@@ -1,0 +1,109 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:PdfEditor.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
+        x:Class="PdfEditor.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="PDF Editor - Cross Platform"
+        Width="1200" Height="800">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        
+        <!-- Toolbar -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10" Spacing="5">
+            <Button Content="Open PDF" Command="{Binding OpenFileCommand}" Padding="10,5"/>
+            <Button Content="Save" Command="{Binding SaveFileCommand}" Padding="10,5"/>
+            <Separator Width="1" Height="30" Margin="5,0"/>
+            <Button Content="Remove Page" Command="{Binding RemoveCurrentPageCommand}" Padding="10,5"/>
+            <Button Content="Add Pages" Command="{Binding AddPagesCommand}" Padding="10,5"/>
+            <Separator Width="1" Height="30" Margin="5,0"/>
+            <Button Content="Redact Mode" Command="{Binding ToggleRedactionModeCommand}" Padding="10,5">
+                <Button.Styles>
+                    <Style Selector="Button">
+                        <Style Selector="^[IsEnabled=True]">
+                            <Setter Property="Background" Value="{Binding IsRedactionMode, Converter={x:Static ObjectConverters.IsNotNullConverter}}"/>
+                        </Style>
+                    </Style>
+                </Button.Styles>
+            </Button>
+            <Button Content="Apply Redaction" Command="{Binding ApplyRedactionCommand}" Padding="10,5" 
+                    IsEnabled="{Binding IsRedactionMode}"/>
+            <Separator Width="1" Height="30" Margin="5,0"/>
+            <Button Content="Zoom In" Command="{Binding ZoomInCommand}" Padding="10,5"/>
+            <Button Content="Zoom Out" Command="{Binding ZoomOutCommand}" Padding="10,5"/>
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="10,0"/>
+        </StackPanel>
+
+        <!-- Main Content Area -->
+        <Grid Grid.Row="1" ColumnDefinitions="200,*">
+            
+            <!-- Thumbnail Sidebar -->
+            <Border Grid.Column="0" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="0,0,1,0">
+                <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding PageThumbnails}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="5" Padding="5" Background="White" 
+                                        BorderBrush="#DDDDDD" BorderThickness="1"
+                                        CornerRadius="3">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{Binding PageNumber, StringFormat='Page {0}'}" 
+                                                   HorizontalAlignment="Center" FontSize="12"/>
+                                        <Image Source="{Binding ThumbnailImage}" 
+                                               Width="150" Height="200" 
+                                               Stretch="Uniform"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- PDF Viewer -->
+            <Border Grid.Column="1" Background="#E0E0E0">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <Grid>
+                        <!-- PDF Page Image -->
+                        <Image Source="{Binding CurrentPageImage}" 
+                               Stretch="Uniform"
+                               RenderOptions.BitmapInterpolationMode="HighQuality">
+                            <Image.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                            </Image.RenderTransform>
+                        </Image>
+
+                        <!-- Redaction Selection Overlay (shown when in redaction mode) -->
+                        <Canvas IsVisible="{Binding IsRedactionMode}"
+                                Background="Transparent"
+                                PointerPressed="Canvas_PointerPressed"
+                                PointerMoved="Canvas_PointerMoved"
+                                PointerReleased="Canvas_PointerReleased">
+                            <!-- This would draw the selection rectangle -->
+                        </Canvas>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="2" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="10,5">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                    <Button Content="&lt;" Command="{Binding PreviousPageCommand}" Padding="10,5"/>
+                    <TextBlock Text="{Binding CurrentPageIndex, StringFormat='Page {0}'}" 
+                               VerticalAlignment="Center"/>
+                    <Button Content="&gt;" Command="{Binding NextPageCommand}" Padding="10,5"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
