@@ -1,31 +1,36 @@
 {
   "format": 1,
   "restore": {
-    "/home/user/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj": {}
+    "/home/marc/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj": {}
   },
   "projects": {
-    "/home/user/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj": {
+    "/home/marc/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/home/user/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj",
+        "projectUniqueName": "/home/marc/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj",
         "projectName": "PdfEditor.Tests",
-        "projectPath": "/home/user/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj",
-        "packagesPath": "/root/.nuget/packages/",
-        "outputPath": "/home/user/pdfe/PdfEditor.Tests/obj/",
+        "projectPath": "/home/marc/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj",
+        "packagesPath": "/home/marc/.nuget/packages/",
+        "outputPath": "/home/marc/pdfe/PdfEditor.Tests/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/root/.nuget/NuGet/NuGet.Config"
+          "/home/marc/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
         ],
         "sources": {
+          "/usr/lib/dotnet/library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net8.0": {
             "targetAlias": "net8.0",
-            "projectReferences": {}
+            "projectReferences": {
+              "/home/marc/pdfe/PdfEditor/PdfEditor.csproj": {
+                "projectPath": "/home/marc/pdfe/PdfEditor/PdfEditor.csproj"
+              }
+            }
           }
         },
         "warningProperties": {
@@ -37,15 +42,44 @@
           "enableAudit": "true",
           "auditLevel": "low",
           "auditMode": "direct"
-        }
+        },
+        "SdkAnalysisLevel": "9.0.100"
       },
       "frameworks": {
         "net8.0": {
           "targetAlias": "net8.0",
           "dependencies": {
+            "FluentAssertions": {
+              "target": "Package",
+              "version": "[6.12.0, )"
+            },
             "Microsoft.NET.Test.Sdk": {
               "target": "Package",
               "version": "[17.8.0, )"
+            },
+            "PdfPig": {
+              "target": "Package",
+              "version": "[0.1.11, )"
+            },
+            "PdfSharpCore": {
+              "target": "Package",
+              "version": "[1.3.65, )"
+            },
+            "Serilog": {
+              "target": "Package",
+              "version": "[3.1.1, )"
+            },
+            "Serilog.Extensions.Logging": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Serilog.Sinks.Console": {
+              "target": "Package",
+              "version": "[5.0.1, )"
+            },
+            "Serilog.Sinks.File": {
+              "target": "Package",
+              "version": "[5.0.0, )"
             },
             "coverlet.collector": {
               "target": "Package",
@@ -76,7 +110,143 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/root/.dotnet/sdk/8.0.416/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/9.0.111/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/marc/pdfe/PdfEditor/PdfEditor.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/marc/pdfe/PdfEditor/PdfEditor.csproj",
+        "projectName": "PdfEditor",
+        "projectPath": "/home/marc/pdfe/PdfEditor/PdfEditor.csproj",
+        "packagesPath": "/home/marc/.nuget/packages/",
+        "outputPath": "/home/marc/pdfe/PdfEditor/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/marc/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "/usr/lib/dotnet/library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "9.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Avalonia": {
+              "target": "Package",
+              "version": "[11.2.5, )"
+            },
+            "Avalonia.Desktop": {
+              "target": "Package",
+              "version": "[11.2.5, )"
+            },
+            "Avalonia.Fonts.Inter": {
+              "target": "Package",
+              "version": "[11.2.5, )"
+            },
+            "Avalonia.ReactiveUI": {
+              "target": "Package",
+              "version": "[11.2.5, )"
+            },
+            "Avalonia.Themes.Fluent": {
+              "target": "Package",
+              "version": "[11.2.5, )"
+            },
+            "FluentAvaloniaUI": {
+              "target": "Package",
+              "version": "[2.4.1, )"
+            },
+            "FluentIcons.Avalonia.Fluent": {
+              "target": "Package",
+              "version": "[1.2.313, )"
+            },
+            "Microsoft.Extensions.DependencyInjection": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
+            "Microsoft.Extensions.Logging": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
+            "Microsoft.Extensions.Logging.Console": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
+            "Microsoft.Extensions.Logging.Debug": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
+            "PDFsharp": {
+              "target": "Package",
+              "version": "[6.2.2, )"
+            },
+            "PDFtoImage": {
+              "target": "Package",
+              "version": "[4.0.2, )"
+            },
+            "PdfPig": {
+              "target": "Package",
+              "version": "[0.1.11, )"
+            },
+            "ReactiveUI": {
+              "target": "Package",
+              "version": "[20.1.1, )"
+            },
+            "ReactiveUI.Fody": {
+              "target": "Package",
+              "version": "[19.5.41, )"
+            },
+            "SkiaSharp": {
+              "target": "Package",
+              "version": "[2.88.9, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.NETCore.App.Host.linux-x64",
+              "version": "[8.0.21, 8.0.21]"
+            }
+          ],
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/9.0.111/PortableRuntimeIdentifierGraph.json"
         }
       }
     }
