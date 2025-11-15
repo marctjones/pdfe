@@ -1,7 +1,10 @@
+using Microsoft.Extensions.Logging;
 using PdfSharp.Pdf.Content.Objects;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace PdfEditor.Services.Redaction;
@@ -11,21 +14,51 @@ namespace PdfEditor.Services.Redaction;
 /// </summary>
 public class ContentStreamBuilder
 {
+    private readonly ILogger<ContentStreamBuilder> _logger;
+
+    public ContentStreamBuilder(ILogger<ContentStreamBuilder> logger)
+    {
+        _logger = logger;
+    }
+
     /// <summary>
     /// Build content stream bytes from operations
     /// </summary>
     public byte[] BuildContentStream(List<PdfOperation> operations)
     {
+        var sw = Stopwatch.StartNew();
+        _logger.LogInformation("Building content stream from {Count} operations", operations.Count);
+
+        // Log operation type breakdown
+        var textOps = operations.OfType<TextOperation>().Count();
+        var pathOps = operations.OfType<PathOperation>().Count();
+        var imageOps = operations.OfType<ImageOperation>().Count();
+        var stateOps = operations.OfType<StateOperation>().Count();
+        var textStateOps = operations.OfType<TextStateOperation>().Count();
+        var genericOps = operations.OfType<GenericOperation>().Count();
+
+        _logger.LogDebug(
+            "Operation breakdown: Text={Text}, Path={Path}, Image={Image}, " +
+            "State={State}, TextState={TextState}, Generic={Generic}",
+            textOps, pathOps, imageOps, stateOps, textStateOps, genericOps);
+
         using var memoryStream = new MemoryStream();
         using var writer = new StreamWriter(memoryStream, Encoding.ASCII);
-        
+
         foreach (var operation in operations)
         {
             WriteOperation(writer, operation);
         }
-        
+
         writer.Flush();
-        return memoryStream.ToArray();
+        var result = memoryStream.ToArray();
+
+        sw.Stop();
+        _logger.LogInformation(
+            "Content stream built successfully in {ElapsedMs}ms. Size: {SizeBytes} bytes",
+            sw.ElapsedMilliseconds, result.Length);
+
+        return result;
     }
     
     /// <summary>
@@ -104,11 +137,7 @@ public class ContentStreamBuilder
                 }
                 writer.Write("]");
                 break;
-            
-            case CBoolean boolVal:
-                writer.Write(boolVal.Value ? "true" : "false");
-                break;
-            
+
             default:
                 // For other types, try to write as-is
                 writer.Write(operand.ToString());

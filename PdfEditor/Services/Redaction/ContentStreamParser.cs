@@ -1,9 +1,11 @@
 using Avalonia;
+using Microsoft.Extensions.Logging;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.Content;
 using PdfSharp.Pdf.Content.Objects;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace PdfEditor.Services.Redaction;
@@ -14,10 +16,16 @@ namespace PdfEditor.Services.Redaction;
 public class ContentStreamParser
 {
     private readonly TextBoundsCalculator _boundsCalculator;
-    
-    public ContentStreamParser()
+    private readonly ILogger<ContentStreamParser> _logger;
+
+    private readonly ILoggerFactory _loggerFactory;
+
+    public ContentStreamParser(ILogger<ContentStreamParser> logger, ILoggerFactory loggerFactory)
     {
-        _boundsCalculator = new TextBoundsCalculator();
+        _logger = logger;
+        _loggerFactory = loggerFactory;
+        _boundsCalculator = new TextBoundsCalculator(_loggerFactory.CreateLogger<TextBoundsCalculator>());
+        _logger.LogDebug("ContentStreamParser instance created");
     }
     
     /// <summary>
@@ -25,32 +33,59 @@ public class ContentStreamParser
     /// </summary>
     public List<PdfOperation> ParseContentStream(PdfPage page)
     {
+        var sw = Stopwatch.StartNew();
+        _logger.LogInformation("Starting content stream parsing");
+
         var operations = new List<PdfOperation>();
-        
+
         try
         {
+            _logger.LogDebug("Reading page content with ContentReader");
             var content = ContentReader.ReadContent(page);
             var pageHeight = page.Height.Point;
-            
+
+            _logger.LogDebug("Page dimensions: Width={Width}, Height={Height}",
+                page.Width.Point, pageHeight);
+
             // State tracking
             var graphicsStateStack = new Stack<PdfGraphicsState>();
             var currentGraphicsState = new PdfGraphicsState();
             var currentTextState = new PdfTextState();
             var inTextObject = false;
-            
+
             // Get page resources for font lookups
             var resources = page.Elements.GetDictionary("/Resources");
-            
+            _logger.LogDebug("Page resources dictionary found: {HasResources}", resources != null);
+
             // Parse all objects in the content stream
-            ParseCObjects(content, operations, graphicsStateStack, 
-                         currentGraphicsState, currentTextState, 
+            _logger.LogDebug("Beginning recursive CObject parsing");
+            ParseCObjects(content, operations, graphicsStateStack,
+                         currentGraphicsState, currentTextState,
                          ref inTextObject, resources, pageHeight);
+
+            sw.Stop();
+
+            // Log statistics
+            var textOps = operations.OfType<TextOperation>().Count();
+            var pathOps = operations.OfType<PathOperation>().Count();
+            var imageOps = operations.OfType<ImageOperation>().Count();
+            var stateOps = operations.OfType<StateOperation>().Count();
+            var textStateOps = operations.OfType<TextStateOperation>().Count();
+
+            _logger.LogInformation(
+                "Content stream parsing complete in {ElapsedMs}ms. " +
+                "Total operations: {Total} (Text: {Text}, Path: {Path}, Image: {Image}, " +
+                "State: {State}, TextState: {TextState})",
+                sw.ElapsedMilliseconds, operations.Count, textOps, pathOps, imageOps,
+                stateOps, textStateOps);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error parsing content stream: {ex.Message}");
+            sw.Stop();
+            _logger.LogError(ex, "Error parsing content stream after {ElapsedMs}ms",
+                sw.ElapsedMilliseconds);
         }
-        
+
         return operations;
     }
     
@@ -94,13 +129,14 @@ public class ContentStreamParser
     /// <summary>
     /// Process a single operator and create appropriate operation object
     /// </summary>
-    private PdfOperation? ProcessOperator(COperator op, PdfGraphicsState gState, 
+    private PdfOperation? ProcessOperator(COperator op, PdfGraphicsState gState,
                                          PdfTextState tState, bool inTextObject,
                                          PdfDictionary? resources, double pageHeight,
                                          ref bool inText)
     {
         var opName = op.OpCode.Name;
-        
+        _logger.LogTrace("Processing operator: {OpName}", opName);
+
         switch (opName)
         {
             // Text showing operators
@@ -108,8 +144,9 @@ public class ContentStreamParser
             case "TJ":  // Show text with individual glyph positioning
             case "'":   // Move to next line and show text
             case "\"":  // Set word/char spacing, move to next line, show text
+                _logger.LogDebug("Creating text operation for operator: {OpName}", opName);
                 return CreateTextOperation(op, gState, tState, pageHeight);
-            
+
             // Path construction
             case "m":   // Move to
             case "l":   // Line to
@@ -118,8 +155,9 @@ public class ContentStreamParser
             case "y":   // Curve to (variant)
             case "h":   // Close path
             case "re":  // Rectangle
+                _logger.LogDebug("Creating path operation for operator: {OpName}", opName);
                 return CreatePathOperation(op, gState, opName);
-            
+
             // Path painting
             case "S":   // Stroke
             case "s":   // Close and stroke
@@ -130,18 +168,21 @@ public class ContentStreamParser
             case "B*":  // Fill (even-odd) and stroke
             case "b":   // Close, fill, and stroke
             case "b*":  // Close, fill (even-odd), and stroke
+                _logger.LogDebug("Creating path painting operation for operator: {OpName}", opName);
                 return CreatePathOperation(op, gState, opName);
-            
+
             // Image
             case "Do":  // Draw XObject (often an image)
+                _logger.LogDebug("Creating image operation for operator: {OpName}", opName);
                 return CreateImageOperation(op, gState, pageHeight);
-            
+
             // Graphics state operations
             case "q":   // Save state
             case "Q":   // Restore state
             case "cm":  // Modify transformation matrix
+                _logger.LogTrace("Creating state operation for operator: {OpName}", opName);
                 return CreateStateOperation(op);
-            
+
             // Text state operations
             case "BT":  // Begin text
             case "ET":  // End text
@@ -150,10 +191,12 @@ public class ContentStreamParser
             case "TD":  // Move text position and set leading
             case "Tm":  // Set text matrix
             case "T*":  // Move to start of next line
+                _logger.LogTrace("Creating text state operation for operator: {OpName}", opName);
                 return CreateTextStateOperation(op);
-            
+
             default:
                 // Preserve other operators
+                _logger.LogTrace("Creating generic operation for unknown operator: {OpName}", opName);
                 return new GenericOperation(op, opName);
         }
     }
@@ -161,7 +204,7 @@ public class ContentStreamParser
     /// <summary>
     /// Create a text operation from a text-showing operator
     /// </summary>
-    private TextOperation CreateTextOperation(COperator op, PdfGraphicsState gState, 
+    private TextOperation CreateTextOperation(COperator op, PdfGraphicsState gState,
                                              PdfTextState tState, double pageHeight)
     {
         var textOp = new TextOperation(op)
@@ -171,18 +214,27 @@ public class ContentStreamParser
             FontSize = tState.FontSize,
             FontName = tState.FontName
         };
-        
+
         // Extract text from operands
         textOp.Text = ExtractText(op);
-        
+
         // Calculate bounding box
         textOp.BoundingBox = _boundsCalculator.CalculateBounds(
             textOp.Text, tState, gState, pageHeight);
-        
+
         // Get position
         var (x, y) = tState.TextMatrix.Transform(0, 0);
         textOp.Position = new Point(x, pageHeight - y);
-        
+
+        _logger.LogDebug(
+            "Text operation created: Text=\"{Text}\" (length={Length}), " +
+            "BoundingBox=({X:F2},{Y:F2},{W:F2}x{H:F2}), Font={Font}/{Size}pt",
+            textOp.Text.Length > 50 ? textOp.Text.Substring(0, 50) + "..." : textOp.Text,
+            textOp.Text.Length,
+            textOp.BoundingBox.X, textOp.BoundingBox.Y,
+            textOp.BoundingBox.Width, textOp.BoundingBox.Height,
+            textOp.FontName, textOp.FontSize);
+
         return textOp;
     }
     
