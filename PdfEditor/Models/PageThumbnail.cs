@@ -6,6 +6,7 @@ namespace PdfEditor.Models;
 public class PageThumbnail : ReactiveObject
 {
     private Bitmap? _thumbnailImage;
+    private bool _isSelected;
 
     public int PageNumber { get; set; }
     public int PageIndex { get; set; }
@@ -14,5 +15,11 @@ public class PageThumbnail : ReactiveObject
     {
         get => _thumbnailImage;
         set => this.RaiseAndSetIfChanged(ref _thumbnailImage, value);
+    }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => this.RaiseAndSetIfChanged(ref _isSelected, value);
     }
 }

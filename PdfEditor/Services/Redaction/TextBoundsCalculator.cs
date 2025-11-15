@@ -1,4 +1,5 @@
 using Avalonia;
+using Microsoft.Extensions.Logging;
 using PdfSharp.Pdf;
 using System;
 using System.Text;
@@ -10,43 +11,64 @@ namespace PdfEditor.Services.Redaction;
 /// </summary>
 public class TextBoundsCalculator
 {
+    private readonly ILogger<TextBoundsCalculator> _logger;
+
+    public TextBoundsCalculator(ILogger<TextBoundsCalculator> logger)
+    {
+        _logger = logger;
+    }
+
     /// <summary>
     /// Calculate bounding box for text with given state
     /// </summary>
     public Rect CalculateBounds(string text, PdfTextState textState, PdfGraphicsState graphicsState, double pageHeight)
     {
         if (string.IsNullOrEmpty(text) || textState.FontSize <= 0)
+        {
+            _logger.LogTrace("Empty text or zero font size, returning empty rect");
             return new Rect();
-        
+        }
+
+        _logger.LogTrace("Calculating bounds for text (length={Length}), fontSize={FontSize}",
+            text.Length, textState.FontSize);
+
         // Get font metrics
         var fontMetrics = GetFontMetrics(textState.FontResource);
-        
+
         // Calculate text width
         var textWidth = CalculateTextWidth(text, textState, fontMetrics);
-        
+
         // Text height is approximately the font size
         var textHeight = textState.FontSize;
-        
+
         // Get starting position from text matrix
         var (x, y) = textState.TextMatrix.Transform(0, 0);
-        
+
         // Apply graphics transformation
         var (transformedX, transformedY) = graphicsState.TransformationMatrix.Transform(x, y);
-        
+
         // Calculate end position
         var (endX, endY) = textState.TextMatrix.Transform(textWidth, textHeight);
         var (transformedEndX, transformedEndY) = graphicsState.TransformationMatrix.Transform(endX, endY);
-        
+
         // Create bounding box
         var minX = Math.Min(transformedX, transformedEndX);
         var maxX = Math.Max(transformedX, transformedEndX);
         var minY = Math.Min(transformedY, transformedEndY);
         var maxY = Math.Max(transformedY, transformedEndY);
-        
+
         // Convert from PDF coordinates (bottom-left) to Avalonia coordinates (top-left)
         var avaloniaY = pageHeight - maxY;
-        
-        return new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
+
+        var rect = new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
+
+        _logger.LogTrace(
+            "Bounds calculated: ({X:F2},{Y:F2},{W:F2}x{H:F2}), " +
+            "TextMatrix=({TmX:F2},{TmY:F2}), Width={Width:F2}, Height={Height:F2}",
+            rect.X, rect.Y, rect.Width, rect.Height,
+            x, y, textWidth, textHeight);
+
+        return rect;
     }
     
     /// <summary>

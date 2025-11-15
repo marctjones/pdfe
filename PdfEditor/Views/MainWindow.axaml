@@ -6,7 +6,6 @@
         mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
         x:Class="PdfEditor.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Icon="/Assets/avalonia-logo.ico"
         Title="PDF Editor - Cross Platform"
         Width="1200" Height="800">
 
@@ -24,16 +23,12 @@
             <Button Content="Remove Page" Command="{Binding RemoveCurrentPageCommand}" Padding="10,5"/>
             <Button Content="Add Pages" Command="{Binding AddPagesCommand}" Padding="10,5"/>
             <Separator Width="1" Height="30" Margin="5,0"/>
-            <Button Content="Redact Mode" Command="{Binding ToggleRedactionModeCommand}" Padding="10,5">
-                <Button.Styles>
-                    <Style Selector="Button">
-                        <Style Selector="^[IsEnabled=True]">
-                            <Setter Property="Background" Value="{Binding IsRedactionMode, Converter={x:Static ObjectConverters.IsNotNullConverter}}"/>
-                        </Style>
-                    </Style>
-                </Button.Styles>
-            </Button>
-            <Button Content="Apply Redaction" Command="{Binding ApplyRedactionCommand}" Padding="10,5" 
+            <Button Content="Select Text" Command="{Binding ToggleTextSelectionModeCommand}" Padding="10,5"/>
+            <Button Content="Copy Text (Ctrl+C)" Command="{Binding CopyTextCommand}" Padding="10,5"
+                    IsEnabled="{Binding IsTextSelectionMode}"/>
+            <Separator Width="1" Height="30" Margin="5,0"/>
+            <Button Content="Redact Mode" Command="{Binding ToggleRedactionModeCommand}" Padding="10,5"/>
+            <Button Content="Apply Redaction" Command="{Binding ApplyRedactionCommand}" Padding="10,5"
                     IsEnabled="{Binding IsRedactionMode}"/>
             <Separator Width="1" Height="30" Margin="5,0"/>
             <Button Content="Zoom In" Command="{Binding ZoomInCommand}" Padding="10,5"/>
@@ -50,17 +45,32 @@
                     <ItemsControl ItemsSource="{Binding PageThumbnails}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Margin="5" Padding="5" Background="White" 
-                                        BorderBrush="#DDDDDD" BorderThickness="1"
-                                        CornerRadius="3">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="{Binding PageNumber, StringFormat='Page {0}'}" 
-                                                   HorizontalAlignment="Center" FontSize="12"/>
-                                        <Image Source="{Binding ThumbnailImage}" 
-                                               Width="150" Height="200" 
-                                               Stretch="Uniform"/>
-                                    </StackPanel>
-                                </Border>
+                                <Button Margin="5" Padding="0" Background="Transparent"
+                                        BorderThickness="0"
+                                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).GoToPageCommand}"
+                                        CommandParameter="{Binding PageIndex}"
+                                        Cursor="Hand"
+                                        Classes.selected="{Binding IsSelected}">
+                                    <Border Padding="5" Background="White"
+                                            BorderBrush="#DDDDDD" BorderThickness="1"
+                                            CornerRadius="3"
+                                            Name="ThumbnailBorder">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="{Binding PageNumber, StringFormat='Page {0}'}"
+                                                       HorizontalAlignment="Center" FontSize="12"/>
+                                            <Image Source="{Binding ThumbnailImage}"
+                                                   Width="150" Height="200"
+                                                   Stretch="Uniform"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Button.Styles>
+                                        <Style Selector="Button.selected > Border">
+                                            <Setter Property="BorderBrush" Value="#1976D2"/>
+                                            <Setter Property="BorderThickness" Value="3"/>
+                                            <Setter Property="Background" Value="#E3F2FD"/>
+                                        </Style>
+                                    </Button.Styles>
+                                </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -97,6 +107,24 @@
                                        Width="{Binding CurrentRedactionArea.Width}"
                                        Height="{Binding CurrentRedactionArea.Height}"/>
                         </Canvas>
+
+                        <!-- Text Selection Overlay (shown when in text selection mode) -->
+                        <Canvas IsVisible="{Binding IsTextSelectionMode}"
+                                Background="Transparent"
+                                PointerPressed="TextCanvas_PointerPressed"
+                                PointerMoved="TextCanvas_PointerMoved"
+                                PointerReleased="TextCanvas_PointerReleased">
+                            <!-- Selection Rectangle - semi-transparent blue with blue dashed border -->
+                            <Rectangle x:Name="TextSelectionRectangle"
+                                       Fill="#404CAF50"
+                                       Stroke="#4CAF50"
+                                       StrokeThickness="2"
+                                       StrokeDashArray="5,5"
+                                       Canvas.Left="{Binding CurrentTextSelectionArea.X}"
+                                       Canvas.Top="{Binding CurrentTextSelectionArea.Y}"
+                                       Width="{Binding CurrentTextSelectionArea.Width}"
+                                       Height="{Binding CurrentTextSelectionArea.Height}"/>
+                        </Canvas>
                     </Grid>
                 </ScrollViewer>
             </Border>
@@ -108,7 +136,7 @@
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
                     <Button Content="&lt;" Command="{Binding PreviousPageCommand}" Padding="10,5"/>
-                    <TextBlock Text="{Binding CurrentPageIndex, StringFormat='Page {0}'}" 
+                    <TextBlock Text="{Binding DisplayPageNumber, StringFormat='Page {0}'}"
                                VerticalAlignment="Center"/>
                     <Button Content="&gt;" Command="{Binding NextPageCommand}" Padding="10,5"/>
                 </StackPanel>
