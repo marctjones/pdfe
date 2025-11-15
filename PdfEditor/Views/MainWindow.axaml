@@ -86,7 +86,16 @@
                                 PointerPressed="Canvas_PointerPressed"
                                 PointerMoved="Canvas_PointerMoved"
                                 PointerReleased="Canvas_PointerReleased">
-                            <!-- This would draw the selection rectangle -->
+                            <!-- Selection Rectangle - semi-transparent black with red dashed border -->
+                            <Rectangle x:Name="SelectionRectangle"
+                                       Fill="#40000000"
+                                       Stroke="Red"
+                                       StrokeThickness="2"
+                                       StrokeDashArray="5,5"
+                                       Canvas.Left="{Binding CurrentRedactionArea.X}"
+                                       Canvas.Top="{Binding CurrentRedactionArea.Y}"
+                                       Width="{Binding CurrentRedactionArea.Width}"
+                                       Height="{Binding CurrentRedactionArea.Height}"/>
                         </Canvas>
                     </Grid>
                 </ScrollViewer>
