@@ -18,15 +18,15 @@ public static class PdfTestHelpers
     public static string ExtractAllText(string pdfPath)
     {
         var text = new StringBuilder();
-        
-        using (var document = PdfDocument.Open(pdfPath))
+
+        using (var document = UglyToad.PdfPig.PdfDocument.Open(pdfPath))
         {
             foreach (var page in document.GetPages())
             {
                 text.AppendLine(page.Text);
             }
         }
-        
+
         return text.ToString();
     }
 
@@ -35,7 +35,7 @@ public static class PdfTestHelpers
     /// </summary>
     public static string ExtractTextFromPage(string pdfPath, int pageIndex)
     {
-        using var document = PdfDocument.Open(pdfPath);
+        using var document = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
         
         if (pageIndex < 0 || pageIndex >= document.NumberOfPages)
         {
@@ -51,7 +51,7 @@ public static class PdfTestHelpers
     /// </summary>
     public static int GetPageCount(string pdfPath)
     {
-        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.ReadOnly);
+        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import);
         return document.PageCount;
     }
 
@@ -69,9 +69,9 @@ public static class PdfTestHelpers
     /// </summary>
     public static List<string> GetWordsFromPage(string pdfPath, int pageIndex)
     {
-        using var document = PdfDocument.Open(pdfPath);
+        using var document = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
         var page = document.GetPage(pageIndex + 1);
-        
+
         return page.GetWords()
             .Select(w => w.Text)
             .ToList();
@@ -105,7 +105,7 @@ public static class PdfTestHelpers
     {
         try
         {
-            using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.ReadOnly);
+            using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import);
             return document.PageCount > 0;
         }
         catch

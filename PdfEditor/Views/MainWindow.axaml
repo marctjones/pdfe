@@ -3,61 +3,135 @@
         xmlns:vm="using:PdfEditor.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:ui="using:FluentAvalonia.UI.Controls"
         mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
         x:Class="PdfEditor.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Title="PDF Editor - Cross Platform"
-        Width="1200" Height="800">
+        Title="PDF Editor"
+        Width="1200" Height="800"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="PreferSystemChrome"
+        ExtendClientAreaTitleBarHeightHint="40"
+        Background="{DynamicResource AppBackgroundBrush}">
 
     <Design.DataContext>
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid RowDefinitions="Auto,*,Auto">
-        
-        <!-- Toolbar -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10" Spacing="5">
-            <Button Content="Open PDF" Command="{Binding OpenFileCommand}" Padding="10,5"/>
-            <Button Content="Save" Command="{Binding SaveFileCommand}" Padding="10,5"/>
-            <Separator Width="1" Height="30" Margin="5,0"/>
-            <Button Content="Remove Page" Command="{Binding RemoveCurrentPageCommand}" Padding="10,5"/>
-            <Button Content="Add Pages" Command="{Binding AddPagesCommand}" Padding="10,5"/>
-            <Separator Width="1" Height="30" Margin="5,0"/>
-            <Button Content="Select Text" Command="{Binding ToggleTextSelectionModeCommand}" Padding="10,5"/>
-            <Button Content="Copy Text (Ctrl+C)" Command="{Binding CopyTextCommand}" Padding="10,5"
-                    IsEnabled="{Binding IsTextSelectionMode}"/>
-            <Separator Width="1" Height="30" Margin="5,0"/>
-            <Button Content="Redact Mode" Command="{Binding ToggleRedactionModeCommand}" Padding="10,5"/>
-            <Button Content="Apply Redaction" Command="{Binding ApplyRedactionCommand}" Padding="10,5"
-                    IsEnabled="{Binding IsRedactionMode}"/>
-            <Separator Width="1" Height="30" Margin="5,0"/>
-            <Button Content="Zoom In" Command="{Binding ZoomInCommand}" Padding="10,5"/>
-            <Button Content="Zoom Out" Command="{Binding ZoomOutCommand}" Padding="10,5"/>
-            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="10,0"/>
-        </StackPanel>
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Modern Title Bar Area -->
+        <Grid Grid.Row="0" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
+              ColumnDefinitions="Auto,*,Auto">
+            <!-- App Icon and Title -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="10,0">
+                <TextBlock Text="PDF Editor"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- Center area for document name -->
+            <TextBlock Grid.Column="1"
+                       Text="{Binding DocumentName, FallbackValue='No document open'}"
+                       FontSize="12"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"/>
+        </Grid>
+
+        <!-- Modern Toolbar -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource SecondaryBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="8,6">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <!-- File Operations -->
+                <Button Content="Open" Command="{Binding OpenFileCommand}"
+                        Classes="modern-button" Padding="12,6"/>
+                <Button Content="Save" Command="{Binding SaveFileCommand}"
+                        Classes="modern-button" Padding="12,6"/>
+
+                <Border Width="1" Height="24" Margin="4,0"
+                        Background="{DynamicResource DividerBrush}"/>
+
+                <!-- Page Operations -->
+                <Button Content="Remove Page" Command="{Binding RemoveCurrentPageCommand}"
+                        Classes="modern-button" Padding="12,6"/>
+                <Button Content="Add Pages" Command="{Binding AddPagesCommand}"
+                        Classes="modern-button" Padding="12,6"/>
+
+                <Border Width="1" Height="24" Margin="4,0"
+                        Background="{DynamicResource DividerBrush}"/>
+
+                <!-- Text Selection -->
+                <Button Content="Select Text" Command="{Binding ToggleTextSelectionModeCommand}"
+                        Classes="modern-button toggle"
+                        Classes.active="{Binding IsTextSelectionMode}"
+                        Padding="12,6"/>
+                <Button Content="Copy Text" Command="{Binding CopyTextCommand}"
+                        Classes="modern-button" Padding="12,6"
+                        IsEnabled="{Binding IsTextSelectionMode}"/>
+
+                <Border Width="1" Height="24" Margin="4,0"
+                        Background="{DynamicResource DividerBrush}"/>
+
+                <!-- Redaction -->
+                <Button Content="Redact Mode" Command="{Binding ToggleRedactionModeCommand}"
+                        Classes="modern-button toggle"
+                        Classes.active="{Binding IsRedactionMode}"
+                        Padding="12,6"/>
+                <Button Content="Apply Redaction" Command="{Binding ApplyRedactionCommand}"
+                        Classes="modern-button accent" Padding="12,6"
+                        IsEnabled="{Binding IsRedactionMode}"/>
+
+                <Border Width="1" Height="24" Margin="4,0"
+                        Background="{DynamicResource DividerBrush}"/>
+
+                <!-- Zoom Controls -->
+                <Button Content="+" Command="{Binding ZoomInCommand}"
+                        Classes="modern-button" Padding="12,6" FontWeight="Bold"/>
+                <TextBlock Text="{Binding ZoomLevel, StringFormat='{}{0:P0}'}"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           MinWidth="50" TextAlignment="Center"/>
+                <Button Content="−" Command="{Binding ZoomOutCommand}"
+                        Classes="modern-button" Padding="12,6" FontWeight="Bold"/>
+            </StackPanel>
+        </Border>
 
         <!-- Main Content Area -->
-        <Grid Grid.Row="1" ColumnDefinitions="200,*">
-            
+        <Grid Grid.Row="2" ColumnDefinitions="200,*,250">
+
             <!-- Thumbnail Sidebar -->
-            <Border Grid.Column="0" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SidebarBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="0,0,1,0">
                 <ScrollViewer>
                     <ItemsControl ItemsSource="{Binding PageThumbnails}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button Margin="5" Padding="0" Background="Transparent"
+                                <Button Margin="6" Padding="0" Background="Transparent"
                                         BorderThickness="0"
                                         Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).GoToPageCommand}"
                                         CommandParameter="{Binding PageIndex}"
                                         Cursor="Hand"
                                         Classes.selected="{Binding IsSelected}">
-                                    <Border Padding="5" Background="White"
-                                            BorderBrush="#DDDDDD" BorderThickness="1"
-                                            CornerRadius="3"
+                                    <Border Padding="6"
+                                            Background="{DynamicResource CardBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
                                             Name="ThumbnailBorder">
-                                        <StackPanel Spacing="5">
+                                        <StackPanel Spacing="6">
                                             <TextBlock Text="{Binding PageNumber, StringFormat='Page {0}'}"
-                                                       HorizontalAlignment="Center" FontSize="12"/>
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="11"
+                                                       FontWeight="Medium"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
                                             <Image Source="{Binding ThumbnailImage}"
                                                    Width="150" Height="200"
                                                    Stretch="Uniform"/>
@@ -65,9 +139,12 @@
                                     </Border>
                                     <Button.Styles>
                                         <Style Selector="Button.selected > Border">
-                                            <Setter Property="BorderBrush" Value="#1976D2"/>
-                                            <Setter Property="BorderThickness" Value="3"/>
-                                            <Setter Property="Background" Value="#E3F2FD"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource BrandPrimaryBrush}"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
+                                            <Setter Property="Background" Value="{DynamicResource SelectedBrush}"/>
+                                        </Style>
+                                        <Style Selector="Button:pointerover > Border">
+                                            <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
                                         </Style>
                                     </Button.Styles>
                                 </Button>
@@ -78,7 +155,7 @@
             </Border>
 
             <!-- PDF Viewer -->
-            <Border Grid.Column="1" Background="#E0E0E0">
+            <Border Grid.Column="1" Background="{DynamicResource TertiaryBackgroundBrush}">
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                     <Grid>
                         <!-- PDF Page Image -->
@@ -128,17 +205,95 @@
                     </Grid>
                 </ScrollViewer>
             </Border>
+
+            <!-- Clipboard History Sidebar -->
+            <Border Grid.Column="2"
+                    Background="{DynamicResource SidebarBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1,0,0,0">
+                <Grid RowDefinitions="Auto,*">
+                    <!-- Header -->
+                    <Border Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="12,10">
+                        <TextBlock Text="Clipboard History"
+                                   FontWeight="SemiBold"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    </Border>
+
+                    <!-- Clipboard History List -->
+                    <ScrollViewer Grid.Row="1">
+                        <ItemsControl ItemsSource="{Binding ClipboardHistory}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="8" Padding="10"
+                                            Background="{DynamicResource CardBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6">
+                                        <StackPanel Spacing="6">
+                                            <!-- Header: Time and Page -->
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding TimeDisplay}"
+                                                           FontSize="11"
+                                                           FontWeight="Medium"
+                                                           Foreground="{DynamicResource BrandPrimaryBrush}"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding PageNumber, StringFormat='Page {0}'}"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </Grid>
+
+                                            <!-- Preview Text -->
+                                            <TextBlock Text="{Binding PreviewText}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       MaxHeight="60"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+
+                                            <!-- Character Count -->
+                                            <TextBlock Text="{Binding CharacterCount, StringFormat='{}{0} characters'}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                       HorizontalAlignment="Right"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
         </Grid>
 
         <!-- Status Bar -->
-        <Border Grid.Row="2" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="10,5">
+        <Border Grid.Row="3"
+                Background="{DynamicResource SecondaryBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,8">
             <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
-                    <Button Content="&lt;" Command="{Binding PreviousPageCommand}" Padding="10,5"/>
+                <TextBlock Text="{Binding StatusText}"
+                           VerticalAlignment="Center"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Content="◀" Command="{Binding PreviousPageCommand}"
+                            Classes="modern-button compact" Padding="8,4"
+                            ToolTip.Tip="Previous Page"/>
                     <TextBlock Text="{Binding DisplayPageNumber, StringFormat='Page {0}'}"
-                               VerticalAlignment="Center"/>
-                    <Button Content="&gt;" Command="{Binding NextPageCommand}" Padding="10,5"/>
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="Medium"
+                               Foreground="{DynamicResource TextPrimaryBrush}"
+                               MinWidth="80"
+                               TextAlignment="Center"/>
+                    <Button Content="▶" Command="{Binding NextPageCommand}"
+                            Classes="modern-button compact" Padding="8,4"
+                            ToolTip.Tip="Next Page"/>
                 </StackPanel>
             </Grid>
         </Border>

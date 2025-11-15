@@ -3,6 +3,7 @@ using FluentAssertions;
 using PdfEditor.Services.Redaction;
 using Xunit.Abstractions;
 using Avalonia;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace PdfEditor.Tests.Unit;
 
@@ -17,7 +18,8 @@ public class TextBoundsCalculatorTests
     public TextBoundsCalculatorTests(ITestOutputHelper output)
     {
         _output = output;
-        _calculator = new TextBoundsCalculator();
+        var logger = NullLogger<TextBoundsCalculator>.Instance;
+        _calculator = new TextBoundsCalculator(logger);
     }
 
     [Fact]

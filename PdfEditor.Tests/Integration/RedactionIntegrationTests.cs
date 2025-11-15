@@ -6,6 +6,8 @@ using PdfSharp.Pdf.IO;
 using Avalonia;
 using System.IO;
 using Xunit.Abstractions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace PdfEditor.Tests.Integration;
 
@@ -22,7 +24,9 @@ public class RedactionIntegrationTests : IDisposable
     public RedactionIntegrationTests(ITestOutputHelper output)
     {
         _output = output;
-        _redactionService = new RedactionService();
+        var loggerFactory = NullLoggerFactory.Instance;
+        var logger = NullLogger<RedactionService>.Instance;
+        _redactionService = new RedactionService(logger, loggerFactory);
     }
 
     [Fact]

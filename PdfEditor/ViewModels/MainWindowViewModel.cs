@@ -48,6 +48,7 @@ public class MainWindowViewModel : ViewModelBase
         _logger.LogInformation("MainWindowViewModel initialized");
 
         PageThumbnails = new ObservableCollection<PageThumbnail>();
+        ClipboardHistory = new ObservableCollection<ClipboardEntry>();
 
         // Commands
         _logger.LogDebug("Setting up ReactiveUI commands");
@@ -70,6 +71,7 @@ public class MainWindowViewModel : ViewModelBase
 
     // Properties
     public ObservableCollection<PageThumbnail> PageThumbnails { get; }
+    public ObservableCollection<ClipboardEntry> ClipboardHistory { get; }
 
     public Bitmap? CurrentPageImage
     {
@@ -97,6 +99,10 @@ public class MainWindowViewModel : ViewModelBase
         get => _zoomLevel;
         set => this.RaiseAndSetIfChanged(ref _zoomLevel, value);
     }
+
+    public string DocumentName => string.IsNullOrEmpty(_currentFilePath)
+        ? "No document open"
+        : System.IO.Path.GetFileName(_currentFilePath);
 
     public bool IsRedactionMode
     {
@@ -168,6 +174,7 @@ public class MainWindowViewModel : ViewModelBase
         try
         {
             _currentFilePath = filePath;
+            this.RaisePropertyChanged(nameof(DocumentName));
             _documentService.LoadDocument(filePath);
             CurrentPageIndex = 0;
 
@@ -347,6 +354,26 @@ public class MainWindowViewModel : ViewModelBase
                     await topLevel.Clipboard.SetTextAsync(textToCopy);
                     SelectedText = textToCopy;
                     _logger.LogInformation("✓ Successfully copied {Length} characters to clipboard", textToCopy.Length);
+
+                    // Add to clipboard history
+                    var clipboardEntry = new ClipboardEntry
+                    {
+                        Text = textToCopy,
+                        Timestamp = DateTime.Now,
+                        PageNumber = CurrentPageIndex + 1
+                    };
+
+                    // Add to beginning of list (most recent first)
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        ClipboardHistory.Insert(0, clipboardEntry);
+
+                        // Keep only last 20 entries
+                        while (ClipboardHistory.Count > 20)
+                        {
+                            ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
+                        }
+                    });
                 }
                 else
                 {
@@ -401,6 +428,9 @@ public class MainWindowViewModel : ViewModelBase
 
             // Clear the selection
             CurrentRedactionArea = new Rect();
+
+            // Exit redaction mode after applying
+            IsRedactionMode = false;
 
             _logger.LogInformation("Redaction complete - use Save button to persist changes to disk");
         }
