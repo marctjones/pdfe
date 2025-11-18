@@ -227,6 +227,72 @@ public class PdfDocumentService
     }
 
     /// <summary>
+    /// Rotate a page by specified degrees (0, 90, 180, 270)
+    /// </summary>
+    public void RotatePage(int pageIndex, int degrees)
+    {
+        _logger.LogInformation("Rotating page {PageIndex} by {Degrees} degrees", pageIndex, degrees);
+
+        if (_currentDocument == null)
+        {
+            _logger.LogError("Cannot rotate page: No document loaded");
+            throw new InvalidOperationException("No document loaded");
+        }
+
+        if (pageIndex < 0 || pageIndex >= _currentDocument.PageCount)
+        {
+            _logger.LogError("Invalid page index: {PageIndex}, Total pages: {PageCount}",
+                pageIndex, _currentDocument.PageCount);
+            throw new ArgumentOutOfRangeException(nameof(pageIndex));
+        }
+
+        // Normalize degrees to 0, 90, 180, or 270
+        degrees = ((degrees % 360) + 360) % 360;
+        if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270)
+        {
+            _logger.LogError("Invalid rotation degrees: {Degrees}. Must be 0, 90, 180, or 270", degrees);
+            throw new ArgumentException("Rotation must be 0, 90, 180, or 270 degrees", nameof(degrees));
+        }
+
+        var page = _currentDocument.Pages[pageIndex];
+        var currentRotation = page.Rotate;
+
+        // Add rotation to current rotation
+        var newRotation = (currentRotation + degrees) % 360;
+        page.Rotate = newRotation;
+
+        _logger.LogInformation("Page {PageIndex} rotated. Previous: {OldRotation}°, New: {NewRotation}°",
+            pageIndex, currentRotation, newRotation);
+    }
+
+    /// <summary>
+    /// Rotate page 90 degrees clockwise (right)
+    /// </summary>
+    public void RotatePageRight(int pageIndex)
+    {
+        _logger.LogDebug("Rotating page {PageIndex} right (90° clockwise)", pageIndex);
+        RotatePage(pageIndex, 90);
+    }
+
+    /// <summary>
+    /// Rotate page 90 degrees counter-clockwise (left)
+    /// </summary>
+    public void RotatePageLeft(int pageIndex)
+    {
+        _logger.LogDebug("Rotating page {PageIndex} left (90° counter-clockwise)", pageIndex);
+        RotatePage(pageIndex, 270); // -90 = +270
+    }
+
+    /// <summary>
+    /// Rotate page 180 degrees
+    /// </summary>
+    public void RotatePage180(int pageIndex)
+    {
+        _logger.LogDebug("Rotating page {PageIndex} 180 degrees", pageIndex);
+        RotatePage(pageIndex, 180);
+    }
+
+    /// <summary>
     /// Close the current document
     /// </summary>
     public void CloseDocument()

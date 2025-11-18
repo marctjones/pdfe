@@ -79,6 +79,7 @@ public partial class App : Application
         services.AddSingleton<PdfRenderService>();
         services.AddSingleton<RedactionService>();
         services.AddSingleton<PdfTextExtractionService>();
+        services.AddSingleton<PdfSearchService>();
 
         // Register ViewModels
         services.AddTransient<MainWindowViewModel>();
