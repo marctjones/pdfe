@@ -18,10 +18,73 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+
+        <!-- Menu Bar -->
+        <Menu Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGesture="Ctrl+O"/>
+                <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGesture="Ctrl+S"/>
+                <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S"/>
+                <Separator/>
+                <MenuItem Header="_Recent Files" Name="RecentFilesMenu">
+                    <!-- Recent files will be populated dynamically -->
+                    <MenuItem Header="No recent files" IsEnabled="False" IsVisible="{Binding !HasRecentFiles}"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Close" Command="{Binding CloseDocumentCommand}" InputGesture="Ctrl+W"/>
+                <Separator/>
+                <MenuItem Header="E_xit" Command="{Binding ExitCommand}" InputGesture="Alt+F4"/>
+            </MenuItem>
+
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Copy Text" Command="{Binding CopyTextCommand}" InputGesture="Ctrl+C"/>
+                <Separator/>
+                <MenuItem Header="_Find..." Command="{Binding ToggleSearchCommand}" InputGesture="Ctrl+F"/>
+                <MenuItem Header="Find _Next" Command="{Binding FindNextCommand}" InputGesture="F3"/>
+                <MenuItem Header="Find _Previous" Command="{Binding FindPreviousCommand}" InputGesture="Shift+F3"/>
+            </MenuItem>
+
+            <MenuItem Header="_View">
+                <MenuItem Header="_Zoom In" Command="{Binding ZoomInCommand}" InputGesture="Ctrl++"/>
+                <MenuItem Header="Zoom _Out" Command="{Binding ZoomOutCommand}" InputGesture="Ctrl+-"/>
+                <MenuItem Header="_Actual Size" Command="{Binding ZoomActualSizeCommand}" InputGesture="Ctrl+0"/>
+                <Separator/>
+                <MenuItem Header="Fit _Width" Command="{Binding ZoomFitWidthCommand}" InputGesture="Ctrl+1"/>
+                <MenuItem Header="Fit _Page" Command="{Binding ZoomFitPageCommand}" InputGesture="Ctrl+2"/>
+                <Separator/>
+                <MenuItem Header="Rotate _Left" Command="{Binding RotatePageLeftCommand}" InputGesture="Ctrl+L"/>
+                <MenuItem Header="Rotate _Right" Command="{Binding RotatePageRightCommand}" InputGesture="Ctrl+R"/>
+                <MenuItem Header="Rotate _180°" Command="{Binding RotatePage180Command}"/>
+            </MenuItem>
+
+            <MenuItem Header="_Tools">
+                <MenuItem Header="_Redaction Mode" Command="{Binding ToggleRedactionModeCommand}">
+                    <MenuItem.Icon>
+                        <TextBlock Text="✓" IsVisible="{Binding IsRedactionMode}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Text Selection Mode" Command="{Binding ToggleTextSelectionModeCommand}">
+                    <MenuItem.Icon>
+                        <TextBlock Text="✓" IsVisible="{Binding IsTextSelectionMode}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Add Pages..." Command="{Binding AddPagesCommand}"/>
+                <MenuItem Header="_Remove Current Page" Command="{Binding RemoveCurrentPageCommand}"/>
+                <Separator/>
+                <MenuItem Header="_Export Pages as Images..." Command="{Binding ExportPagesCommand}"/>
+                <MenuItem Header="_Print..." Command="{Binding PrintCommand}" InputGesture="Ctrl+P"/>
+            </MenuItem>
+
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About PDF Editor" Command="{Binding AboutCommand}"/>
+                <MenuItem Header="_Keyboard Shortcuts" Command="{Binding ShowShortcutsCommand}" InputGesture="F1"/>
+            </MenuItem>
+        </Menu>
 
         <!-- Modern Title Bar Area -->
-        <Grid Grid.Row="0" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
+        <Grid Grid.Row="1" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
               ColumnDefinitions="Auto,*,Auto">
             <!-- App Icon and Title -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="10,0">
@@ -136,7 +199,7 @@
         </Border>
 
         <!-- Search Bar -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1"
@@ -207,7 +270,7 @@
         </Border>
 
         <!-- Main Content Area -->
-        <Grid Grid.Row="3" ColumnDefinitions="200,*,250">
+        <Grid Grid.Row="4" ColumnDefinitions="200,*,250">
 
             <!-- Thumbnail Sidebar -->
             <Border Grid.Column="0"
@@ -374,7 +437,7 @@
         </Grid>
 
         <!-- Status Bar -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0"
