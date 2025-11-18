@@ -53,6 +53,21 @@ class Program
         TestRandomRedaction(redactionService, outputDir);
         Console.WriteLine();
 
+        // Test 4: Text-only document
+        Console.WriteLine("--- Test 4: Text-Only Document (No Shapes) ---");
+        TestTextOnlyRedaction(redactionService, outputDir);
+        Console.WriteLine();
+
+        // Test 5: Shapes-only document
+        Console.WriteLine("--- Test 5: Shapes-Only Document (No Text) ---");
+        TestShapesOnlyRedaction(redactionService, outputDir);
+        Console.WriteLine();
+
+        // Test 6: Layered shapes
+        Console.WriteLine("--- Test 6: Layered/Overlapping Shapes ---");
+        TestLayeredShapesRedaction(redactionService, outputDir);
+        Console.WriteLine();
+
         Console.WriteLine($"\n=== All demonstrations complete! ===");
         Console.WriteLine($"Check the files in: {outputDir}");
         Console.WriteLine("\nYou can open the PDFs to visually inspect the redactions.");
@@ -230,6 +245,141 @@ class Program
         }
     }
 
+    static void TestTextOnlyRedaction(RedactionService redactionService, string outputDir)
+    {
+        // Step 1: Create PDF with ONLY text (no shapes)
+        var originalPdf = Path.Combine(outputDir, "04_text_only_original.pdf");
+        CreateTextOnlyPdf(originalPdf);
+        Console.WriteLine($"✓ Created: {Path.GetFileName(originalPdf)}");
+
+        // Step 2: Verify all text exists
+        var textBefore = ExtractText(originalPdf);
+        Console.WriteLine($"  Document contains only text (no shapes)");
+        Console.WriteLine($"  Text sections: CONFIDENTIAL, PUBLIC, ANOTHER CONFIDENTIAL");
+
+        // Step 3: Apply black boxes over confidential sections only
+        var redactedPdf = Path.Combine(outputDir, "04_text_only_redacted.pdf");
+        var document = PdfReader.Open(originalPdf, PdfDocumentOpenMode.Modify);
+        var page = document.Pages[0];
+
+        Console.WriteLine("  Applying black box over first CONFIDENTIAL section");
+        redactionService.RedactArea(page, new Rect(95, 95, 350, 80), renderDpi: 72);
+
+        Console.WriteLine("  Applying black box over second CONFIDENTIAL section");
+        redactionService.RedactArea(page, new Rect(95, 395, 300, 80), renderDpi: 72);
+
+        document.Save(redactedPdf);
+        document.Dispose();
+        Console.WriteLine($"✓ Saved: {Path.GetFileName(redactedPdf)}");
+
+        // Step 4: Verify
+        var textAfter = ExtractText(redactedPdf);
+
+        var confidentialRemoved = !textAfter.Contains("CONFIDENTIAL SECTION") &&
+                                   !textAfter.Contains("confidential data");
+        var publicPreserved = textAfter.Contains("PUBLIC SECTION") &&
+                             textAfter.Contains("public information");
+
+        if (confidentialRemoved && publicPreserved)
+        {
+            Console.WriteLine($"  ✓ SUCCESS: Confidential text removed, public text preserved");
+        }
+        else
+        {
+            Console.WriteLine($"  ✗ FAILED: Redaction did not work correctly");
+        }
+    }
+
+    static void TestShapesOnlyRedaction(RedactionService redactionService, string outputDir)
+    {
+        // Step 1: Create PDF with ONLY shapes (no text)
+        var originalPdf = Path.Combine(outputDir, "05_shapes_only_original.pdf");
+        CreateShapesOnlyPdf(originalPdf);
+        Console.WriteLine($"✓ Created: {Path.GetFileName(originalPdf)}");
+
+        Console.WriteLine($"  Document contains only shapes (no text)");
+        Console.WriteLine($"  Shapes: blue rect, green circle, red rect, yellow rect, purple rect, triangle");
+
+        // Step 2: Get content size before
+        var contentBefore = GetContentStreamSize(originalPdf);
+        Console.WriteLine($"  Content stream size before: {contentBefore} bytes");
+
+        // Step 3: Apply black boxes over specific shapes
+        var redactedPdf = Path.Combine(outputDir, "05_shapes_only_redacted.pdf");
+        var document = PdfReader.Open(originalPdf, PdfDocumentOpenMode.Modify);
+        var page = document.Pages[0];
+
+        Console.WriteLine("  Applying black box over blue rectangle");
+        redactionService.RedactArea(page, new Rect(45, 45, 210, 110), renderDpi: 72);
+
+        Console.WriteLine("  Applying black box over red rectangle");
+        redactionService.RedactArea(page, new Rect(95, 245, 310, 110), renderDpi: 72);
+
+        document.Save(redactedPdf);
+        document.Dispose();
+        Console.WriteLine($"✓ Saved: {Path.GetFileName(redactedPdf)}");
+
+        // Step 4: Verify
+        var contentAfter = GetContentStreamSize(redactedPdf);
+        Console.WriteLine($"  Content stream size after: {contentAfter} bytes");
+
+        if (contentAfter != contentBefore)
+        {
+            Console.WriteLine($"  ✓ SUCCESS: Content stream modified (shapes redacted)");
+        }
+        else
+        {
+            Console.WriteLine($"  ✗ FAILED: Content stream unchanged");
+        }
+    }
+
+    static void TestLayeredShapesRedaction(RedactionService redactionService, string outputDir)
+    {
+        // Step 1: Create PDF with layered shapes
+        var originalPdf = Path.Combine(outputDir, "06_layered_shapes_original.pdf");
+        CreateLayeredShapesPdf(originalPdf);
+        Console.WriteLine($"✓ Created: {Path.GetFileName(originalPdf)}");
+
+        Console.WriteLine($"  Document has 4 overlapping layers:");
+        Console.WriteLine($"    Layer 1: Gray background");
+        Console.WriteLine($"    Layer 2: Blue rectangle");
+        Console.WriteLine($"    Layer 3: Green rectangle");
+        Console.WriteLine($"    Layer 4: Red circle");
+
+        // Step 2: Verify layer labels
+        var textBefore = ExtractText(originalPdf);
+
+        // Step 3: Apply single black box covering all layers
+        var redactedPdf = Path.Combine(outputDir, "06_layered_shapes_redacted.pdf");
+        var document = PdfReader.Open(originalPdf, PdfDocumentOpenMode.Modify);
+        var page = document.Pages[0];
+
+        Console.WriteLine("  Applying single black box covering ALL 4 layers");
+        redactionService.RedactArea(page, new Rect(95, 95, 410, 310), renderDpi: 72);
+
+        document.Save(redactedPdf);
+        document.Dispose();
+        Console.WriteLine($"✓ Saved: {Path.GetFileName(redactedPdf)}");
+
+        // Step 4: Verify all layer labels removed
+        var textAfter = ExtractText(redactedPdf);
+
+        var allLayersRemoved = !textAfter.Contains("Layer 1") &&
+                              !textAfter.Contains("Layer 2") &&
+                              !textAfter.Contains("Layer 3") &&
+                              !textAfter.Contains("Layer 4");
+        var separatePreserved = textAfter.Contains("Separate shape");
+
+        if (allLayersRemoved && separatePreserved)
+        {
+            Console.WriteLine($"  ✓ SUCCESS: All layers under black box removed, separate shape preserved");
+        }
+        else
+        {
+            Console.WriteLine($"  ✗ FAILED: Layer redaction did not work correctly");
+        }
+    }
+
     // Helper methods
 
     static void CreateSimpleTestPdf(string outputPath)
@@ -316,5 +466,109 @@ class Program
     static int CountWords(string text)
     {
         return text.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
+    }
+
+    static void CreateTextOnlyPdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 12);
+
+        // Only text, no shapes
+        gfx.DrawString("Header Text", font, XBrushes.Black, new XPoint(100, 50));
+        gfx.DrawString("CONFIDENTIAL SECTION", font, XBrushes.Red, new XPoint(100, 100));
+        gfx.DrawString("This is line 1 of confidential data", font, XBrushes.Black, new XPoint(100, 130));
+        gfx.DrawString("This is line 2 of confidential data", font, XBrushes.Black, new XPoint(100, 160));
+        gfx.DrawString("PUBLIC SECTION", font, XBrushes.Green, new XPoint(100, 250));
+        gfx.DrawString("This is public information line 1", font, XBrushes.Black, new XPoint(100, 280));
+        gfx.DrawString("This is public information line 2", font, XBrushes.Black, new XPoint(100, 310));
+        gfx.DrawString("ANOTHER CONFIDENTIAL BLOCK", font, XBrushes.Red, new XPoint(100, 400));
+        gfx.DrawString("Secret data here", font, XBrushes.Black, new XPoint(100, 430));
+        gfx.DrawString("Footer - Public", font, XBrushes.Black, new XPoint(100, 700));
+
+        document.Save(outputPath);
+        document.Dispose();
+    }
+
+    static void CreateShapesOnlyPdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+
+        // Only shapes, NO TEXT
+        gfx.DrawRectangle(XPens.Blue, XBrushes.LightBlue, new XRect(50, 50, 200, 100));
+        gfx.DrawEllipse(XPens.Green, XBrushes.LightGreen, new XRect(300, 50, 150, 150));
+        gfx.DrawRectangle(XPens.Red, XBrushes.LightPink, new XRect(100, 250, 300, 100));
+        gfx.DrawRectangle(XPens.Yellow, XBrushes.LightYellow, new XRect(50, 400, 150, 80));
+        gfx.DrawRectangle(XPens.Purple, XBrushes.Lavender, new XRect(350, 400, 150, 80));
+        gfx.DrawPolygon(XPens.Orange, XBrushes.Orange,
+            new XPoint[] {
+                new XPoint(100, 600),
+                new XPoint(200, 700),
+                new XPoint(0, 700)
+            },
+            XFillMode.Winding);
+
+        document.Save(outputPath);
+        document.Dispose();
+    }
+
+    static void CreateLayeredShapesPdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 10);
+
+        // Multiple overlapping layers
+        gfx.DrawRectangle(XBrushes.LightGray, new XRect(100, 100, 400, 300));
+        gfx.DrawRectangle(XPens.Blue, XBrushes.LightBlue, new XRect(150, 150, 200, 100));
+        gfx.DrawRectangle(XPens.Green, XBrushes.LightGreen, new XRect(200, 200, 200, 100));
+        gfx.DrawEllipse(XPens.Red, XBrushes.LightPink, new XRect(250, 180, 120, 120));
+
+        // Layer labels
+        gfx.DrawString("Layer 1 (gray)", font, XBrushes.Black, new XPoint(110, 120));
+        gfx.DrawString("Layer 2 (blue)", font, XBrushes.DarkBlue, new XPoint(160, 170));
+        gfx.DrawString("Layer 3 (green)", font, XBrushes.DarkGreen, new XPoint(210, 220));
+        gfx.DrawString("Layer 4 (red)", font, XBrushes.DarkRed, new XPoint(270, 240));
+
+        // Separate shape outside layered area
+        gfx.DrawRectangle(XPens.Purple, XBrushes.Lavender, new XRect(100, 500, 150, 100));
+        gfx.DrawString("Separate shape", font, XBrushes.Black, new XPoint(110, 520));
+
+        document.Save(outputPath);
+        document.Dispose();
+    }
+
+    static int GetContentStreamSize(string pdfPath)
+    {
+        try
+        {
+            var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import);
+            var page = document.Pages[0];
+            var contentStream = page.Contents.Elements.FirstOrDefault();
+
+            if (contentStream is PdfSharp.Pdf.PdfDictionary dict && dict.Stream != null)
+            {
+                return dict.Stream.Value.Length;
+            }
+
+            return 0;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 }
