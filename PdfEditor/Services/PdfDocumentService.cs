@@ -17,9 +17,15 @@ public class PdfDocumentService
     private readonly ILogger<PdfDocumentService> _logger;
     private PdfDocument? _currentDocument;
     private string? _currentFilePath;
+    private int _originalPdfVersion = 14; // Default to PDF 1.4
 
     public int PageCount => _currentDocument?.PageCount ?? 0;
     public bool IsDocumentLoaded => _currentDocument != null;
+
+    /// <summary>
+    /// Gets the original PDF version as a string (e.g., "1.4", "1.7", "2.0")
+    /// </summary>
+    public string PdfVersion => $"{_originalPdfVersion / 10}.{_originalPdfVersion % 10}";
 
     public PdfDocumentService(ILogger<PdfDocumentService> logger)
     {
@@ -49,8 +55,12 @@ public class PdfDocumentService
             _currentDocument = PdfReader.Open(filePath, PdfDocumentOpenMode.Modify);
             _currentFilePath = filePath;
 
-            _logger.LogInformation("PDF loaded successfully. Pages: {PageCount}, File: {FileName}",
-                PageCount, Path.GetFileName(filePath));
+            // Capture original PDF version for preservation on save
+            _originalPdfVersion = _currentDocument.Version;
+            _logger.LogDebug("Detected PDF version: {Version}", PdfVersion);
+
+            _logger.LogInformation("PDF loaded successfully. Pages: {PageCount}, Version: {Version}, File: {FileName}",
+                PageCount, PdfVersion, Path.GetFileName(filePath));
         }
         catch (Exception ex)
         {
@@ -79,12 +89,18 @@ public class PdfDocumentService
             throw new ArgumentException("File path is required");
         }
 
-        _logger.LogDebug("Saving to: {FilePath}, Pages: {PageCount}", savePath, PageCount);
+        _logger.LogDebug("Saving to: {FilePath}, Pages: {PageCount}, Version: {Version}",
+            savePath, PageCount, PdfVersion);
 
         try
         {
+            // Preserve the original PDF version
+            _currentDocument.Version = _originalPdfVersion;
+            _logger.LogDebug("Set output PDF version to: {Version}", PdfVersion);
+
             _currentDocument.Save(savePath);
-            _logger.LogInformation("PDF saved successfully to: {FilePath}", savePath);
+            _logger.LogInformation("PDF saved successfully to: {FilePath} (Version {Version})",
+                savePath, PdfVersion);
 
             // After saving, PdfSharp marks the document as read-only
             // We need to reload it to allow further modifications
