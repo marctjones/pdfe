@@ -16,6 +16,25 @@ namespace PdfEditor.Services;
 /// Implements TRUE content-level redaction by parsing and filtering PDF content streams
 /// Uses PdfSharpCore (MIT License) for low-level PDF manipulation
 /// </summary>
+/// <remarks>
+/// ⚠️ CRITICAL FOR AI CODING ASSISTANTS:
+///
+/// This service implements GLYPH-LEVEL REMOVAL - text is removed from PDF structure,
+/// not just visually covered. This is a SECURITY-CRITICAL feature.
+///
+/// DO NOT:
+/// - Replace with visual-only redaction (just drawing black boxes)
+/// - Remove the content stream parsing (ParseContentStream)
+/// - Remove the content stream rebuilding (BuildContentStream)
+/// - Simplify by skipping the RemoveContentInArea method
+///
+/// The correct flow is: parse → filter → rebuild → replace → draw
+///
+/// Tests verify that text extraction FAILS after redaction.
+/// If you break this, redacted text becomes extractable = SECURITY VULNERABILITY.
+///
+/// See REDACTION_AI_GUIDELINES.md for complete documentation.
+/// </remarks>
 public class RedactionService
 {
     private readonly ILogger<RedactionService> _logger;
@@ -124,6 +143,20 @@ public class RedactionService
     /// Remove content within the specified area
     /// This is TRUE content-level redaction - removes text, graphics, and images
     /// </summary>
+    /// <remarks>
+    /// ⚠️ CRITICAL METHOD - DO NOT REMOVE OR SIMPLIFY
+    ///
+    /// This method performs actual GLYPH REMOVAL by:
+    /// 1. Parsing content stream into operations (including text with glyphs)
+    /// 2. Filtering out operations that intersect with redaction area
+    /// 3. Rebuilding content stream WITHOUT removed operations
+    /// 4. Replacing page content with filtered stream
+    ///
+    /// After this method runs, text extraction tools CANNOT find the removed text.
+    /// This is the security-critical part of redaction.
+    ///
+    /// If you remove/simplify this, text will still be extractable = SECURITY VULNERABILITY.
+    /// </remarks>
     private void RemoveContentInArea(PdfPage page, Rect area)
     {
         try
