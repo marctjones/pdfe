@@ -71,17 +71,15 @@ public class RedactionService
         try
         {
             // Step 1: Remove content within the area (true redaction)
-            // TEMPORARILY DISABLED: Content stream rebuild has bugs that remove all text
-            // TODO: Fix content stream builder and re-enable
-            //_logger.LogDebug("Step 1: Removing content within redaction area");
-            //RemoveContentInArea(page, scaledArea);
+            _logger.LogDebug("Step 1: Removing content within redaction area");
+            RemoveContentInArea(page, scaledArea);
 
             // Step 2: Draw black rectangle over the area (visual redaction)
-            _logger.LogDebug("Drawing black rectangle for visual redaction");
+            _logger.LogDebug("Step 2: Drawing black rectangle for visual redaction");
             DrawBlackRectangle(page, scaledArea);
 
             sw.Stop();
-            _logger.LogInformation("Visual redaction completed successfully in {ElapsedMs}ms (content removal disabled)", sw.ElapsedMilliseconds);
+            _logger.LogInformation("Redaction completed successfully in {ElapsedMs}ms (content removed and visual redaction applied)", sw.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
