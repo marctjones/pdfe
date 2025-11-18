@@ -5,6 +5,8 @@ using PdfSharp.Drawing;
 using Avalonia;
 using Microsoft.Extensions.Logging;
 using UglyToad.PdfPig;
+using PdfSharpDocument = PdfSharp.Pdf.PdfDocument;
+using PdfPigDocument = UglyToad.PdfPig.PdfDocument;
 
 namespace PdfEditor.Demo;
 
@@ -384,7 +386,7 @@ class Program
 
     static void CreateSimpleTestPdf(string outputPath)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharpDocument();
         var page = document.AddPage();
 
         using var gfx = XGraphics.FromPdfPage(page);
@@ -399,7 +401,7 @@ class Program
 
     static void CreateComplexTestPdf(string outputPath)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharpDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
         page.Height = XUnit.FromPoint(800);
@@ -422,7 +424,7 @@ class Program
 
     static void CreateGridTestPdf(string outputPath)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharpDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
         page.Height = XUnit.FromPoint(800);
@@ -447,7 +449,7 @@ class Program
     {
         try
         {
-            using var document = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+            using var document = PdfPigDocument.Open(pdfPath);
             var text = new System.Text.StringBuilder();
 
             foreach (var page in document.GetPages())
@@ -470,7 +472,7 @@ class Program
 
     static void CreateTextOnlyPdf(string outputPath)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharpDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
         page.Height = XUnit.FromPoint(800);
@@ -496,7 +498,7 @@ class Program
 
     static void CreateShapesOnlyPdf(string outputPath)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharpDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
         page.Height = XUnit.FromPoint(800);
@@ -523,7 +525,7 @@ class Program
 
     static void CreateLayeredShapesPdf(string outputPath)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharpDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
         page.Height = XUnit.FromPoint(800);
