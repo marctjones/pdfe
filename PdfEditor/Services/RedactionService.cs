@@ -90,7 +90,7 @@ public class RedactionService
             // Fallback: At least draw the black rectangle
             try
             {
-                DrawBlackRectangle(page, area);
+                DrawBlackRectangle(page, scaledArea);
                 _logger.LogWarning("Fallback successful: Visual redaction applied (content may not be removed)");
             }
             catch (Exception fallbackEx)
@@ -284,7 +284,7 @@ public class RedactionService
             if (xObjects == null)
                 return;
 
-            Console.WriteLine($"Found {xObjects.Elements.Count} XObjects");
+            _logger.LogDebug("Found {XObjectCount} XObjects", xObjects.Elements.Count);
 
             // Track which XObjects to remove
             var keysToRemove = new List<string>();
@@ -304,7 +304,7 @@ public class RedactionService
                     // A more sophisticated implementation would track image positions
                     // from the content stream Do operators
 
-                    Console.WriteLine($"Found image: {key}");
+                    _logger.LogDebug("Found image: {Key}", key);
                     // Note: We'd need to track image positions from Do operators
                     // to accurately determine intersection. For now, images are
                     // preserved unless explicitly intersecting based on Do operator analysis
@@ -315,12 +315,12 @@ public class RedactionService
             foreach (var key in keysToRemove)
             {
                 xObjects.Elements.Remove(key);
-                Console.WriteLine($"Removed image: {key}");
+                _logger.LogInformation("Removed image: {Key}", key);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Warning: Could not process images: {ex.Message}");
+            _logger.LogWarning(ex, "Could not process images");
         }
     }
 
