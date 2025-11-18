@@ -13,6 +13,43 @@ This is a cross-platform PDF editor built with **C# + .NET 8 + Avalonia UI** (MV
 - Page thumbnails sidebar
 - All dependencies use permissive licenses (MIT, Apache 2.0, BSD-3)
 
+## ⚠️ CRITICAL: Redaction Code Requirements
+
+**READ BEFORE MODIFYING ANY REDACTION CODE**
+
+This project implements **TRUE glyph-level removal** for PDF redaction. This is a security-critical feature.
+
+### ABSOLUTE RULES
+
+1. **NEVER replace glyph removal with visual-only redaction** (just drawing black boxes)
+2. **NEVER simplify by removing content stream parsing/rebuilding**
+3. **ALWAYS maintain the full pipeline**: parse → filter → rebuild → replace → draw
+4. **ALWAYS run redaction tests** after any changes: `dotnet test --filter "FullyQualifiedName~Redaction"`
+
+### What Glyph Removal Means
+
+- Text glyphs are **REMOVED** from PDF content stream
+- Text extraction tools (pdftotext, PdfPig) **cannot find** the text
+- Black box is visual confirmation only (secondary)
+
+### Critical Files - DO NOT SIMPLIFY
+
+```
+PdfEditor/Services/RedactionService.cs           ← RemoveContentInArea() is critical
+PdfEditor/Services/Redaction/ContentStreamParser.cs  ← Parses text operations
+PdfEditor/Services/Redaction/ContentStreamBuilder.cs ← Rebuilds without removed ops
+```
+
+### Required Test Assertion
+
+```csharp
+var textAfter = PdfTestHelpers.ExtractAllText(redactedPdf);
+textAfter.Should().NotContain("REDACTED_TEXT",
+    "Text must be REMOVED from PDF structure, not just hidden");
+```
+
+**See `REDACTION_AI_GUIDELINES.md` for complete documentation.**
+
 ## Build and Run Commands
 
 ### Basic Development
