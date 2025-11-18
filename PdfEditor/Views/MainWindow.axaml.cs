@@ -28,10 +28,185 @@ public partial class MainWindow : Window
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
-        // Handle Ctrl+C for copying text
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        // Ctrl+O: Open file
+        if (e.Key == Key.O && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.OpenFileCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+S: Save file
+        if (e.Key == Key.S && e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.SaveFileCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+Shift+S: Save As
+        if (e.Key == Key.S && e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.SaveAsCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+W: Close document
+        if (e.Key == Key.W && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.CloseDocumentCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+P: Print
+        if (e.Key == Key.P && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.PrintCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // F1: Show keyboard shortcuts
+        if (e.Key == Key.F1)
+        {
+            viewModel.ShowShortcutsCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+F: Toggle search
+        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.ToggleSearchCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // F3: Find next
+        if (e.Key == Key.F3 && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.FindNextCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Shift+F3: Find previous
+        if (e.Key == Key.F3 && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.FindPreviousCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Escape: Close search if visible
+        if (e.Key == Key.Escape && viewModel.IsSearchVisible)
+        {
+            viewModel.CloseSearchCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+L: Rotate page left
+        if (e.Key == Key.L && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.RotatePageLeftCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+R: Rotate page right
+        if (e.Key == Key.R && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.RotatePageRightCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+0: Actual size (100%)
+        if (e.Key == Key.D0 && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.ZoomActualSizeCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+1: Fit width
+        if (e.Key == Key.D1 && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.ZoomFitWidthCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+2: Fit page
+        if (e.Key == Key.D2 && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.ZoomFitPageCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl++: Zoom in
+        if ((e.Key == Key.OemPlus || e.Key == Key.Add) && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.ZoomInCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+-: Zoom out
+        if ((e.Key == Key.OemMinus || e.Key == Key.Subtract) && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.ZoomOutCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Page Down / Down Arrow: Next page
+        if (e.Key == Key.PageDown || (e.Key == Key.Down && !e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+        {
+            viewModel.NextPageCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Page Up / Up Arrow: Previous page
+        if (e.Key == Key.PageUp || (e.Key == Key.Up && !e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+        {
+            viewModel.PreviousPageCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Home: First page
+        if (e.Key == Key.Home)
+        {
+            viewModel.GoToPageCommand?.Execute(0).Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // End: Last page
+        if (e.Key == Key.End)
+        {
+            var lastPage = viewModel.TotalPages - 1;
+            if (lastPage >= 0)
+            {
+                viewModel.GoToPageCommand?.Execute(lastPage).Subscribe();
+            }
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+C: Copy text
         if (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            if (DataContext is MainWindowViewModel viewModel && viewModel.IsTextSelectionMode)
+            if (viewModel.IsTextSelectionMode)
             {
                 viewModel.CopyTextCommand.Execute().Subscribe();
                 e.Handled = true;
@@ -46,6 +221,8 @@ public partial class MainWindow : Window
         {
             viewModel.OpenFileCommand.Subscribe(async _ => await OpenFileDialog());
             viewModel.AddPagesCommand.Subscribe(async _ => await AddPagesDialog());
+            viewModel.SaveAsCommand.Subscribe(async _ => await SaveAsDialog());
+            viewModel.ExportPagesCommand.Subscribe(async _ => await ExportPagesDialog());
         }
     }
 
@@ -96,6 +273,50 @@ public partial class MainWindow : Window
         {
             var filePath = files[0].Path.LocalPath;
             await viewModel.AddPagesFromFileAsync(filePath);
+        }
+    }
+
+    private async System.Threading.Tasks.Task SaveAsDialog()
+    {
+        var topLevel = GetTopLevel(this);
+        if (topLevel == null) return;
+
+        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save PDF As",
+            DefaultExtension = "pdf",
+            SuggestedFileName = "document.pdf",
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("PDF Files")
+                {
+                    Patterns = new[] { "*.pdf" }
+                }
+            }
+        });
+
+        if (file != null && DataContext is MainWindowViewModel viewModel)
+        {
+            var filePath = file.Path.LocalPath;
+            await viewModel.SaveFileAsAsync(filePath);
+        }
+    }
+
+    private async System.Threading.Tasks.Task ExportPagesDialog()
+    {
+        var topLevel = GetTopLevel(this);
+        if (topLevel == null) return;
+
+        var folder = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Folder for Exported Images",
+            AllowMultiple = false
+        });
+
+        if (folder.Count >= 1 && DataContext is MainWindowViewModel viewModel)
+        {
+            var folderPath = folder[0].Path.LocalPath;
+            await viewModel.ExportPagesToImagesAsync(folderPath, "png", 150);
         }
     }
 
