@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace PdfEditor.ViewModels;
 
-public class MainWindowViewModel : ViewModelBase
+public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly PdfDocumentService _documentService;
@@ -37,13 +37,15 @@ public class MainWindowViewModel : ViewModelBase
         PdfDocumentService documentService,
         PdfRenderService renderService,
         RedactionService redactionService,
-        PdfTextExtractionService textExtractionService)
+        PdfTextExtractionService textExtractionService,
+        PdfSearchService searchService)
     {
         _logger = logger;
         _documentService = documentService;
         _renderService = renderService;
         _redactionService = redactionService;
         _textExtractionService = textExtractionService;
+        _searchService = searchService;
 
         _logger.LogInformation("MainWindowViewModel initialized");
 
@@ -65,6 +67,19 @@ public class MainWindowViewModel : ViewModelBase
         NextPageCommand = ReactiveCommand.Create(NextPage);
         PreviousPageCommand = ReactiveCommand.Create(PreviousPage);
         GoToPageCommand = ReactiveCommand.Create<int>(GoToPage);
+
+        // Rotation commands
+        RotatePageLeftCommand = ReactiveCommand.Create(RotatePageLeft);
+        RotatePageRightCommand = ReactiveCommand.Create(RotatePageRight);
+        RotatePage180Command = ReactiveCommand.Create(RotatePage180);
+
+        // Zoom preset commands
+        ZoomActualSizeCommand = ReactiveCommand.Create(ZoomActualSize);
+        ZoomFitWidthCommand = ReactiveCommand.Create(ZoomFitWidth);
+        ZoomFitPageCommand = ReactiveCommand.Create(ZoomFitPage);
+
+        // Initialize search commands
+        InitializeSearchCommands();
 
         _logger.LogDebug("MainWindowViewModel initialization complete");
     }
@@ -158,6 +173,16 @@ public class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> NextPageCommand { get; }
     public ReactiveCommand<Unit, Unit> PreviousPageCommand { get; }
     public ReactiveCommand<int, Unit> GoToPageCommand { get; }
+
+    // Rotation Commands
+    public ReactiveCommand<Unit, Unit> RotatePageLeftCommand { get; }
+    public ReactiveCommand<Unit, Unit> RotatePageRightCommand { get; }
+    public ReactiveCommand<Unit, Unit> RotatePage180Command { get; }
+
+    // Zoom Preset Commands
+    public ReactiveCommand<Unit, Unit> ZoomActualSizeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ZoomFitWidthCommand { get; }
+    public ReactiveCommand<Unit, Unit> ZoomFitPageCommand { get; }
 
     // Command Implementations
     private async Task OpenFileAsync()
@@ -452,6 +477,31 @@ public class MainWindowViewModel : ViewModelBase
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
+    private void ZoomActualSize()
+    {
+        _logger.LogInformation("Setting zoom to actual size (100%)");
+        ZoomLevel = 1.0;
+        this.RaisePropertyChanged(nameof(StatusText));
+    }
+
+    private void ZoomFitWidth()
+    {
+        _logger.LogInformation("Setting zoom to fit width");
+        // In a production app, this would calculate based on page width and viewport width
+        // For now, use a reasonable default that typically fits width well
+        ZoomLevel = 1.3;
+        this.RaisePropertyChanged(nameof(StatusText));
+    }
+
+    private void ZoomFitPage()
+    {
+        _logger.LogInformation("Setting zoom to fit page");
+        // In a production app, this would calculate based on page dimensions and viewport dimensions
+        // For now, use a reasonable default that typically fits the page
+        ZoomLevel = 0.9;
+        this.RaisePropertyChanged(nameof(StatusText));
+    }
+
     private void NextPage()
     {
         if (CurrentPageIndex < TotalPages - 1)
@@ -478,6 +528,78 @@ public class MainWindowViewModel : ViewModelBase
         {
             CurrentPageIndex = pageIndex;
             Task.Run(async () => await RenderCurrentPageAsync());
+        }
+    }
+
+    private void RotatePageLeft()
+    {
+        _logger.LogInformation("Rotating current page left (counter-clockwise)");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot rotate page: No document loaded");
+            return;
+        }
+
+        try
+        {
+            _documentService.RotatePageLeft(CurrentPageIndex);
+            _logger.LogInformation("Page {PageIndex} rotated left successfully", CurrentPageIndex);
+
+            // Re-render the page to show the rotation
+            Task.Run(async () => await RenderCurrentPageAsync());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rotating page left");
+        }
+    }
+
+    private void RotatePageRight()
+    {
+        _logger.LogInformation("Rotating current page right (clockwise)");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot rotate page: No document loaded");
+            return;
+        }
+
+        try
+        {
+            _documentService.RotatePageRight(CurrentPageIndex);
+            _logger.LogInformation("Page {PageIndex} rotated right successfully", CurrentPageIndex);
+
+            // Re-render the page to show the rotation
+            Task.Run(async () => await RenderCurrentPageAsync());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rotating page right");
+        }
+    }
+
+    private void RotatePage180()
+    {
+        _logger.LogInformation("Rotating current page 180 degrees");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot rotate page: No document loaded");
+            return;
+        }
+
+        try
+        {
+            _documentService.RotatePage180(CurrentPageIndex);
+            _logger.LogInformation("Page {PageIndex} rotated 180 degrees successfully", CurrentPageIndex);
+
+            // Re-render the page to show the rotation
+            Task.Run(async () => await RenderCurrentPageAsync());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rotating page 180 degrees");
         }
     }
 
