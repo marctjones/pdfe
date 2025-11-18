@@ -156,18 +156,18 @@ public class TextBoundsCalculator
                 var count = 0;
                 foreach (var item in widths.Elements)
                 {
-                    if (item is PdfSharp.Pdf.PdfInteger intItem)
+                    if (item is PdfInteger intItem)
                     {
                         sum += intItem.Value;
                         count++;
                     }
-                    else if (item is PdfSharp.Pdf.PdfReal realItem)
+                    else if (item is PdfReal realItem)
                     {
                         sum += realItem.Value;
                         count++;
                     }
                 }
-                
+
                 if (count > 0)
                 {
                     return new FontMetrics
