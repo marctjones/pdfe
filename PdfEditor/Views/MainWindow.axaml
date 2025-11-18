@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:PdfEditor.ViewModels"
+        xmlns:models="using:PdfEditor.Models"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:ui="using:FluentAvalonia.UI.Controls"
@@ -394,7 +395,7 @@
                     <ScrollViewer Grid.Row="1">
                         <ItemsControl ItemsSource="{Binding ClipboardHistory}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate>
+                                <DataTemplate DataType="models:ClipboardEntry">
                                     <Border Margin="8" Padding="10"
                                             Background="{DynamicResource CardBrush}"
                                             BorderBrush="{DynamicResource BorderBrush}"
