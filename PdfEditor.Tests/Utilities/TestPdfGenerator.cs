@@ -273,6 +273,157 @@ public static class TestPdfGenerator
     }
 
     /// <summary>
+    /// Creates a PDF with ONLY text (no shapes or graphics)
+    /// </summary>
+    public static string CreateTextOnlyPdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 12);
+
+        // Multiple text items at various positions - NO SHAPES
+        gfx.DrawString("Header Text", font, XBrushes.Black, new XPoint(100, 50));
+        gfx.DrawString("CONFIDENTIAL SECTION", font, XBrushes.Red, new XPoint(100, 100));
+        gfx.DrawString("This is line 1 of confidential data", font, XBrushes.Black, new XPoint(100, 130));
+        gfx.DrawString("This is line 2 of confidential data", font, XBrushes.Black, new XPoint(100, 160));
+        gfx.DrawString("PUBLIC SECTION", font, XBrushes.Green, new XPoint(100, 250));
+        gfx.DrawString("This is public information line 1", font, XBrushes.Black, new XPoint(100, 280));
+        gfx.DrawString("This is public information line 2", font, XBrushes.Black, new XPoint(100, 310));
+        gfx.DrawString("ANOTHER CONFIDENTIAL BLOCK", font, XBrushes.Red, new XPoint(100, 400));
+        gfx.DrawString("Secret data here", font, XBrushes.Black, new XPoint(100, 430));
+        gfx.DrawString("More secret data", font, XBrushes.Black, new XPoint(100, 460));
+        gfx.DrawString("Footer - Public", font, XBrushes.Black, new XPoint(100, 700));
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
+
+    /// <summary>
+    /// Creates a PDF with ONLY shapes/graphics (no text at all)
+    /// </summary>
+    public static string CreateShapesOnlyPdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+
+        // NO TEXT - Only shapes and graphics
+
+        // Large blue rectangle
+        gfx.DrawRectangle(XPens.Blue, XBrushes.LightBlue, new XRect(50, 50, 200, 100));
+
+        // Green circle (using ellipse)
+        gfx.DrawEllipse(XPens.Green, XBrushes.LightGreen, new XRect(300, 50, 150, 150));
+
+        // Red rectangle that will be partially covered
+        gfx.DrawRectangle(XPens.Red, XBrushes.LightPink, new XRect(100, 250, 300, 100));
+
+        // Yellow rectangle
+        gfx.DrawRectangle(XPens.Yellow, XBrushes.LightYellow, new XRect(50, 400, 150, 80));
+
+        // Purple rectangle
+        gfx.DrawRectangle(XPens.Purple, XBrushes.Lavender, new XRect(350, 400, 150, 80));
+
+        // Orange triangle (using path)
+        gfx.DrawPolygon(XPens.Orange, XBrushes.Orange,
+            new XPoint[] {
+                new XPoint(100, 600),
+                new XPoint(200, 700),
+                new XPoint(0, 700)
+            },
+            XFillMode.Winding);
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
+
+    /// <summary>
+    /// Creates a PDF with layered/overlapping shapes
+    /// Multiple shapes drawn on top of each other
+    /// </summary>
+    public static string CreateLayeredShapesPdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 10);
+
+        // Layer 1: Large background rectangle
+        gfx.DrawRectangle(XBrushes.LightGray, new XRect(100, 100, 400, 300));
+
+        // Layer 2: Blue rectangle on top
+        gfx.DrawRectangle(XPens.Blue, XBrushes.LightBlue, new XRect(150, 150, 200, 100));
+
+        // Layer 3: Green rectangle overlapping blue
+        gfx.DrawRectangle(XPens.Green, XBrushes.LightGreen, new XRect(200, 200, 200, 100));
+
+        // Layer 4: Red circle overlapping both
+        gfx.DrawEllipse(XPens.Red, XBrushes.LightPink, new XRect(250, 180, 120, 120));
+
+        // Add text labels to identify layers
+        gfx.DrawString("Layer 1 (gray)", font, XBrushes.Black, new XPoint(110, 120));
+        gfx.DrawString("Layer 2 (blue)", font, XBrushes.DarkBlue, new XPoint(160, 170));
+        gfx.DrawString("Layer 3 (green)", font, XBrushes.DarkGreen, new XPoint(210, 220));
+        gfx.DrawString("Layer 4 (red)", font, XBrushes.DarkRed, new XPoint(270, 240));
+
+        // Additional separate shapes not in the layered area
+        gfx.DrawRectangle(XPens.Purple, XBrushes.Lavender, new XRect(100, 500, 150, 100));
+        gfx.DrawString("Separate shape", font, XBrushes.Black, new XPoint(110, 520));
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
+
+    /// <summary>
+    /// Creates a PDF with shapes that will be partially covered by redaction
+    /// </summary>
+    public static string CreatePartialCoveragePdf(string outputPath)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 10);
+
+        // Large rectangle that will be partially redacted
+        gfx.DrawRectangle(XPens.Blue, XBrushes.LightBlue, new XRect(50, 100, 400, 150));
+        gfx.DrawString("This large blue rectangle", font, XBrushes.DarkBlue, new XPoint(60, 120));
+        gfx.DrawString("will be partially covered", font, XBrushes.DarkBlue, new XPoint(60, 140));
+        gfx.DrawString("by a black box", font, XBrushes.DarkBlue, new XPoint(60, 160));
+
+        // Circle that will be partially redacted
+        gfx.DrawEllipse(XPens.Green, XBrushes.LightGreen, new XRect(100, 350, 200, 200));
+        gfx.DrawString("Partial circle", font, XBrushes.DarkGreen, new XPoint(150, 450));
+
+        // Text that will be partially redacted
+        gfx.DrawString("This text spans a long area and will be partially redacted in the middle portion only",
+            font, XBrushes.Black, new XPoint(50, 650));
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
+
+    /// <summary>
     /// Cleans up test PDF file
     /// </summary>
     public static void CleanupTestFile(string filePath)
