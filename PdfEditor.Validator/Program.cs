@@ -80,6 +80,16 @@ class Program
                     ShowContentStream(args[1]);
                     break;
 
+                case "detect-blocking":
+                    if (args.Length < 2)
+                    {
+                        Console.WriteLine("Error: PDF file path required");
+                        Console.WriteLine("Usage: PdfEditor.Validator detect-blocking <pdf-file>");
+                        return;
+                    }
+                    VisualBlockingCommands.DetectBlocking(args[1]);
+                    break;
+
                 default:
                     Console.WriteLine($"Unknown command: {command}");
                     ShowHelp();
@@ -128,6 +138,11 @@ COMMANDS:
     content-stream <pdf-file>
         Show raw PDF content stream (advanced)
         Useful for debugging redaction implementation
+
+    detect-blocking <pdf-file>
+        Detect content that is VISUALLY blocked by black boxes
+        Analyzes drawing order (z-order) to find what's underneath
+        This checks if black boxes are actually covering content
 
 OPTIONS:
     --verbose       Show detailed error messages
