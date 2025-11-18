@@ -85,6 +85,38 @@ Manages application state and commands:
 - Redaction mode
 - Page thumbnails
 
+## Quick Start Demo
+
+**Want to see redaction in action?** Run the demonstration program:
+
+```bash
+# Linux/macOS
+./run-demo.sh
+
+# Windows
+run-demo.bat
+```
+
+This will:
+1. Generate sample PDFs with text and shapes
+2. Apply black box redactions at known and random locations
+3. Save the redacted PDFs
+4. Re-open and verify content is actually removed from the PDF structure
+5. Generate before/after PDFs you can inspect
+
+See `PdfEditor.Demo/README.md` for details.
+
+## Testing
+
+Run the comprehensive test suite (21 tests):
+
+```bash
+cd PdfEditor.Tests
+dotnet test
+```
+
+See `TEST_SUITE_GUIDE.md` for complete test documentation.
+
 ## Building and Running
 
 ### Prerequisites
@@ -160,49 +192,53 @@ The published executable will be in `bin/Release/net8.0/{runtime}/publish/`
 
 ### What's Fully Implemented
 
-✅ **PDF Loading/Saving** - Complete  
-✅ **Page Removal** - Complete  
-✅ **Page Addition/Merging** - Complete  
-✅ **PDF Rendering** - Complete (using PDFium)  
-✅ **Visual Redaction** - Complete (black rectangles)  
-✅ **Zoom/Pan Controls** - Complete  
-✅ **Page Thumbnails** - Complete  
-✅ **MVVM Architecture** - Complete  
+✅ **PDF Loading/Saving** - Complete
+✅ **Page Removal** - Complete
+✅ **Page Addition/Merging** - Complete
+✅ **PDF Rendering** - Complete (using PDFium)
+✅ **Visual Redaction** - Complete (black rectangles)
+✅ **Content Removal** - Complete (removes text/graphics from PDF structure)
+✅ **Zoom/Pan Controls** - Complete
+✅ **Page Thumbnails** - Complete
+✅ **MVVM Architecture** - Complete
+✅ **Comprehensive Test Suite** - Complete (21 tests)
 
-### What Needs Custom Implementation
+### Content-Level Redaction
 
-⚠️ **True Content Redaction** (35% of total effort)
+✅ **TRUE Content Redaction Implemented**
 
-The `RedactionService` currently implements **visual redaction** (draws black rectangles) but has **placeholder code** for true content removal.
+The `RedactionService` implements **both visual AND content-level redaction**:
+- **Visual redaction**: Draws black rectangles over sensitive areas
+- **Content removal**: Actually removes text and graphics from the PDF structure (not just hiding them)
 
-To fully implement content redaction, you need to:
+The implementation includes:
 
-1. **Parse PDF Content Streams**
-   - Use `CObjectScanner` to parse content stream operators
-   - Track graphics state stack (q/Q operators)
-   - Track current transformation matrix (cm operator)
+1. **Parse PDF Content Streams** ✅
+   - `ContentStreamParser` parses content stream operators
+   - Tracks graphics state stack (q/Q operators)
+   - Tracks current transformation matrix (cm operator)
 
-2. **Text Content Removal**
-   - Track text state (Tf, TL, Tc, Tw, Tz, Ts, Tm, T*)
-   - Calculate bounding boxes for text-showing operators (Tj, TJ, ', ")
-   - Remove operators that intersect redaction areas
+2. **Text Content Removal** ✅
+   - Tracks text state (Tf, TL, Tc, Tw, Tz, Ts, Tm, T*)
+   - Calculates bounding boxes for text-showing operators (Tj, TJ, ', ")
+   - Removes operators that intersect redaction areas
 
-3. **Graphics Content Removal**
-   - Track path construction (m, l, c, v, y, h)
-   - Track path painting (S, s, f, F, f*, B, B*, b, b*, n)
-   - Remove paths intersecting redaction areas
+3. **Graphics Content Removal** ✅
+   - Tracks path construction (m, l, c, v, y, h)
+   - Tracks path painting (S, s, f, F, f*, B, B*, b, b*, n)
+   - Removes paths intersecting redaction areas
 
-4. **Image Redaction**
-   - Identify inline images (BI...ID...EI) and XObject images (Do)
-   - Extract images, modify pixels to black, re-embed
+4. **Image Redaction** ⚠️
+   - XObject images (Do) are tracked and removed
+   - Inline images (BI...ID...EI) not yet implemented
 
-5. **Rebuild Content Stream**
-   - Serialize filtered operators back to PDF syntax
-   - Update page content stream
+5. **Rebuild Content Stream** ✅
+   - `ContentStreamBuilder` serializes filtered operators
+   - Updates page content stream
 
-**Estimated effort**: 1500-2000 lines of code, requires deep PDF specification knowledge.
+**Implementation**: ~2000 lines of code across multiple components. See `REDACTION_ENGINE.md` for architecture details.
 
-**Current implementation**: Visual redaction (black rectangles) is sufficient for many use cases and prevents viewing redacted content, but doesn't remove the underlying data from the PDF file structure.
+**Verification**: Run `./run-demo.sh` to see actual content removal in action. The demo re-opens PDFs and verifies text is removed from the PDF structure.
 
 ## PDF Specification Resources
 
