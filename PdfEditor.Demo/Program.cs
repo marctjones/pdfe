@@ -2,6 +2,7 @@ using PdfEditor.Services;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 using PdfSharp.Drawing;
+using PdfSharp.Fonts;
 using Avalonia;
 using Microsoft.Extensions.Logging;
 using UglyToad.PdfPig;
@@ -22,6 +23,11 @@ class Program
     static void Main(string[] args)
     {
         Console.WriteLine("=== PDF Redaction Demonstration ===\n");
+
+        // Initialize font resolver for cross-platform font support
+        Console.WriteLine("Initializing font resolver...");
+        GlobalFontSettings.FontResolver = new CustomFontResolver();
+        Console.WriteLine();
 
         var outputDir = Path.Combine(Directory.GetCurrentDirectory(), "RedactionDemo");
         Directory.CreateDirectory(outputDir);
