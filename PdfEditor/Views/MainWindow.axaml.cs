@@ -31,6 +31,54 @@ public partial class MainWindow : Window
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
+        // Ctrl+O: Open file
+        if (e.Key == Key.O && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.OpenFileCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+S: Save file
+        if (e.Key == Key.S && e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.SaveFileCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+Shift+S: Save As
+        if (e.Key == Key.S && e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.SaveAsCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+W: Close document
+        if (e.Key == Key.W && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.CloseDocumentCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+P: Print
+        if (e.Key == Key.P && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            viewModel.PrintCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // F1: Show keyboard shortcuts
+        if (e.Key == Key.F1)
+        {
+            viewModel.ShowShortcutsCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+F: Toggle search
         if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
@@ -173,6 +221,8 @@ public partial class MainWindow : Window
         {
             viewModel.OpenFileCommand.Subscribe(async _ => await OpenFileDialog());
             viewModel.AddPagesCommand.Subscribe(async _ => await AddPagesDialog());
+            viewModel.SaveAsCommand.Subscribe(async _ => await SaveAsDialog());
+            viewModel.ExportPagesCommand.Subscribe(async _ => await ExportPagesDialog());
         }
     }
 
@@ -223,6 +273,50 @@ public partial class MainWindow : Window
         {
             var filePath = files[0].Path.LocalPath;
             await viewModel.AddPagesFromFileAsync(filePath);
+        }
+    }
+
+    private async System.Threading.Tasks.Task SaveAsDialog()
+    {
+        var topLevel = GetTopLevel(this);
+        if (topLevel == null) return;
+
+        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save PDF As",
+            DefaultExtension = "pdf",
+            SuggestedFileName = "document.pdf",
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("PDF Files")
+                {
+                    Patterns = new[] { "*.pdf" }
+                }
+            }
+        });
+
+        if (file != null && DataContext is MainWindowViewModel viewModel)
+        {
+            var filePath = file.Path.LocalPath;
+            await viewModel.SaveFileAsAsync(filePath);
+        }
+    }
+
+    private async System.Threading.Tasks.Task ExportPagesDialog()
+    {
+        var topLevel = GetTopLevel(this);
+        if (topLevel == null) return;
+
+        var folder = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Folder for Exported Images",
+            AllowMultiple = false
+        });
+
+        if (folder.Count >= 1 && DataContext is MainWindowViewModel viewModel)
+        {
+            var folderPath = folder[0].Path.LocalPath;
+            await viewModel.ExportPagesToImagesAsync(folderPath, "png", 150);
         }
     }
 

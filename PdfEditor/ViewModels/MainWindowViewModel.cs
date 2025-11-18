@@ -31,6 +31,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isTextSelectionMode;
     private Rect _currentTextSelectionArea;
     private string _selectedText = string.Empty;
+    private ObservableCollection<string> _recentFiles = new();
 
     public MainWindowViewModel(
         ILogger<MainWindowViewModel> logger,
@@ -78,8 +79,24 @@ public partial class MainWindowViewModel : ViewModelBase
         ZoomFitWidthCommand = ReactiveCommand.Create(ZoomFitWidth);
         ZoomFitPageCommand = ReactiveCommand.Create(ZoomFitPage);
 
+        // File menu commands
+        SaveAsCommand = ReactiveCommand.CreateFromTask(SaveAsAsync);
+        CloseDocumentCommand = ReactiveCommand.Create(CloseDocument);
+        ExitCommand = ReactiveCommand.Create(Exit);
+
+        // Tools menu commands
+        ExportPagesCommand = ReactiveCommand.CreateFromTask(ExportPagesAsync);
+        PrintCommand = ReactiveCommand.CreateFromTask(PrintAsync);
+
+        // Help menu commands
+        AboutCommand = ReactiveCommand.Create(ShowAbout);
+        ShowShortcutsCommand = ReactiveCommand.Create(ShowKeyboardShortcuts);
+
         // Initialize search commands
         InitializeSearchCommands();
+
+        // Load recent files
+        LoadRecentFiles();
 
         _logger.LogDebug("MainWindowViewModel initialization complete");
     }
@@ -159,6 +176,14 @@ public partial class MainWindowViewModel : ViewModelBase
         ? $"Page {CurrentPageIndex + 1} of {TotalPages} - Zoom: {ZoomLevel:P0}"
         : "No document loaded";
 
+    public ObservableCollection<string> RecentFiles
+    {
+        get => _recentFiles;
+        set => this.RaiseAndSetIfChanged(ref _recentFiles, value);
+    }
+
+    public bool HasRecentFiles => RecentFiles.Count > 0;
+
     // Commands
     public ReactiveCommand<Unit, Unit> OpenFileCommand { get; }
     public ReactiveCommand<Unit, Unit> SaveFileCommand { get; }
@@ -183,6 +208,19 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> ZoomActualSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomFitWidthCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomFitPageCommand { get; }
+
+    // File Menu Commands
+    public ReactiveCommand<Unit, Unit> SaveAsCommand { get; }
+    public ReactiveCommand<Unit, Unit> CloseDocumentCommand { get; }
+    public ReactiveCommand<Unit, Unit> ExitCommand { get; }
+
+    // Tools Menu Commands
+    public ReactiveCommand<Unit, Unit> ExportPagesCommand { get; }
+    public ReactiveCommand<Unit, Unit> PrintCommand { get; }
+
+    // Help Menu Commands
+    public ReactiveCommand<Unit, Unit> AboutCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowShortcutsCommand { get; }
 
     // Command Implementations
     private async Task OpenFileAsync()
@@ -211,6 +249,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
             this.RaisePropertyChanged(nameof(TotalPages));
             this.RaisePropertyChanged(nameof(StatusText));
+
+            // Add to recent files
+            AddToRecentFiles(filePath);
 
             _logger.LogInformation("Document loaded successfully. Total pages: {PageCount}", TotalPages);
         }
@@ -671,5 +712,255 @@ public partial class MainWindowViewModel : ViewModelBase
         _logger.LogDebug("Waiting for all thumbnails to load");
         await Task.WhenAll(loadTasks);
         _logger.LogInformation("All {Count} thumbnails loaded successfully", TotalPages);
+    }
+
+    // File Menu Commands
+
+    private async Task SaveAsAsync()
+    {
+        _logger.LogInformation("Save As command triggered");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot save: No document loaded");
+            return;
+        }
+
+        // This would show a save file dialog
+        // For now, placeholder
+        await Task.CompletedTask;
+    }
+
+    public async Task SaveFileAsAsync(string filePath)
+    {
+        _logger.LogInformation("Saving document to: {FilePath}", filePath);
+
+        try
+        {
+            _documentService.SaveDocument(filePath);
+            _currentFilePath = filePath;
+            this.RaisePropertyChanged(nameof(DocumentName));
+            _logger.LogInformation("Document saved successfully to: {FilePath}", filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving document to: {FilePath}", filePath);
+        }
+    }
+
+    private void CloseDocument()
+    {
+        _logger.LogInformation("Close document command triggered");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("No document to close");
+            return;
+        }
+
+        try
+        {
+            _documentService.CloseDocument();
+            _currentFilePath = string.Empty;
+            CurrentPageImage = null;
+            PageThumbnails.Clear();
+            this.RaisePropertyChanged(nameof(DocumentName));
+            this.RaisePropertyChanged(nameof(TotalPages));
+            this.RaisePropertyChanged(nameof(StatusText));
+            _logger.LogInformation("Document closed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error closing document");
+        }
+    }
+
+    private void Exit()
+    {
+        _logger.LogInformation("Exit command triggered");
+
+        var lifetime = Avalonia.Application.Current?.ApplicationLifetime
+            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime;
+
+        if (lifetime != null)
+        {
+            lifetime.Shutdown();
+        }
+    }
+
+    // Tools Menu Commands
+
+    private async Task ExportPagesAsync()
+    {
+        _logger.LogInformation("Export pages command triggered");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot export: No document loaded");
+            return;
+        }
+
+        // This would show a folder picker and export options dialog
+        // For now, placeholder
+        await Task.CompletedTask;
+    }
+
+    public async Task ExportPagesToImagesAsync(string outputFolder, string format = "png", int dpi = 150)
+    {
+        _logger.LogInformation("Exporting pages to: {Folder}, Format: {Format}, DPI: {DPI}",
+            outputFolder, format, dpi);
+
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogError("Cannot export: No document loaded");
+            return;
+        }
+
+        try
+        {
+            for (int i = 0; i < TotalPages; i++)
+            {
+                _logger.LogDebug("Exporting page {PageIndex}", i);
+
+                var bitmap = await _renderService.RenderPageAsync(_currentFilePath, i, dpi);
+                if (bitmap != null)
+                {
+                    var fileName = $"page_{i + 1:D3}.{format}";
+                    var filePath = System.IO.Path.Combine(outputFolder, fileName);
+
+                    bitmap.Save(filePath);
+                    _logger.LogDebug("Page {PageIndex} exported to: {FilePath}", i, filePath);
+                }
+            }
+
+            _logger.LogInformation("All {Count} pages exported successfully", TotalPages);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error exporting pages");
+        }
+    }
+
+    private async Task PrintAsync()
+    {
+        _logger.LogInformation("Print command triggered");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot print: No document loaded");
+            return;
+        }
+
+        // This would show print dialog
+        // For now, placeholder
+        _logger.LogInformation("Print functionality not yet implemented");
+        await Task.CompletedTask;
+    }
+
+    // Help Menu Commands
+
+    private void ShowAbout()
+    {
+        _logger.LogInformation("About dialog requested");
+        // This would show an about dialog
+    }
+
+    private void ShowKeyboardShortcuts()
+    {
+        _logger.LogInformation("Keyboard shortcuts dialog requested");
+        // This would show keyboard shortcuts help
+    }
+
+    // Recent Files Management
+
+    private void LoadRecentFiles()
+    {
+        _logger.LogDebug("Loading recent files");
+
+        try
+        {
+            var recentFilesPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "PdfEditor",
+                "recent.txt");
+
+            if (System.IO.File.Exists(recentFilesPath))
+            {
+                var lines = System.IO.File.ReadAllLines(recentFilesPath);
+                foreach (var line in lines.Take(10)) // Keep max 10 recent files
+                {
+                    if (System.IO.File.Exists(line))
+                    {
+                        RecentFiles.Add(line);
+                    }
+                }
+
+                this.RaisePropertyChanged(nameof(HasRecentFiles));
+                _logger.LogInformation("Loaded {Count} recent files", RecentFiles.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error loading recent files");
+        }
+    }
+
+    private void AddToRecentFiles(string filePath)
+    {
+        _logger.LogDebug("Adding to recent files: {FilePath}", filePath);
+
+        try
+        {
+            // Remove if already exists
+            if (RecentFiles.Contains(filePath))
+            {
+                RecentFiles.Remove(filePath);
+            }
+
+            // Add to beginning
+            RecentFiles.Insert(0, filePath);
+
+            // Keep max 10 files
+            while (RecentFiles.Count > 10)
+            {
+                RecentFiles.RemoveAt(RecentFiles.Count - 1);
+            }
+
+            this.RaisePropertyChanged(nameof(HasRecentFiles));
+
+            // Save to file
+            SaveRecentFiles();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error adding to recent files");
+        }
+    }
+
+    private void SaveRecentFiles()
+    {
+        try
+        {
+            var appDataPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "PdfEditor");
+
+            System.IO.Directory.CreateDirectory(appDataPath);
+
+            var recentFilesPath = System.IO.Path.Combine(appDataPath, "recent.txt");
+            System.IO.File.WriteAllLines(recentFilesPath, RecentFiles);
+
+            _logger.LogDebug("Recent files saved");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error saving recent files");
+        }
+    }
+
+    public async Task LoadRecentFileAsync(string filePath)
+    {
+        _logger.LogInformation("Loading recent file: {FilePath}", filePath);
+        await LoadDocumentAsync(filePath);
     }
 }
