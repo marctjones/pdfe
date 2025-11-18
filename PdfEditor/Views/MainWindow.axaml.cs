@@ -336,12 +336,14 @@ public partial class MainWindow : Window
             return;
 
         var currentPoint = e.GetPosition(sender as Control);
-        
-        // Calculate selection rectangle
-        var x = Math.Min(_selectionStartPoint.X, currentPoint.X);
-        var y = Math.Min(_selectionStartPoint.Y, currentPoint.Y);
-        var width = Math.Abs(currentPoint.X - _selectionStartPoint.X);
-        var height = Math.Abs(currentPoint.Y - _selectionStartPoint.Y);
+
+        // Calculate selection rectangle and apply zoom compensation
+        // The image is scaled by ZoomLevel, so we need to divide coordinates to get actual PDF coordinates
+        var zoom = viewModel.ZoomLevel;
+        var x = Math.Min(_selectionStartPoint.X, currentPoint.X) / zoom;
+        var y = Math.Min(_selectionStartPoint.Y, currentPoint.Y) / zoom;
+        var width = Math.Abs(currentPoint.X - _selectionStartPoint.X) / zoom;
+        var height = Math.Abs(currentPoint.Y - _selectionStartPoint.Y) / zoom;
 
         viewModel.CurrentRedactionArea = new Rect(x, y, width, height);
     }
@@ -368,11 +370,13 @@ public partial class MainWindow : Window
 
         var currentPoint = e.GetPosition(sender as Control);
 
-        // Calculate selection rectangle
-        var x = Math.Min(_textSelectionStartPoint.X, currentPoint.X);
-        var y = Math.Min(_textSelectionStartPoint.Y, currentPoint.Y);
-        var width = Math.Abs(currentPoint.X - _textSelectionStartPoint.X);
-        var height = Math.Abs(currentPoint.Y - _textSelectionStartPoint.Y);
+        // Calculate selection rectangle and apply zoom compensation
+        // The image is scaled by ZoomLevel, so we need to divide coordinates to get actual PDF coordinates
+        var zoom = viewModel.ZoomLevel;
+        var x = Math.Min(_textSelectionStartPoint.X, currentPoint.X) / zoom;
+        var y = Math.Min(_textSelectionStartPoint.Y, currentPoint.Y) / zoom;
+        var width = Math.Abs(currentPoint.X - _textSelectionStartPoint.X) / zoom;
+        var height = Math.Abs(currentPoint.Y - _textSelectionStartPoint.Y) / zoom;
 
         viewModel.CurrentTextSelectionArea = new Rect(x, y, width, height);
     }

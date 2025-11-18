@@ -57,22 +57,22 @@ public partial class MainWindowViewModel : ViewModelBase
         _logger.LogDebug("Setting up ReactiveUI commands");
         OpenFileCommand = ReactiveCommand.CreateFromTask(OpenFileAsync);
         SaveFileCommand = ReactiveCommand.CreateFromTask(SaveFileAsync);
-        RemoveCurrentPageCommand = ReactiveCommand.Create(RemoveCurrentPage);
+        RemoveCurrentPageCommand = ReactiveCommand.CreateFromTask(RemoveCurrentPageAsync);
         AddPagesCommand = ReactiveCommand.CreateFromTask(AddPagesAsync);
         ToggleRedactionModeCommand = ReactiveCommand.Create(ToggleRedactionMode);
-        ApplyRedactionCommand = ReactiveCommand.Create(ApplyRedaction);
+        ApplyRedactionCommand = ReactiveCommand.CreateFromTask(ApplyRedactionAsync);
         ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
         CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
         ZoomInCommand = ReactiveCommand.Create(ZoomIn);
         ZoomOutCommand = ReactiveCommand.Create(ZoomOut);
-        NextPageCommand = ReactiveCommand.Create(NextPage);
-        PreviousPageCommand = ReactiveCommand.Create(PreviousPage);
-        GoToPageCommand = ReactiveCommand.Create<int>(GoToPage);
+        NextPageCommand = ReactiveCommand.CreateFromTask(NextPageAsync);
+        PreviousPageCommand = ReactiveCommand.CreateFromTask(PreviousPageAsync);
+        GoToPageCommand = ReactiveCommand.CreateFromTask<int>(GoToPageAsync);
 
         // Rotation commands
-        RotatePageLeftCommand = ReactiveCommand.Create(RotatePageLeft);
-        RotatePageRightCommand = ReactiveCommand.Create(RotatePageRight);
-        RotatePage180Command = ReactiveCommand.Create(RotatePage180);
+        RotatePageLeftCommand = ReactiveCommand.CreateFromTask(RotatePageLeftAsync);
+        RotatePageRightCommand = ReactiveCommand.CreateFromTask(RotatePageRightAsync);
+        RotatePage180Command = ReactiveCommand.CreateFromTask(RotatePage180Async);
 
         // Zoom preset commands
         ZoomActualSizeCommand = ReactiveCommand.Create(ZoomActualSize);
@@ -284,7 +284,7 @@ public partial class MainWindowViewModel : ViewModelBase
         await Task.CompletedTask;
     }
 
-    private void RemoveCurrentPage()
+    private async Task RemoveCurrentPageAsync()
     {
         _logger.LogInformation("Remove page command triggered. Current page: {PageIndex}", CurrentPageIndex);
 
@@ -306,11 +306,8 @@ public partial class MainWindowViewModel : ViewModelBase
             }
 
             _logger.LogDebug("Reloading thumbnails and rendering current page");
-            Task.Run(async () =>
-            {
-                await LoadPageThumbnailsAsync();
-                await RenderCurrentPageAsync();
-            });
+            await LoadPageThumbnailsAsync();
+            await RenderCurrentPageAsync();
 
             this.RaisePropertyChanged(nameof(TotalPages));
             this.RaisePropertyChanged(nameof(StatusText));
@@ -319,7 +316,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error removing page: {ex.Message}");
+            _logger.LogError(ex, "Error removing page");
         }
     }
 
@@ -344,7 +341,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error adding pages: {ex.Message}");
+            _logger.LogError(ex, "Error adding pages");
         }
     }
 
@@ -457,7 +454,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private void ApplyRedaction()
+    private async Task ApplyRedactionAsync()
     {
         if (!IsRedactionMode || CurrentRedactionArea.Width <= 0 || CurrentRedactionArea.Height <= 0)
             return;
@@ -476,21 +473,15 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation("Redaction applied to in-memory document (not saved to disk yet)");
 
             // Render the page from the in-memory document to show the redaction
-            Task.Run(async () =>
+            using var docStream = _documentService.GetCurrentDocumentAsStream();
+            if (docStream != null)
             {
-                using var docStream = _documentService.GetCurrentDocumentAsStream();
-                if (docStream != null)
+                var bitmap = await _renderService.RenderPageFromStreamAsync(docStream, CurrentPageIndex);
+                if (bitmap != null)
                 {
-                    var bitmap = await _renderService.RenderPageFromStreamAsync(docStream, CurrentPageIndex);
-                    if (bitmap != null)
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                        {
-                            CurrentPageImage = bitmap;
-                        });
-                    }
+                    CurrentPageImage = bitmap;
                 }
-            });
+            }
 
             // Clear the selection
             CurrentRedactionArea = new Rect();
@@ -543,36 +534,36 @@ public partial class MainWindowViewModel : ViewModelBase
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
-    private void NextPage()
+    private async Task NextPageAsync()
     {
         if (CurrentPageIndex < TotalPages - 1)
         {
             CurrentPageIndex++;
-            Task.Run(async () => await RenderCurrentPageAsync());
+            await RenderCurrentPageAsync();
         }
     }
 
-    private void PreviousPage()
+    private async Task PreviousPageAsync()
     {
         if (CurrentPageIndex > 0)
         {
             CurrentPageIndex--;
-            Task.Run(async () => await RenderCurrentPageAsync());
+            await RenderCurrentPageAsync();
         }
     }
 
-    private void GoToPage(int pageIndex)
+    private async Task GoToPageAsync(int pageIndex)
     {
         _logger.LogInformation("Navigating to page {PageIndex}", pageIndex);
 
         if (pageIndex >= 0 && pageIndex < TotalPages && pageIndex != CurrentPageIndex)
         {
             CurrentPageIndex = pageIndex;
-            Task.Run(async () => await RenderCurrentPageAsync());
+            await RenderCurrentPageAsync();
         }
     }
 
-    private void RotatePageLeft()
+    private async Task RotatePageLeftAsync()
     {
         _logger.LogInformation("Rotating current page left (counter-clockwise)");
 
@@ -588,7 +579,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation("Page {PageIndex} rotated left successfully", CurrentPageIndex);
 
             // Re-render the page to show the rotation
-            Task.Run(async () => await RenderCurrentPageAsync());
+            await RenderCurrentPageAsync();
         }
         catch (Exception ex)
         {
@@ -596,7 +587,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private void RotatePageRight()
+    private async Task RotatePageRightAsync()
     {
         _logger.LogInformation("Rotating current page right (clockwise)");
 
@@ -612,7 +603,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation("Page {PageIndex} rotated right successfully", CurrentPageIndex);
 
             // Re-render the page to show the rotation
-            Task.Run(async () => await RenderCurrentPageAsync());
+            await RenderCurrentPageAsync();
         }
         catch (Exception ex)
         {
@@ -620,7 +611,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private void RotatePage180()
+    private async Task RotatePage180Async()
     {
         _logger.LogInformation("Rotating current page 180 degrees");
 
@@ -636,7 +627,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation("Page {PageIndex} rotated 180 degrees successfully", CurrentPageIndex);
 
             // Re-render the page to show the rotation
-            Task.Run(async () => await RenderCurrentPageAsync());
+            await RenderCurrentPageAsync();
         }
         catch (Exception ex)
         {
@@ -656,7 +647,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error rendering page: {ex.Message}");
+            _logger.LogError(ex, "Error rendering page");
         }
     }
 
