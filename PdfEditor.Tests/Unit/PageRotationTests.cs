@@ -25,7 +25,7 @@ public class PageRotationTests : IDisposable
 
         // Create a test PDF
         _testPdfPath = Path.Combine(_testOutputDir, "rotation_test.pdf");
-        TestPdfGenerator.CreateSimplePdf(_testPdfPath, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(_testPdfPath, pageCount: 3);
     }
 
     [Fact]

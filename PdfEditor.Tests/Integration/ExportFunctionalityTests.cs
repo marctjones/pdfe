@@ -27,7 +27,7 @@ public class ExportFunctionalityTests : IDisposable
 
         // Create a test PDF with 3 pages
         _testPdfPath = Path.Combine(_testOutputDir, "export_test.pdf");
-        TestPdfGenerator.CreateSimplePdf(_testPdfPath, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(_testPdfPath, pageCount: 3);
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class ExportFunctionalityTests : IDisposable
         Directory.CreateDirectory(exportDir);
 
         var multiPagePdf = Path.Combine(_testOutputDir, "multi_page.pdf");
-        TestPdfGenerator.CreateSimplePdf(multiPagePdf, pageCount: 10);
+        TestPdfGenerator.CreateSimpleTextPdf(multiPagePdf, pageCount: 10);
 
         _documentService.LoadDocument(multiPagePdf);
 

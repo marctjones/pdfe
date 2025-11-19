@@ -30,6 +30,51 @@ public static class TestPdfGenerator
     }
 
     /// <summary>
+    /// Creates a simple multi-page PDF with text at known positions
+    /// Overload with pageCount parameter for backwards compatibility
+    /// </summary>
+    public static string CreateSimpleTextPdf(string outputPath, int pageCount)
+    {
+        return CreateMultiPagePdf(outputPath, pageCount);
+    }
+
+    /// <summary>
+    /// Creates a PDF with ONLY text, with custom content
+    /// Overload with text parameter for backwards compatibility
+    /// </summary>
+    public static string CreateTextOnlyPdf(string outputPath, string text)
+    {
+        return CreateSimpleTextPdf(outputPath, text);
+    }
+
+    /// <summary>
+    /// Creates a PDF with multiple lines of text
+    /// Overload with string array for backwards compatibility
+    /// </summary>
+    public static string CreateTextOnlyPdf(string outputPath, string[] lines)
+    {
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(600);
+        page.Height = XUnit.FromPoint(800);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 12);
+
+        double y = 50;
+        foreach (var line in lines)
+        {
+            gfx.DrawString(line, font, XBrushes.Black, new XPoint(100, y));
+            y += 30;
+        }
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
+
+    /// <summary>
     /// Creates a PDF with multiple text blocks at known positions
     /// </summary>
     public static string CreateMultiTextPdf(string outputPath)
