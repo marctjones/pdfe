@@ -39,7 +39,7 @@ public class PdfSearchServiceTests : IDisposable
 
         // Assert
         results.Should().NotBeEmpty();
-        results.Should().Contain(m => m.Text.Contains("Hello"));
+        results.Should().Contain(m => m.MatchedText.Contains("Hello"));
         results.First().PageIndex.Should().Be(0);
     }
 
