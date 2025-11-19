@@ -1,6 +1,11 @@
 using PdfSharp.Pdf;
 using PdfSharp.Drawing;
+using PdfSharp.Fonts;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Linq;
+using System;
 
 namespace PdfEditor.Tests.Utilities;
 
@@ -9,11 +14,26 @@ namespace PdfEditor.Tests.Utilities;
 /// </summary>
 public static class TestPdfGenerator
 {
+    private static bool _fontResolverInitialized = false;
+
+    /// <summary>
+    /// Ensures font resolver is set up before creating PDFs
+    /// </summary>
+    private static void EnsureFontResolverInitialized()
+    {
+        if (_fontResolverInitialized)
+            return;
+
+        GlobalFontSettings.FontResolver = new TestFontResolver();
+        _fontResolverInitialized = true;
+    }
+
     /// <summary>
     /// Creates a simple single-page PDF with text at known positions
     /// </summary>
     public static string CreateSimpleTextPdf(string outputPath, string text = "Test Content")
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         
@@ -79,6 +99,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateMultiTextPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         
@@ -102,6 +123,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateTextWithGraphicsPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         
@@ -127,6 +149,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateTransformedTextPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         
@@ -159,6 +182,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateMultiPagePdf(string outputPath, int pageCount = 3)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         
         for (int i = 0; i < pageCount; i++)
@@ -182,6 +206,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateGridContentPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -219,6 +244,7 @@ public static class TestPdfGenerator
     public static (string path, Dictionary<string, (double x, double y, double width, double height)> contentMap)
         CreateMappedContentPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -273,6 +299,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateComplexContentPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -322,6 +349,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateTextOnlyPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -354,6 +382,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateShapesOnlyPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -399,6 +428,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreateLayeredShapesPdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -440,6 +470,7 @@ public static class TestPdfGenerator
     /// </summary>
     public static string CreatePartialCoveragePdf(string outputPath)
     {
+        EnsureFontResolverInitialized();
         var document = new PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(600);
@@ -484,5 +515,128 @@ public static class TestPdfGenerator
                 // Ignore cleanup errors in tests
             }
         }
+    }
+}
+
+/// <summary>
+/// Simple font resolver for tests - finds system fonts on Windows/Linux/macOS
+/// </summary>
+internal class TestFontResolver : IFontResolver
+{
+    private readonly Dictionary<string, string> _fontCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public TestFontResolver()
+    {
+        PopulateFontCache();
+    }
+
+    public byte[]? GetFont(string faceName)
+    {
+        if (_fontCache.TryGetValue(faceName, out var fontPath) && File.Exists(fontPath))
+        {
+            return File.ReadAllBytes(fontPath);
+        }
+        return null;
+    }
+
+    public FontResolverInfo? ResolveTypeface(string familyName, bool bold, bool italic)
+    {
+        var normalizedFamily = NormalizeFontFamily(familyName);
+
+        if (_fontCache.ContainsKey(normalizedFamily))
+        {
+            return new FontResolverInfo(normalizedFamily);
+        }
+
+        // Return first available font as fallback
+        var fallback = _fontCache.Keys.FirstOrDefault() ?? "DejaVuSans";
+        return new FontResolverInfo(fallback);
+    }
+
+    private void PopulateFontCache()
+    {
+        var directories = GetSystemFontDirectories();
+
+        foreach (var directory in directories)
+        {
+            if (!Directory.Exists(directory))
+                continue;
+
+            try
+            {
+                foreach (var fontFile in Directory.GetFiles(directory, "*.ttf", SearchOption.AllDirectories))
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(fontFile);
+                    if (!_fontCache.ContainsKey(fileName))
+                    {
+                        _fontCache[fileName] = fontFile;
+                    }
+
+                    // Also add simplified name
+                    var simplified = SimplifyFontName(fileName);
+                    if (!_fontCache.ContainsKey(simplified))
+                    {
+                        _fontCache[simplified] = fontFile;
+                    }
+                }
+            }
+            catch { /* Skip inaccessible directories */ }
+        }
+    }
+
+    private string[] GetSystemFontDirectories()
+    {
+        var dirs = new List<string>();
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts"));
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            dirs.Add("/usr/share/fonts");
+            dirs.Add("/usr/local/share/fonts");
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(home))
+            {
+                dirs.Add(Path.Combine(home, ".local/share/fonts"));
+            }
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            dirs.Add("/System/Library/Fonts");
+            dirs.Add("/Library/Fonts");
+        }
+
+        return dirs.ToArray();
+    }
+
+    private string NormalizeFontFamily(string familyName)
+    {
+        // Map Windows fonts to Linux equivalents
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return familyName;
+
+        return familyName.ToLower() switch
+        {
+            "arial" => _fontCache.ContainsKey("LiberationSans-Regular") ? "LiberationSans-Regular" :
+                       _fontCache.ContainsKey("DejaVuSans") ? "DejaVuSans" : familyName,
+            "times new roman" => _fontCache.ContainsKey("LiberationSerif-Regular") ? "LiberationSerif-Regular" :
+                                _fontCache.ContainsKey("DejaVuSerif") ? "DejaVuSerif" : familyName,
+            "courier new" => _fontCache.ContainsKey("LiberationMono-Regular") ? "LiberationMono-Regular" :
+                            _fontCache.ContainsKey("DejaVuSansMono") ? "DejaVuSansMono" : familyName,
+            _ => familyName
+        };
+    }
+
+    private string SimplifyFontName(string name)
+    {
+        var suffixes = new[] { "-Regular", "-Bold", "-Italic", "Regular", "Bold", "Italic" };
+        foreach (var suffix in suffixes)
+        {
+            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return name[..^suffix.Length];
+        }
+        return name;
     }
 }

@@ -283,12 +283,63 @@ public class RedactionService
     {
         try
         {
-            _logger.LogDebug("Clearing existing content elements");
-            // Clear existing content
-            page.Contents.Elements.Clear();
+            _logger.LogDebug("Clearing existing content elements. Current count: {Count}", page.Contents.Elements.Count);
 
+            // Method: Get the existing content reference and replace its stream
+            // This preserves the indirect reference structure that PdfPig expects
+            if (page.Contents.Elements.Count > 0)
+            {
+                // Get the first content stream (or only one after flattening)
+                var contentRef = page.Contents.Elements[0];
+                _logger.LogDebug("Content element type: {Type}", contentRef.GetType().FullName);
+
+                if (contentRef is PdfSharp.Pdf.Advanced.PdfReference pdfRef)
+                {
+                    _logger.LogDebug("Reference value type: {ValueType}", pdfRef.Value?.GetType().FullName ?? "null");
+                    var contentObject = pdfRef.Value as PdfSharp.Pdf.Advanced.PdfContent;
+                    if (contentObject != null)
+                    {
+                        // Replace the stream in the existing content object
+                        // The content object already has a stream, so we need to access and replace it
+                        try
+                        {
+                            // PdfContent inherits from PdfDictionary which has a Stream property
+                            // We need to replace the stream value with our new content
+                            if (contentObject.Stream != null)
+                            {
+                                // Get the existing stream and replace its value
+                                contentObject.Stream.Value = newContent;
+                            }
+                            else
+                            {
+                                // No existing stream, create new one
+                                contentObject.CreateStream(newContent);
+                            }
+                            _logger.LogInformation("Successfully replaced page content stream using existing reference");
+                            return;
+                        }
+                        catch (Exception streamEx)
+                        {
+                            _logger.LogError(streamEx, "CreateStream failed: {Message}", streamEx.Message);
+                            throw;
+                        }
+                    }
+                }
+                else if (contentRef is PdfSharp.Pdf.Advanced.PdfContent directContent)
+                {
+                    // Direct content object - replace its stream
+                    directContent.CreateStream(newContent);
+                    _logger.LogInformation("Successfully replaced page content stream (direct content)");
+                    return;
+                }
+
+                // If it's something else, clear and recreate
+                _logger.LogDebug("Unknown content type, clearing and recreating");
+                page.Contents.Elements.Clear();
+            }
+
+            // Fallback: Create new content stream
             _logger.LogDebug("Creating new content stream with {SizeBytes} bytes", newContent.Length);
-            // Create new content stream
             var stream = page.Contents.CreateSingleContent();
             stream.CreateStream(newContent);
 
