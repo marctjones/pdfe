@@ -44,7 +44,7 @@ public class PdfConformanceTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "basic.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 1);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 1);
 
         // Act
         _documentService.LoadDocument(pdfPath);
@@ -59,7 +59,7 @@ public class PdfConformanceTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "render.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 2);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 2);
 
         // Act
         var bitmap = await _renderService.RenderPageAsync(pdfPath, 0);
@@ -104,7 +104,7 @@ public class PdfConformanceTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "modify.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 3);
 
         _documentService.LoadDocument(pdfPath);
         var originalCount = _documentService.PageCount;
@@ -123,8 +123,8 @@ public class PdfConformanceTests : IDisposable
         var pdf1 = Path.Combine(_testOutputDir, "add1.pdf");
         var pdf2 = Path.Combine(_testOutputDir, "add2.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(pdf1, pageCount: 2);
-        TestPdfGenerator.CreateSimplePdf(pdf2, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(pdf1, pageCount: 2);
+        TestPdfGenerator.CreateSimpleTextPdf(pdf2, pageCount: 3);
 
         _documentService.LoadDocument(pdf1);
         var originalCount = _documentService.PageCount;
@@ -143,7 +143,7 @@ public class PdfConformanceTests : IDisposable
         var pdfPath = Path.Combine(_testOutputDir, "save_mod.pdf");
         var savePath = Path.Combine(_testOutputDir, "save_mod_result.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 5);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 5);
         _documentService.LoadDocument(pdfPath);
 
         // Act
@@ -166,7 +166,7 @@ public class PdfConformanceTests : IDisposable
         var pdfPath = Path.Combine(_testOutputDir, "rotate.pdf");
         var savePath = Path.Combine(_testOutputDir, "rotate_result.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 1);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 1);
         _documentService.LoadDocument(pdfPath);
 
         // Act
@@ -185,7 +185,7 @@ public class PdfConformanceTests : IDisposable
         var pdfPath = Path.Combine(_testOutputDir, "rotate_persist.pdf");
         var savePath = Path.Combine(_testOutputDir, "rotate_persist_result.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 1);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 1);
         _documentService.LoadDocument(pdfPath);
 
         // Act
@@ -217,18 +217,21 @@ public class PdfConformanceTests : IDisposable
         _documentService.LoadDocument(pdfPath);
 
         var logger = new Mock<ILogger<RedactionService>>().Object;
-        var redactionService = new RedactionService(logger);
+        var loggerFactory = new Mock<ILoggerFactory>().Object;
+        var redactionService = new RedactionService(logger, loggerFactory);
 
         var doc = _documentService.GetCurrentDocument();
         var page = doc!.Pages[0];
 
         // Get a text location
-        var targetText = contentMap.First().Value.First();
+        var targetEntry = contentMap.contentMap.First();
+        var targetText = targetEntry.Key;  // The actual text string
+        var targetPos = targetEntry.Value;  // The position tuple
         var redactArea = new Avalonia.Rect(
-            targetText.X,
-            targetText.Y,
-            targetText.Width,
-            targetText.Height
+            targetPos.x,
+            targetPos.y,
+            targetPos.width,
+            targetPos.height
         );
 
         // Act
@@ -237,7 +240,7 @@ public class PdfConformanceTests : IDisposable
 
         // Assert - Text should be removed
         var textAfter = _textService.ExtractTextFromPage(savePath, 0);
-        textAfter.Should().NotContain(targetText.Text);
+        textAfter.Should().NotContain(targetText);
     }
 
     #endregion
@@ -249,7 +252,7 @@ public class PdfConformanceTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "multi.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 10);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 10);
 
         // Act & Assert - Can load
         _documentService.LoadDocument(pdfPath);
@@ -280,7 +283,7 @@ public class PdfConformanceTests : IDisposable
         var exportDir = Path.Combine(_testOutputDir, "export_imgs");
         Directory.CreateDirectory(exportDir);
 
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 3);
 
         // Act
         for (int i = 0; i < 3; i++)
@@ -310,7 +313,7 @@ public class PdfConformanceTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "invalid_idx.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 2);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 2);
         _documentService.LoadDocument(pdfPath);
 
         // Act & Assert
