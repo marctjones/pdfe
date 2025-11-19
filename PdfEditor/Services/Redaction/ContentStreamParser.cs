@@ -1,12 +1,15 @@
 using Avalonia;
 using Microsoft.Extensions.Logging;
 using PdfSharp.Pdf;
+using PdfSharp.Pdf.Advanced;
 using PdfSharp.Pdf.Content;
 using PdfSharp.Pdf.Content.Objects;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace PdfEditor.Services.Redaction;
 
@@ -557,5 +560,275 @@ public class ContentStreamParser
         if (obj is CReal r)
             return r.Value;
         return 0;
+    }
+
+    /// <summary>
+    /// Parse inline images (BI...ID...EI sequences) from raw content stream bytes
+    /// </summary>
+    /// <param name="page">The PDF page</param>
+    /// <param name="pageHeight">Page height for coordinate conversion</param>
+    /// <param name="graphicsState">Current graphics state for transformations</param>
+    /// <returns>List of inline image operations found</returns>
+    public List<InlineImageOperation> ParseInlineImages(PdfPage page, double pageHeight, PdfGraphicsState graphicsState)
+    {
+        var inlineImages = new List<InlineImageOperation>();
+
+        try
+        {
+            // Get raw content stream bytes
+            var rawBytes = GetRawContentStream(page);
+            if (rawBytes == null || rawBytes.Length == 0)
+            {
+                return inlineImages;
+            }
+
+            _logger.LogDebug("Scanning {Length} bytes for inline images", rawBytes.Length);
+
+            // Scan for BI (Begin Inline Image) operators
+            int position = 0;
+            while (position < rawBytes.Length - 2)
+            {
+                // Look for "BI" followed by whitespace
+                if (rawBytes[position] == 'B' && rawBytes[position + 1] == 'I' &&
+                    (position + 2 >= rawBytes.Length || IsWhitespace(rawBytes[position + 2])))
+                {
+                    // Check that BI is preceded by whitespace or start of stream
+                    if (position == 0 || IsWhitespace(rawBytes[position - 1]))
+                    {
+                        var imageStart = position;
+
+                        // Find ID (Image Data) marker
+                        var idPosition = FindSequence(rawBytes, position + 2, "ID");
+                        if (idPosition < 0)
+                        {
+                            position++;
+                            continue;
+                        }
+
+                        // Find EI (End Image) marker
+                        // EI must be preceded by whitespace and followed by whitespace or end
+                        var eiPosition = FindEIMarker(rawBytes, idPosition + 2);
+                        if (eiPosition < 0)
+                        {
+                            position++;
+                            continue;
+                        }
+
+                        // Extract the complete inline image sequence
+                        var imageLength = eiPosition + 2 - imageStart;
+                        var imageData = new byte[imageLength];
+                        Array.Copy(rawBytes, imageStart, imageData, 0, imageLength);
+
+                        // Parse image properties from BI...ID section
+                        var properties = ParseInlineImageProperties(rawBytes, position + 2, idPosition);
+
+                        // Calculate bounding box using CTM
+                        // Inline images are rendered in a 1x1 unit square transformed by CTM
+                        var bounds = CalculateInlineImageBounds(graphicsState, pageHeight,
+                            properties.width, properties.height);
+
+                        var inlineImage = new InlineImageOperation(imageData, bounds, imageStart, imageLength)
+                        {
+                            ImageWidth = properties.width,
+                            ImageHeight = properties.height
+                        };
+
+                        inlineImages.Add(inlineImage);
+
+                        _logger.LogDebug(
+                            "Found inline image at position {Position}: {Width}x{Height}, bounds=({X:F2},{Y:F2},{W:F2}x{H:F2})",
+                            imageStart, properties.width, properties.height,
+                            bounds.X, bounds.Y, bounds.Width, bounds.Height);
+
+                        // Skip past this image
+                        position = eiPosition + 2;
+                        continue;
+                    }
+                }
+
+                position++;
+            }
+
+            _logger.LogInformation("Found {Count} inline images in content stream", inlineImages.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error parsing inline images");
+        }
+
+        return inlineImages;
+    }
+
+    /// <summary>
+    /// Get raw content stream bytes from a page
+    /// </summary>
+    private byte[]? GetRawContentStream(PdfPage page)
+    {
+        try
+        {
+            if (page.Contents.Elements.Count == 0)
+                return null;
+
+            using var ms = new MemoryStream();
+
+            foreach (var item in page.Contents.Elements)
+            {
+                PdfDictionary? contentDict = null;
+
+                if (item is PdfReference pdfRef)
+                {
+                    contentDict = pdfRef.Value as PdfDictionary;
+                }
+                else if (item is PdfDictionary dict)
+                {
+                    contentDict = dict;
+                }
+
+                if (contentDict?.Stream?.Value != null)
+                {
+                    ms.Write(contentDict.Stream.Value, 0, contentDict.Stream.Value.Length);
+                    ms.WriteByte((byte)'\n');
+                }
+            }
+
+            return ms.ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not get raw content stream");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Check if a byte is PDF whitespace
+    /// </summary>
+    private bool IsWhitespace(byte b)
+    {
+        return b == 0x00 || b == 0x09 || b == 0x0A || b == 0x0C || b == 0x0D || b == 0x20;
+    }
+
+    /// <summary>
+    /// Find a sequence of ASCII characters in byte array
+    /// </summary>
+    private int FindSequence(byte[] data, int startIndex, string sequence)
+    {
+        var seqBytes = Encoding.ASCII.GetBytes(sequence);
+
+        for (int i = startIndex; i <= data.Length - seqBytes.Length; i++)
+        {
+            bool found = true;
+            for (int j = 0; j < seqBytes.Length; j++)
+            {
+                if (data[i + j] != seqBytes[j])
+                {
+                    found = false;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                // For ID, must be followed by single whitespace then data
+                if (sequence == "ID" && i + 2 < data.Length && !IsWhitespace(data[i + 2]))
+                {
+                    continue;
+                }
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Find EI marker that ends an inline image
+    /// EI must be preceded by whitespace and followed by whitespace/end
+    /// </summary>
+    private int FindEIMarker(byte[] data, int startIndex)
+    {
+        for (int i = startIndex; i < data.Length - 1; i++)
+        {
+            if (data[i] == 'E' && data[i + 1] == 'I')
+            {
+                // Must be preceded by whitespace
+                if (i > 0 && !IsWhitespace(data[i - 1]))
+                    continue;
+
+                // Must be followed by whitespace or end of data
+                if (i + 2 < data.Length && !IsWhitespace(data[i + 2]))
+                    continue;
+
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Parse inline image properties from the BI...ID section
+    /// </summary>
+    private (int width, int height) ParseInlineImageProperties(byte[] data, int start, int end)
+    {
+        int width = 1;
+        int height = 1;
+
+        try
+        {
+            var propString = Encoding.ASCII.GetString(data, start, end - start);
+
+            // Parse key/value pairs
+            // Common keys: W (Width), H (Height), BPC (BitsPerComponent), CS (ColorSpace)
+            var tokens = propString.Split(new[] { ' ', '\n', '\r', '\t' },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            for (int i = 0; i < tokens.Length - 1; i++)
+            {
+                var key = tokens[i].TrimStart('/');
+                var value = tokens[i + 1];
+
+                if ((key == "W" || key == "Width") && int.TryParse(value, out int w))
+                {
+                    width = w;
+                }
+                else if ((key == "H" || key == "Height") && int.TryParse(value, out int h))
+                {
+                    height = h;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not parse inline image properties");
+        }
+
+        return (width, height);
+    }
+
+    /// <summary>
+    /// Calculate bounding box for inline image based on CTM
+    /// </summary>
+    private Rect CalculateInlineImageBounds(PdfGraphicsState gState, double pageHeight, int imgWidth, int imgHeight)
+    {
+        // Inline images are drawn in a unit square, scaled by CTM
+        // Transform the four corners of the unit square
+        var ctm = gState.TransformationMatrix;
+
+        var (x1, y1) = ctm.Transform(0, 0);
+        var (x2, y2) = ctm.Transform(1, 0);
+        var (x3, y3) = ctm.Transform(1, 1);
+        var (x4, y4) = ctm.Transform(0, 1);
+
+        // Find bounding box
+        var minX = Math.Min(Math.Min(x1, x2), Math.Min(x3, x4));
+        var maxX = Math.Max(Math.Max(x1, x2), Math.Max(x3, x4));
+        var minY = Math.Min(Math.Min(y1, y2), Math.Min(y3, y4));
+        var maxY = Math.Max(Math.Max(y1, y2), Math.Max(y3, y4));
+
+        // Convert to Avalonia coordinates (top-left origin)
+        var avaloniaY = pageHeight - maxY;
+
+        return new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
     }
 }

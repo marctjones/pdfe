@@ -214,6 +214,17 @@ public class RedactionService
             _logger.LogInformation("Parsed content stream in {ElapsedMs}ms. Found {OperationCount} operations",
                 sw.ElapsedMilliseconds, operations.Count);
 
+            // Step 1b: Parse inline images (BI...ID...EI sequences)
+            var pageHeight = page.Height.Point;
+            var currentGraphicsState = new PdfGraphicsState();
+            var inlineImages = _parser.ParseInlineImages(page, pageHeight, currentGraphicsState);
+
+            if (inlineImages.Count > 0)
+            {
+                _logger.LogInformation("Found {Count} inline images to check for redaction", inlineImages.Count);
+                operations.AddRange(inlineImages);
+            }
+
             // Step 2: Filter out operations that intersect with the redaction area
             _logger.LogInformation("Filtering operations against redaction area: ({X:F2},{Y:F2},{W:F2}x{H:F2})",
                 area.X, area.Y, area.Width, area.Height);
@@ -268,6 +279,14 @@ public class RedactionService
                             imgOp.ResourceName,
                             imgOp.BoundingBox.X, imgOp.BoundingBox.Y,
                             imgOp.BoundingBox.Width, imgOp.BoundingBox.Height);
+                    }
+                    else if (operation is InlineImageOperation inlineImgOp)
+                    {
+                        _logger.LogInformation(
+                            "REMOVING Inline Image: {Width}x{Height} at ({X:F2},{Y:F2},{W:F2}x{H:F2})",
+                            inlineImgOp.ImageWidth, inlineImgOp.ImageHeight,
+                            inlineImgOp.BoundingBox.X, inlineImgOp.BoundingBox.Y,
+                            inlineImgOp.BoundingBox.Width, inlineImgOp.BoundingBox.Height);
                     }
                     else
                     {
