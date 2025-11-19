@@ -169,12 +169,60 @@ public enum TextStateOperationType
 public class GenericOperation : PdfOperation
 {
     public string OperatorName { get; set; }
-    
+
     public GenericOperation(CObject obj, string opName) : base(obj)
     {
         OperatorName = opName;
     }
-    
+
     // Generic operations are preserved by default
     public override bool IntersectsWith(Rect area) => false;
+}
+
+/// <summary>
+/// Represents an inline image operation (BI...ID...EI sequence)
+/// </summary>
+public class InlineImageOperation : PdfOperation
+{
+    /// <summary>
+    /// Raw bytes of the complete BI...ID...EI sequence
+    /// </summary>
+    public byte[] RawData { get; set; }
+
+    /// <summary>
+    /// Position in the original content stream
+    /// </summary>
+    public int StreamPosition { get; set; }
+
+    /// <summary>
+    /// Length of the entire inline image sequence
+    /// </summary>
+    public int StreamLength { get; set; }
+
+    /// <summary>
+    /// Image width from inline image dictionary
+    /// </summary>
+    public int ImageWidth { get; set; }
+
+    /// <summary>
+    /// Image height from inline image dictionary
+    /// </summary>
+    public int ImageHeight { get; set; }
+
+    public InlineImageOperation(CObject obj) : base(obj)
+    {
+        RawData = Array.Empty<byte>();
+    }
+
+    /// <summary>
+    /// Constructor for inline images that don't have a CObject representation
+    /// </summary>
+    public InlineImageOperation(byte[] rawData, Rect bounds, int position, int length)
+        : base(new PdfSharp.Pdf.Content.Objects.CComment())  // Use a placeholder CObject
+    {
+        RawData = rawData;
+        BoundingBox = bounds;
+        StreamPosition = position;
+        StreamLength = length;
+    }
 }
