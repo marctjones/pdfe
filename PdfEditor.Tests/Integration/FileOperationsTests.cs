@@ -29,7 +29,7 @@ public class FileOperationsTests : IDisposable
         var sourcePdf = Path.Combine(_testOutputDir, "source.pdf");
         var destinationPdf = Path.Combine(_testOutputDir, "destination.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(sourcePdf, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(sourcePdf, pageCount: 3);
         _documentService.LoadDocument(sourcePdf);
 
         // Act
@@ -49,7 +49,7 @@ public class FileOperationsTests : IDisposable
         var sourcePdf = Path.Combine(_testOutputDir, "source_mod.pdf");
         var destinationPdf = Path.Combine(_testOutputDir, "destination_mod.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(sourcePdf, pageCount: 5);
+        TestPdfGenerator.CreateSimpleTextPdf(sourcePdf, pageCount: 5);
         _documentService.LoadDocument(sourcePdf);
 
         // Act - Modify and save
@@ -68,7 +68,7 @@ public class FileOperationsTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "close_test.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 2);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 2);
         _documentService.LoadDocument(pdfPath);
 
         _documentService.IsDocumentLoaded.Should().BeTrue();
@@ -88,8 +88,8 @@ public class FileOperationsTests : IDisposable
         var pdf1 = Path.Combine(_testOutputDir, "doc1.pdf");
         var pdf2 = Path.Combine(_testOutputDir, "doc2.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(pdf1, pageCount: 2);
-        TestPdfGenerator.CreateSimplePdf(pdf2, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(pdf1, pageCount: 2);
+        TestPdfGenerator.CreateSimpleTextPdf(pdf2, pageCount: 3);
 
         // Act
         _documentService.LoadDocument(pdf1);
@@ -109,7 +109,7 @@ public class FileOperationsTests : IDisposable
     {
         // Arrange
         var pdfPath = Path.Combine(_testOutputDir, "overwrite.pdf");
-        TestPdfGenerator.CreateSimplePdf(pdfPath, pageCount: 5);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, pageCount: 5);
 
         _documentService.LoadDocument(pdfPath);
 
@@ -132,8 +132,8 @@ public class FileOperationsTests : IDisposable
         var pdf2 = Path.Combine(_testOutputDir, "add_pages_from.pdf");
         var resultPdf = Path.Combine(_testOutputDir, "add_result.pdf");
 
-        TestPdfGenerator.CreateSimplePdf(pdf1, pageCount: 2);
-        TestPdfGenerator.CreateSimplePdf(pdf2, pageCount: 3);
+        TestPdfGenerator.CreateSimpleTextPdf(pdf1, pageCount: 2);
+        TestPdfGenerator.CreateSimpleTextPdf(pdf2, pageCount: 3);
 
         _documentService.LoadDocument(pdf1);
 

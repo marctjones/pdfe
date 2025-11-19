@@ -315,7 +315,7 @@ public class BlindRedactionVerificationTests : IDisposable
     {
         var textItems = new List<GridTextItem>();
 
-        var document = new PdfDocument();
+        var document = new PdfSharp.Pdf.PdfDocument();
         var page = document.AddPage();
         page.Width = XUnit.FromPoint(612);  // Letter size
         page.Height = XUnit.FromPoint(792);
@@ -344,7 +344,7 @@ public class BlindRedactionVerificationTests : IDisposable
 
     private void CreateSmallGridPdf(string outputPath, int rows, int cols)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharp.Pdf.PdfDocument();
         var page = document.AddPage();
 
         using var gfx = XGraphics.FromPdfPage(page);
@@ -366,7 +366,7 @@ public class BlindRedactionVerificationTests : IDisposable
 
     private void CreateSimpleGridPdf(string outputPath, string text, double x, double y)
     {
-        var document = new PdfDocument();
+        var document = new PdfSharp.Pdf.PdfDocument();
         var page = document.AddPage();
 
         using var gfx = XGraphics.FromPdfPage(page);
@@ -482,12 +482,15 @@ public class BlindRedactionVerificationTests : IDisposable
         if (page.Contents.Elements.Count > 0)
         {
             var content = page.Contents.Elements.GetObject(0);
-            if (content is PdfSharp.Pdf.Advanced.PdfDictionary dict)
+            // Use reflection or direct stream access based on content type
+            var streamProp = content?.GetType().GetProperty("Stream");
+            if (streamProp != null)
             {
-                var stream = dict.Stream;
-                if (stream != null)
+                var stream = streamProp.GetValue(content);
+                var valueProp = stream?.GetType().GetProperty("Value");
+                if (valueProp != null)
                 {
-                    return stream.Value;
+                    return valueProp.GetValue(stream) as byte[] ?? Array.Empty<byte>();
                 }
             }
         }
