@@ -2,6 +2,8 @@ using Avalonia;
 using Microsoft.Extensions.Logging;
 using PdfSharp.Pdf;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace PdfEditor.Services.Redaction;
@@ -41,21 +43,30 @@ public class TextBoundsCalculator
         // Text height is approximately the font size
         var textHeight = textState.FontSize;
 
-        // Get starting position from text matrix
-        var (x, y) = textState.TextMatrix.Transform(0, 0);
+        // Transform all four corners of the text rectangle in text space
+        // This properly handles rotation and scaling in the text matrix
+        var corners = new[]
+        {
+            (0.0, 0.0),                    // Bottom-left
+            (textWidth, 0.0),              // Bottom-right
+            (0.0, textHeight),             // Top-left
+            (textWidth, textHeight)        // Top-right
+        };
 
-        // Apply graphics transformation
-        var (transformedX, transformedY) = graphicsState.TransformationMatrix.Transform(x, y);
+        // Transform each corner through text matrix then graphics matrix
+        var transformedCorners = new List<(double x, double y)>();
+        foreach (var (cx, cy) in corners)
+        {
+            var (px, py) = textState.TextMatrix.Transform(cx, cy);
+            var (tx, ty) = graphicsState.TransformationMatrix.Transform(px, py);
+            transformedCorners.Add((tx, ty));
+        }
 
-        // Calculate end position
-        var (endX, endY) = textState.TextMatrix.Transform(textWidth, textHeight);
-        var (transformedEndX, transformedEndY) = graphicsState.TransformationMatrix.Transform(endX, endY);
-
-        // Create bounding box
-        var minX = Math.Min(transformedX, transformedEndX);
-        var maxX = Math.Max(transformedX, transformedEndX);
-        var minY = Math.Min(transformedY, transformedEndY);
-        var maxY = Math.Max(transformedY, transformedEndY);
+        // Find bounding box of all transformed corners
+        var minX = transformedCorners.Min(c => c.x);
+        var maxX = transformedCorners.Max(c => c.x);
+        var minY = transformedCorners.Min(c => c.y);
+        var maxY = transformedCorners.Max(c => c.y);
 
         // Convert from PDF coordinates (bottom-left) to Avalonia coordinates (top-left)
         var avaloniaY = pageHeight - maxY;
@@ -64,9 +75,9 @@ public class TextBoundsCalculator
 
         _logger.LogTrace(
             "Bounds calculated: ({X:F2},{Y:F2},{W:F2}x{H:F2}), " +
-            "TextMatrix=({TmX:F2},{TmY:F2}), Width={Width:F2}, Height={Height:F2}",
+            "TextMatrix=(E={TmE:F2},F={TmF:F2}), Width={Width:F2}, Height={Height:F2}",
             rect.X, rect.Y, rect.Width, rect.Height,
-            x, y, textWidth, textHeight);
+            textState.TextMatrix.E, textState.TextMatrix.F, textWidth, textHeight);
 
         return rect;
     }

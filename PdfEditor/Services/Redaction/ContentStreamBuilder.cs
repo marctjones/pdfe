@@ -92,10 +92,17 @@ public class ContentStreamBuilder
             WriteOperand(writer, operand);
             writer.Write(" ");
         }
-        
+
         // Write operator
         writer.Write(op.OpCode.Name);
         writer.WriteLine();
+
+        // Debug: Log Tf operators to help diagnose font issues
+        if (op.OpCode.Name == "Tf")
+        {
+            var operandTypes = string.Join(", ", op.Operands.Select(o => $"{o.GetType().Name}={o}"));
+            _logger.LogDebug("Wrote Tf operator with operands: [{Operands}]", operandTypes);
+        }
     }
     
     /// <summary>
@@ -122,8 +129,14 @@ public class ContentStreamBuilder
                 break;
             
             case CName nameVal:
-                writer.Write("/");
-                writer.Write(nameVal.Name);
+                // CName.Name already includes the "/" prefix, so just write it directly
+                // But ToString() returns with "/" too, so check both
+                var name = nameVal.Name;
+                if (!name.StartsWith("/"))
+                {
+                    writer.Write("/");
+                }
+                writer.Write(name);
                 break;
             
             case CArray arrayVal:

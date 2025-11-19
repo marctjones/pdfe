@@ -4,6 +4,7 @@ using PdfEditor.Services;
 using PdfEditor.Tests.Utilities;
 using PdfSharp.Pdf.IO;
 using Avalonia;
+using System;
 using System.IO;
 using Xunit.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -24,8 +25,13 @@ public class RedactionIntegrationTests : IDisposable
     public RedactionIntegrationTests(ITestOutputHelper output)
     {
         _output = output;
-        var loggerFactory = NullLoggerFactory.Instance;
-        var logger = NullLogger<RedactionService>.Instance;
+        // Use real loggers to see what's happening
+        var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.AddProvider(new XUnitLoggerProvider(output));
+            builder.SetMinimumLevel(LogLevel.Debug);
+        });
+        var logger = loggerFactory.CreateLogger<RedactionService>();
         _redactionService = new RedactionService(logger, loggerFactory);
     }
 
@@ -54,10 +60,11 @@ public class RedactionIntegrationTests : IDisposable
 
         // Redact area where text is located
         // Text is at (100, 100), create redaction area around it
+        // Use renderDpi: 72 since XGraphics uses PDF coordinates (72 DPI)
         var redactionArea = new Rect(90, 90, 150, 30);
         _output.WriteLine($"Redacting area: X={redactionArea.X}, Y={redactionArea.Y}, W={redactionArea.Width}, H={redactionArea.Height}");
-        
-        _redactionService.RedactArea(page, redactionArea);
+
+        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("simple_text_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -106,8 +113,8 @@ public class RedactionIntegrationTests : IDisposable
         // Redact first text block only (CONFIDENTIAL at y=100)
         var redactionArea = new Rect(90, 90, 150, 30);
         _output.WriteLine($"Redacting area around 'CONFIDENTIAL': {redactionArea}");
-        
-        _redactionService.RedactArea(page, redactionArea);
+
+        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("multi_text_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -145,8 +152,8 @@ public class RedactionIntegrationTests : IDisposable
         // Redact area far from any content
         var redactionArea = new Rect(400, 400, 100, 50);
         _output.WriteLine($"Redacting empty area: {redactionArea}");
-        
-        _redactionService.RedactArea(page, redactionArea);
+
+        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("empty_area_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -181,12 +188,12 @@ public class RedactionIntegrationTests : IDisposable
         // Redact "CONFIDENTIAL" and "Secret Data"
         var area1 = new Rect(90, 90, 150, 30);   // CONFIDENTIAL at y=100
         var area2 = new Rect(90, 290, 150, 30);  // Secret Data at y=300
-        
+
         _output.WriteLine($"Redacting area 1: {area1}");
-        _redactionService.RedactArea(page, area1);
-        
+        _redactionService.RedactArea(page, area1, renderDpi: 72);
+
         _output.WriteLine($"Redacting area 2: {area2}");
-        _redactionService.RedactArea(page, area2);
+        _redactionService.RedactArea(page, area2, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("multiple_areas_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -224,7 +231,7 @@ public class RedactionIntegrationTests : IDisposable
 
         var redactionArea = new Rect(90, 190, 200, 30);
         _output.WriteLine("Redacting content on page 2...");
-        _redactionService.RedactArea(page, redactionArea);
+        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("structure_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -266,6 +273,60 @@ public class RedactionIntegrationTests : IDisposable
         foreach (var file in _tempFiles)
         {
             TestPdfGenerator.CleanupTestFile(file);
+        }
+    }
+}
+
+/// <summary>
+/// Logger provider that outputs to xUnit test output
+/// </summary>
+public class XUnitLoggerProvider : ILoggerProvider
+{
+    private readonly ITestOutputHelper _output;
+
+    public XUnitLoggerProvider(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        return new XUnitLogger(_output, categoryName);
+    }
+
+    public void Dispose() { }
+}
+
+/// <summary>
+/// Logger that writes to xUnit test output
+/// </summary>
+public class XUnitLogger : ILogger
+{
+    private readonly ITestOutputHelper _output;
+    private readonly string _categoryName;
+
+    public XUnitLogger(ITestOutputHelper output, string categoryName)
+    {
+        _output = output;
+        _categoryName = categoryName;
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (!IsEnabled(logLevel))
+            return;
+
+        try
+        {
+            _output.WriteLine($"[{logLevel}] {formatter(state, exception)}");
+        }
+        catch
+        {
+            // Ignore logging errors
         }
     }
 }
