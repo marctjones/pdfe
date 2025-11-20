@@ -79,10 +79,10 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
+        // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
         var options = new RedactionOptions { SanitizeMetadata = true };
-        var areas = new List<Rect> { new Rect(90, pageHeight - 100 - 20, 200, 20) };
+        var areas = new List<Rect> { new Rect(90, 90, 200, 20) };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
 
@@ -127,10 +127,10 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
+        // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
         var options = new RedactionOptions { SanitizeMetadata = true };
-        var areas = new List<Rect> { new Rect(90, pageHeight - 100 - 20, 200, 20) };
+        var areas = new List<Rect> { new Rect(90, 90, 200, 20) };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
 
@@ -173,10 +173,10 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
+        // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
         var options = new RedactionOptions { SanitizeMetadata = true };
-        var areas = new List<Rect> { new Rect(90, pageHeight - 100 - 20, 200, 20) };
+        var areas = new List<Rect> { new Rect(90, 90, 200, 20) };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
 
@@ -283,15 +283,14 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
         var options = new RedactionOptions { SanitizeMetadata = true };
 
-        // Redact company name and author name from content
+        // XGraphics uses top-left origin - text at Y=100 and Y=130
         var areas = new List<Rect>
         {
-            new Rect(90, pageHeight - 100 - 20, 250, 20),
-            new Rect(90, pageHeight - 130 - 20, 200, 20)
+            new Rect(90, 90, 250, 20),
+            new Rect(90, 120, 200, 20)
         };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
@@ -352,8 +351,8 @@ public class MetadataRedactionIntegrationTests : IDisposable
         for (int i = 0; i < doc.PageCount; i++)
         {
             var pg = doc.Pages[i];
-            var pageHeight = pg.Height.Point;
-            var areas = new List<Rect> { new Rect(90, pageHeight - 100 - 20, 250, 20) };
+            // XGraphics uses top-left origin - text at Y=100
+            var areas = new List<Rect> { new Rect(90, 90, 250, 20) };
             _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
         }
 
@@ -404,13 +403,13 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
         var options = new RedactionOptions { SanitizeMetadata = true };
+        // XGraphics uses top-left origin - text at Y=100 and Y=150
         var areas = new List<Rect>
         {
-            new Rect(90, pageHeight - 100 - 20, 150, 20),
-            new Rect(90, pageHeight - 150 - 20, 150, 20)
+            new Rect(90, 90, 150, 20),
+            new Rect(90, 140, 150, 20)
         };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
@@ -531,10 +530,10 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
         var options = new RedactionOptions { SanitizeMetadata = true };
-        var areas = new List<Rect> { new Rect(90, pageHeight - 100 - 20, 100, 20) };
+        // XGraphics uses top-left origin - text at Y=100
+        var areas = new List<Rect> { new Rect(90, 90, 100, 20) };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
 
@@ -579,10 +578,10 @@ public class MetadataRedactionIntegrationTests : IDisposable
         // Act - Use default options (SanitizeMetadata = false)
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
         var options = new RedactionOptions(); // Default: SanitizeMetadata = false
-        var areas = new List<Rect> { new Rect(90, pageHeight - 100 - 20, 150, 20) };
+        // XGraphics uses top-left origin - text at Y=100
+        var areas = new List<Rect> { new Rect(90, 90, 150, 20) };
 
         _redactionService.RedactWithOptions(doc, pg, areas, options, renderDpi: 72);
 

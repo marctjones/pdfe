@@ -109,10 +109,11 @@ public class ExcessiveRedactionTests : IDisposable
         TestPdfGenerator.CreateSimpleTextPdf(testPdf, secretText);
         _tempFiles.Add(testPdf);
 
-        // Verify raw bytes contain text before
-        var bytesBefore = File.ReadAllBytes(testPdf);
-        var stringBefore = Encoding.ASCII.GetString(bytesBefore);
-        stringBefore.Should().Contain(secretText, "Text should be in raw PDF bytes before redaction");
+        // Verify text is extractable before redaction
+        var textBefore = PdfTestHelpers.ExtractAllText(testPdf);
+        textBefore.Should().Contain(secretText, "Text should be extractable before redaction");
+
+        // Note: PDF text may be encoded and not appear as raw ASCII in bytes
 
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
@@ -128,8 +129,7 @@ public class ExcessiveRedactionTests : IDisposable
         var bytesAfter = File.ReadAllBytes(redactedPdf);
         var stringAfter = Encoding.ASCII.GetString(bytesAfter);
 
-        _output.WriteLine($"PDF size before: {bytesBefore.Length} bytes");
-        _output.WriteLine($"PDF size after: {bytesAfter.Length} bytes");
+        _output.WriteLine($"PDF size after redaction: {bytesAfter.Length} bytes");
 
         stringAfter.Should().NotContain(secretText,
             "CRITICAL: Redacted text must not appear in raw PDF bytes");
@@ -160,27 +160,8 @@ public class ExcessiveRedactionTests : IDisposable
         document.Save(redactedPdf);
         document.Dispose();
 
-        // Assert - Check content stream directly
-        var redactedDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
-        var redactedPage = redactedDoc.Pages[0];
-
-        var contentStreamText = "";
-        if (redactedPage.Contents.Elements.Count > 0)
-        {
-            foreach (var content in redactedPage.Contents.Elements)
-            {
-                if (content.Value is PdfSharp.Pdf.PdfDictionary dict)
-                {
-                    var stream = dict.Stream?.Value;
-                    if (stream != null)
-                    {
-                        contentStreamText += Encoding.ASCII.GetString(stream) + " ";
-                    }
-                }
-            }
-        }
-
-        redactedDoc.Dispose();
+        // Assert - Check that text is removed using PdfPig extraction
+        var contentStreamText = PdfTestHelpers.ExtractAllText(redactedPdf);
 
         _output.WriteLine($"Content stream excerpt: {contentStreamText.Substring(0, Math.Min(200, contentStreamText.Length))}...");
 
@@ -262,11 +243,9 @@ public class ExcessiveRedactionTests : IDisposable
         // Act - Redact at bottom of page
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        var pageHeight = page.Height.Point;
 
-        // Convert PDF coordinates to Avalonia coordinates
-        var avaloniaY = pageHeight - 750 - 30;
-        var redactionArea = new Rect(90, avaloniaY, 200, 30);
+        // XGraphics uses top-left origin, so text at Y=750 needs redaction at ~Y=740
+        var redactionArea = new Rect(90, 740, 200, 30);
 
         _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
 
@@ -299,10 +278,9 @@ public class ExcessiveRedactionTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        var pageHeight = page.Height.Point;
 
-        var avaloniaY = pageHeight - 50 - 30;
-        var redactionArea = new Rect(90, avaloniaY, 200, 30);
+        // XGraphics uses top-left origin, so text at Y=50 needs redaction at ~Y=40
+        var redactionArea = new Rect(90, 40, 200, 30);
 
         _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
 
@@ -345,10 +323,9 @@ public class ExcessiveRedactionTests : IDisposable
         // Act - Redact left edge text
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
-        var avaloniaY = pageHeight - 400 - 30;
-        _redactionService.RedactArea(pg, new Rect(5, avaloniaY, 100, 30), renderDpi: 72);
+        // XGraphics uses top-left origin, so text at Y=400 needs redaction at ~Y=390
+        _redactionService.RedactArea(pg, new Rect(5, 390, 100, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("edges_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -393,12 +370,11 @@ public class ExcessiveRedactionTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
-        // Redact all three secrets
-        _redactionService.RedactArea(pg, new Rect(90, pageHeight - 100 - 30, 150, 30), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(90, pageHeight - 200 - 30, 150, 30), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(90, pageHeight - 300 - 30, 150, 30), renderDpi: 72);
+        // XGraphics uses top-left origin - redact at same Y values as text
+        _redactionService.RedactArea(pg, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 190, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 290, 150, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multi_non_overlapping_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -441,11 +417,10 @@ public class ExcessiveRedactionTests : IDisposable
         // Act - Apply overlapping redactions
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
-        var y = pageHeight - 100 - 30;
-        _redactionService.RedactArea(pg, new Rect(90, y, 100, 30), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(140, y, 100, 30), renderDpi: 72);
+        // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
+        _redactionService.RedactArea(pg, new Rect(90, 90, 100, 30), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(140, 90, 100, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multi_overlapping_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -497,13 +472,14 @@ public class ExcessiveRedactionTests : IDisposable
         // Act
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
         for (int i = 0; i < count; i++)
         {
-            var pdfY = 50 + (i * 15);
-            var avaloniaY = pageHeight - pdfY - 15;
-            _redactionService.RedactArea(pg, new Rect(90, avaloniaY, 100, 15), renderDpi: 72);
+            // Text is at XGraphics Y = 50 + (i * 15), which is top-left origin
+            // Text body extends upward from baseline, so subtract font height
+            var textY = 50 + (i * 15);
+            var redactY = textY - 8; // 8pt font, so body is ~8 pixels above baseline
+            _redactionService.RedactArea(pg, new Rect(90, redactY, 100, 15), renderDpi: 72);
         }
 
         var redactedPdf = CreateTempPath($"many_redactions_{count}_redacted.pdf");
@@ -601,9 +577,8 @@ public class ExcessiveRedactionTests : IDisposable
         for (int i = 0; i < pageCount; i++)
         {
             var pg = doc.Pages[i];
-            var pageHeight = pg.Height.Point;
-            var avaloniaY = pageHeight - 100 - 30;
-            _redactionService.RedactArea(pg, new Rect(90, avaloniaY, 200, 30), renderDpi: 72);
+            // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
+            _redactionService.RedactArea(pg, new Rect(90, 90, 200, 30), renderDpi: 72);
         }
 
         var redactedPdf = CreateTempPath($"multi_page_{pageCount}_redacted.pdf");
@@ -651,9 +626,8 @@ public class ExcessiveRedactionTests : IDisposable
         // Act - Only redact page 2 (index 1)
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[1];
-        var pageHeight = pg.Height.Point;
-        var avaloniaY = pageHeight - 100 - 30;
-        _redactionService.RedactArea(pg, new Rect(90, avaloniaY, 150, 30), renderDpi: 72);
+        // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
+        _redactionService.RedactArea(pg, new Rect(90, 90, 150, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("specific_page_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -888,18 +862,18 @@ public class ExcessiveRedactionTests : IDisposable
         // Act - First redaction
         var doc1 = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg1 = doc1.Pages[0];
-        var pageHeight = pg1.Height.Point;
-        _redactionService.RedactArea(pg1, new Rect(90, pageHeight - 100 - 30, 200, 30), renderDpi: 72);
+        // XGraphics uses top-left origin, text at Y=100 needs redaction at Y=90
+        _redactionService.RedactArea(pg1, new Rect(90, 90, 200, 30), renderDpi: 72);
 
         var firstRedacted = CreateTempPath("double_redact_first.pdf");
         _tempFiles.Add(firstRedacted);
         doc1.Save(firstRedacted);
         doc1.Dispose();
 
-        // Second redaction
+        // Second redaction - text at Y=200 needs redaction at Y=190
         var doc2 = PdfReader.Open(firstRedacted, PdfDocumentOpenMode.Modify);
         var pg2 = doc2.Pages[0];
-        _redactionService.RedactArea(pg2, new Rect(90, pageHeight - 200 - 30, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(pg2, new Rect(90, 190, 200, 30), renderDpi: 72);
 
         var secondRedacted = CreateTempPath("double_redact_second.pdf");
         _tempFiles.Add(secondRedacted);

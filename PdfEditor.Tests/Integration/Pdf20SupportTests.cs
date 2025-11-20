@@ -358,17 +358,19 @@ public class Pdf20SupportTests : IDisposable
         var tempPath = outputPath + ".temp";
         TestPdfGenerator.CreateSimpleTextPdf(tempPath, text);
 
-        // Read the file and modify the header to 2.0
+        // Read the file as binary and modify the header to 2.0
         var content = File.ReadAllBytes(tempPath);
-        var contentString = Encoding.UTF8.GetString(content);
 
-        // Replace version in header
-        contentString = contentString.Replace("%PDF-1.4", "%PDF-2.0");
+        // Replace version in header (first few bytes)
+        // PDF header is typically %PDF-1.4 or %PDF-1.6
+        var header = Encoding.ASCII.GetString(content, 0, Math.Min(20, content.Length));
+        if (header.Contains("%PDF-1."))
+        {
+            content[5] = (byte)'2'; // Change 1.X to 2.X
+            content[7] = (byte)'0'; // Change to 2.0
+        }
 
-        // Also update the version in the catalog if present
-        contentString = contentString.Replace("/Version /1.4", "/Version /2.0");
-
-        File.WriteAllBytes(outputPath, Encoding.UTF8.GetBytes(contentString));
+        File.WriteAllBytes(outputPath, content);
         File.Delete(tempPath);
     }
 
@@ -392,10 +394,15 @@ public class Pdf20SupportTests : IDisposable
         document.Save(tempPath);
         document.Dispose();
 
-        // Convert to PDF 2.0
-        var content = File.ReadAllText(tempPath);
-        content = content.Replace("%PDF-1.4", "%PDF-2.0");
-        File.WriteAllText(outputPath, content);
+        // Convert to PDF 2.0 using binary operations
+        var content = File.ReadAllBytes(tempPath);
+        var header = Encoding.ASCII.GetString(content, 0, Math.Min(20, content.Length));
+        if (header.Contains("%PDF-1."))
+        {
+            content[5] = (byte)'2'; // Change 1.X to 2.X
+            content[7] = (byte)'0'; // Change to 2.0
+        }
+        File.WriteAllBytes(outputPath, content);
         File.Delete(tempPath);
     }
 

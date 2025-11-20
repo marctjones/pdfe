@@ -531,14 +531,22 @@ public class Pdf17SupportTests : IDisposable
         var tempPath = outputPath + ".temp";
         TestPdfGenerator.CreateSimpleTextPdf(tempPath, text);
 
-        // Read the file and modify the header to 1.7
+        // Read the file as binary and modify the header to 1.7
         var content = File.ReadAllBytes(tempPath);
-        var contentString = Encoding.UTF8.GetString(content);
 
-        // Replace version in header
-        contentString = contentString.Replace("%PDF-1.4", "%PDF-1.7");
+        // Replace version in header (first few bytes)
+        // Look for %PDF-1.4 or %PDF-1.6 and change to %PDF-1.7
+        var header = Encoding.ASCII.GetString(content, 0, Math.Min(20, content.Length));
+        if (header.Contains("%PDF-1.4"))
+        {
+            content[7] = (byte)'7'; // Change 1.4 to 1.7
+        }
+        else if (header.Contains("%PDF-1.6"))
+        {
+            content[7] = (byte)'7'; // Change 1.6 to 1.7
+        }
 
-        File.WriteAllBytes(outputPath, Encoding.UTF8.GetBytes(contentString));
+        File.WriteAllBytes(outputPath, content);
         File.Delete(tempPath);
     }
 
@@ -562,10 +570,14 @@ public class Pdf17SupportTests : IDisposable
         document.Save(tempPath);
         document.Dispose();
 
-        // Convert to PDF 1.7
-        var content = File.ReadAllText(tempPath);
-        content = content.Replace("%PDF-1.4", "%PDF-1.7");
-        File.WriteAllText(outputPath, content);
+        // Convert to PDF 1.7 using binary operations
+        var content = File.ReadAllBytes(tempPath);
+        var header = Encoding.ASCII.GetString(content, 0, Math.Min(20, content.Length));
+        if (header.Contains("%PDF-1.4") || header.Contains("%PDF-1.6"))
+        {
+            content[7] = (byte)'7'; // Change version to 1.7
+        }
+        File.WriteAllBytes(outputPath, content);
         File.Delete(tempPath);
     }
 
@@ -589,10 +601,14 @@ public class Pdf17SupportTests : IDisposable
         document.Save(tempPath);
         document.Dispose();
 
-        // Convert to PDF 1.7
-        var content = File.ReadAllText(tempPath);
-        content = content.Replace("%PDF-1.4", "%PDF-1.7");
-        File.WriteAllText(outputPath, content);
+        // Convert to PDF 1.7 using binary operations
+        var content = File.ReadAllBytes(tempPath);
+        var header = Encoding.ASCII.GetString(content, 0, Math.Min(20, content.Length));
+        if (header.Contains("%PDF-1.4") || header.Contains("%PDF-1.6"))
+        {
+            content[7] = (byte)'7'; // Change version to 1.7
+        }
+        File.WriteAllBytes(outputPath, content);
         File.Delete(tempPath);
     }
 
@@ -623,10 +639,14 @@ public class Pdf17SupportTests : IDisposable
         document.Save(tempPath);
         document.Dispose();
 
-        // Convert to PDF 1.7
-        var content = File.ReadAllText(tempPath);
-        content = content.Replace("%PDF-1.4", "%PDF-1.7");
-        File.WriteAllText(outputPath, content);
+        // Convert to PDF 1.7 using binary operations
+        var content = File.ReadAllBytes(tempPath);
+        var header = Encoding.ASCII.GetString(content, 0, Math.Min(20, content.Length));
+        if (header.Contains("%PDF-1.4") || header.Contains("%PDF-1.6"))
+        {
+            content[7] = (byte)'7'; // Change version to 1.7
+        }
+        File.WriteAllBytes(outputPath, content);
         File.Delete(tempPath);
     }
 

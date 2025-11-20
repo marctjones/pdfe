@@ -63,16 +63,18 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act - Sanitize with specific terms
+        // Act - Reload and sanitize with specific terms
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);
-        sanitizer.SanitizeDocument(document, new[] { "Confidential", "Secret" });
+        sanitizer.SanitizeDocument(doc, new[] { "Confidential", "Secret" });
 
         var sanitizedPath = CreateTempPath("metadata_title_sanitized.pdf");
-        document.Save(sanitizedPath);
+        doc.Save(sanitizedPath);
         _tempFiles.Add(sanitizedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
@@ -110,16 +112,18 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act
+        // Act - Reload and sanitize
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);
-        sanitizer.SanitizeDocument(document, new[] { "Secret" });
+        sanitizer.SanitizeDocument(doc, new[] { "Secret" });
 
         var sanitizedPath = CreateTempPath("metadata_all_fields_sanitized.pdf");
-        document.Save(sanitizedPath);
+        doc.Save(sanitizedPath);
         _tempFiles.Add(sanitizedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
@@ -157,16 +161,18 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act
+        // Act - Reload and sanitize
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);
-        sanitizer.SanitizeDocument(document, new[] { "secret" });
+        sanitizer.SanitizeDocument(doc, new[] { "secret" });
 
         var sanitizedPath = CreateTempPath("metadata_case_sanitized.pdf");
-        document.Save(sanitizedPath);
+        doc.Save(sanitizedPath);
         _tempFiles.Add(sanitizedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
@@ -205,16 +211,18 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act
+        // Act - Reload and remove all metadata
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);
-        sanitizer.RemoveAllMetadata(document);
+        sanitizer.RemoveAllMetadata(doc);
 
         var sanitizedPath = CreateTempPath("metadata_remove_all_result.pdf");
-        document.Save(sanitizedPath);
+        doc.Save(sanitizedPath);
         _tempFiles.Add(sanitizedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
@@ -228,7 +236,7 @@ public class MetadataSanitizationTests : IDisposable
         sanitizedDoc.Info.Author.Should().BeEmpty();
         sanitizedDoc.Info.Subject.Should().BeEmpty();
         sanitizedDoc.Info.Keywords.Should().BeEmpty();
-        sanitizedDoc.Info.Producer.Should().Be("pdfe");
+        // Producer is read-only in PdfSharpCore, set automatically by the library
 
         _output.WriteLine("✅ TEST PASSED: All metadata removed");
     }
@@ -256,18 +264,21 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act - Redact the text and sanitize metadata
+        // Act - Reload the document and redact the text with sanitize metadata
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var pg = doc.Pages[0];
         var redactArea = new Rect(90, 90, 150, 30);
         var options = new RedactionOptions { SanitizeMetadata = true };
 
-        _redactionService.RedactWithOptions(document, page, new[] { redactArea }, options, renderDpi: 72);
+        _redactionService.RedactWithOptions(doc, pg, new[] { redactArea }, options, renderDpi: 72);
 
         var redactedPath = CreateTempPath("redact_with_sanitize_result.pdf");
-        document.Save(redactedPath);
+        doc.Save(redactedPath);
         _tempFiles.Add(redactedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         // Check text is removed from content
@@ -305,18 +316,21 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act - Redact with RemoveAllMetadata option
+        // Act - Reload and redact with RemoveAllMetadata option
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var pg = doc.Pages[0];
         var redactArea = new Rect(90, 90, 100, 30);
         var options = new RedactionOptions { RemoveAllMetadata = true };
 
-        _redactionService.RedactWithOptions(document, page, new[] { redactArea }, options, renderDpi: 72);
+        _redactionService.RedactWithOptions(doc, pg, new[] { redactArea }, options, renderDpi: 72);
 
         var redactedPath = CreateTempPath("redact_remove_all_metadata_result.pdf");
-        document.Save(redactedPath);
+        doc.Save(redactedPath);
         _tempFiles.Add(redactedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         using var redactedDoc = PdfReader.Open(redactedPath, PdfDocumentOpenMode.ReadOnly);
@@ -345,11 +359,14 @@ public class MetadataSanitizationTests : IDisposable
         }
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act - Clear and redact
+        // Act - Reload, clear and redact
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var pg = doc.Pages[0];
         _redactionService.ClearRedactedTerms();
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 90, 150, 30), renderDpi: 72);
 
         // Assert
         _output.WriteLine($"Redacted terms count: {_redactionService.RedactedTerms.Count}");
@@ -360,7 +377,7 @@ public class MetadataSanitizationTests : IDisposable
 
         _redactionService.RedactedTerms.Should().NotBeEmpty();
 
-        document.Dispose();
+        doc.Dispose();
         _output.WriteLine("✅ TEST PASSED: Redacted terms tracked correctly");
     }
 
@@ -389,16 +406,18 @@ public class MetadataSanitizationTests : IDisposable
         outline.Outlines.Add("Secret Section", page, true);
 
         document.Save(pdfPath);
+        document.Dispose();
         _tempFiles.Add(pdfPath);
 
-        // Act
+        // Act - Reload and sanitize
+        var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);
-        sanitizer.SanitizeDocument(document, new[] { "Secret" });
+        sanitizer.SanitizeDocument(doc, new[] { "Secret" });
 
         var sanitizedPath = CreateTempPath("metadata_outline_sanitized.pdf");
-        document.Save(sanitizedPath);
+        doc.Save(sanitizedPath);
         _tempFiles.Add(sanitizedPath);
-        document.Dispose();
+        doc.Dispose();
 
         // Assert
         using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);

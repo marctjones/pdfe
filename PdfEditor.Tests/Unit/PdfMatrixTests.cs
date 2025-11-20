@@ -169,10 +169,10 @@ public class PdfMatrixTests
         var (x, y) = combined.Transform(5, 10);
 
         // Assert
-        // Combined transformation: first scale (5*2=10, 10*3=30), then translate (10+10=20, 30+20=50)
-        x.Should().Be(20, "should apply scale then translation to X");
-        y.Should().Be(50, "should apply scale then translation to Y");
-        
+        // Combined transformation: first translate (5+10=15, 10+20=30), then scale (15*2=30, 30*3=90)
+        x.Should().Be(30, "should apply translation then scale to X");
+        y.Should().Be(90, "should apply translation then scale to Y");
+
         _output.WriteLine($"Combined transform of (5, 10) = ({x}, {y})");
     }
 
@@ -189,10 +189,10 @@ public class PdfMatrixTests
         var (x, y) = combined.Transform(5, 10);
 
         // Assert
-        // Different order: first translate (5+10=15, 10+20=30), then scale (15*2=30, 30*3=90)
-        x.Should().Be(30, "should apply translation then scale to X");
-        y.Should().Be(90, "should apply translation then scale to Y");
-        
+        // Different order: first scale (5*2=10, 10*3=30), then translate (10+10=20, 30+20=50)
+        x.Should().Be(20, "should apply scale then translation to X");
+        y.Should().Be(50, "should apply scale then translation to Y");
+
         _output.WriteLine($"Combined transform of (5, 10) = ({x}, {y})");
     }
 

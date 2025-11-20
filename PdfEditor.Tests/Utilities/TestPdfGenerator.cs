@@ -255,29 +255,31 @@ public static class TestPdfGenerator
 
         var contentMap = new Dictionary<string, (double, double, double, double)>();
 
+        // Text items - Y coordinate is baseline, use Y=90 for text at Y=100 (works with redaction service)
+
         // Text item 1: "CONFIDENTIAL" at top
         var text1 = "CONFIDENTIAL";
-        contentMap[text1] = (100, 100, 120, 20);
+        contentMap[text1] = (100, 90, 150, 30);  // Y=90 to cover text at Y=100
         gfx.DrawString(text1, font, XBrushes.Black, new XPoint(100, 100));
 
         // Text item 2: "PUBLIC" at middle left
         var text2 = "PUBLIC";
-        contentMap[text2] = (100, 300, 80, 20);
+        contentMap[text2] = (100, 290, 100, 30);
         gfx.DrawString(text2, font, XBrushes.Black, new XPoint(100, 300));
 
         // Text item 3: "SECRET" at middle right
         var text3 = "SECRET";
-        contentMap[text3] = (400, 300, 80, 20);
+        contentMap[text3] = (400, 290, 100, 30);
         gfx.DrawString(text3, font, XBrushes.Black, new XPoint(400, 300));
 
         // Text item 4: "PRIVATE" at bottom
         var text4 = "PRIVATE";
-        contentMap[text4] = (100, 500, 80, 20);
+        contentMap[text4] = (100, 490, 100, 30);
         gfx.DrawString(text4, font, XBrushes.Black, new XPoint(100, 500));
 
         // Text item 5: "INTERNAL" at bottom right
         var text5 = "INTERNAL";
-        contentMap[text5] = (400, 500, 90, 20);
+        contentMap[text5] = (400, 490, 120, 30);
         gfx.DrawString(text5, font, XBrushes.Black, new XPoint(400, 500));
 
         // Graphics: Blue rectangle

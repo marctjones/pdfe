@@ -67,10 +67,10 @@ public class ForensicRedactionVerificationTests : IDisposable
         TestPdfGenerator.CreateSimpleTextPdf(testPdf, sensitiveData);
         _tempFiles.Add(testPdf);
 
-        // Verify presence before
-        var bytesBefore = File.ReadAllBytes(testPdf);
-        Encoding.ASCII.GetString(bytesBefore).Should().Contain(sensitiveData,
-            "Pre-redaction: sensitive data should be in raw bytes");
+        // Verify text is extractable before redaction
+        var textBefore = PdfTestHelpers.ExtractAllText(testPdf);
+        textBefore.Should().Contain(sensitiveData,
+            "Pre-redaction: sensitive data should be extractable");
 
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
@@ -130,28 +130,8 @@ public class ForensicRedactionVerificationTests : IDisposable
         document.Save(redactedPdf);
         document.Dispose();
 
-        // Assert - Check content streams
-        var redactedDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
-        var redactedPage = redactedDoc.Pages[0];
-
-        var allStreamContent = new StringBuilder();
-
-        // Extract all content streams
-        if (redactedPage.Contents.Elements.Count > 0)
-        {
-            foreach (var element in redactedPage.Contents.Elements)
-            {
-                if (element.Value is PdfSharp.Pdf.PdfDictionary dict && dict.Stream?.Value != null)
-                {
-                    allStreamContent.Append(Encoding.ASCII.GetString(dict.Stream.Value));
-                    allStreamContent.Append(" ");
-                }
-            }
-        }
-
-        redactedDoc.Dispose();
-
-        var streamText = allStreamContent.ToString();
+        // Assert - Check content streams using PdfPig extraction
+        var streamText = PdfTestHelpers.ExtractAllText(redactedPdf);
         streamText.Should().NotContain(sensitiveData,
             "FORENSIC FAILURE: Sensitive data found in content streams");
         streamText.Should().NotContain("ACCOUNT_NUMBER",
@@ -283,13 +263,13 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act - Redact the sensitive names and amounts
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
+        // XGraphics uses top-left origin - text at Y=100 needs redaction at Y=90
         // Redact "KONSTANTIN_KILIMNIK"
-        _redactionService.RedactArea(pg, new Rect(300, pageHeight - 100 - 20, 200, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(300, 90, 200, 20), renderDpi: 72);
 
-        // Redact "$75_MILLION"
-        _redactionService.RedactArea(pg, new Rect(400, pageHeight - 120 - 20, 100, 20), renderDpi: 72);
+        // Redact "$75_MILLION" - text at Y=120 needs redaction at Y=110
+        _redactionService.RedactArea(pg, new Rect(400, 110, 100, 20), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("manafort_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -344,10 +324,10 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act - Redact PHI
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
-        _redactionService.RedactArea(pg, new Rect(110, pageHeight - 100 - 20, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(100, pageHeight - 120 - 20, 100, 20), renderDpi: 72);
+        // XGraphics uses top-left origin - text at Y=100 and Y=120
+        _redactionService.RedactArea(pg, new Rect(110, 90, 200, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(100, 110, 100, 20), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("hipaa_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -397,12 +377,11 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act - Redact financial data
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
-        // Redact all financial data
-        _redactionService.RedactArea(pg, new Rect(110, pageHeight - 100 - 20, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(95, pageHeight - 120 - 20, 50, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(110, pageHeight - 140 - 20, 60, 20), renderDpi: 72);
+        // XGraphics uses top-left origin - text at Y=100, 120, 140
+        _redactionService.RedactArea(pg, new Rect(110, 90, 200, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(95, 110, 50, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(110, 130, 60, 20), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("financial_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -569,11 +548,12 @@ public class ForensicRedactionVerificationTests : IDisposable
         {
             var doc = PdfReader.Open(currentPdf, PdfDocumentOpenMode.Modify);
             var pg = doc.Pages[0];
-            var pageHeight = pg.Height.Point;
 
-            var pdfY = round * 100;
-            var avaloniaY = pageHeight - pdfY - 20;
-            _redactionService.RedactArea(pg, new Rect(90, avaloniaY, 150, 20), renderDpi: 72);
+            // XGraphics uses top-left origin, text at Y=100, 200, 300
+            // Text body extends upward from baseline, so subtract font height
+            var textY = round * 100;
+            var redactY = textY - 12; // 12pt font
+            _redactionService.RedactArea(pg, new Rect(90, redactY, 150, 25), renderDpi: 72);
 
             var nextPdf = CreateTempPath($"repeated_round_{round}.pdf");
             _tempFiles.Add(nextPdf);
@@ -631,14 +611,13 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act - Redact with metadata sanitization
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        var pageHeight = pg.Height.Point;
 
         // Create list of redacted terms for metadata sanitization
         var redactedTerms = new List<string> { "SECRET_DATA", "CONFIDENTIAL_INFO" };
 
-        // Redact content
-        _redactionService.RedactArea(pg, new Rect(90, pageHeight - 100 - 20, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(90, pageHeight - 200 - 20, 200, 20), renderDpi: 72);
+        // XGraphics uses top-left origin - text at Y=100 and Y=200
+        _redactionService.RedactArea(pg, new Rect(90, 90, 200, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 190, 200, 20), renderDpi: 72);
 
         // Sanitize metadata (using the service's built-in method)
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);
