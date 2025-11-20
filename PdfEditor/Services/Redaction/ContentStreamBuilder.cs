@@ -33,14 +33,15 @@ public class ContentStreamBuilder
         var textOps = operations.OfType<TextOperation>().Count();
         var pathOps = operations.OfType<PathOperation>().Count();
         var imageOps = operations.OfType<ImageOperation>().Count();
+        var inlineImgOps = operations.OfType<InlineImageOperation>().Count();
         var stateOps = operations.OfType<StateOperation>().Count();
         var textStateOps = operations.OfType<TextStateOperation>().Count();
         var genericOps = operations.OfType<GenericOperation>().Count();
 
         _logger.LogDebug(
-            "Operation breakdown: Text={Text}, Path={Path}, Image={Image}, " +
+            "Operation breakdown: Text={Text}, Path={Path}, Image={Image}, InlineImage={InlineImage}, " +
             "State={State}, TextState={TextState}, Generic={Generic}",
-            textOps, pathOps, imageOps, stateOps, textStateOps, genericOps);
+            textOps, pathOps, imageOps, inlineImgOps, stateOps, textStateOps, genericOps);
 
         using var memoryStream = new MemoryStream();
         using var writer = new StreamWriter(memoryStream, Encoding.ASCII);
@@ -66,6 +67,21 @@ public class ContentStreamBuilder
     /// </summary>
     private void WriteOperation(StreamWriter writer, PdfOperation operation)
     {
+        // Handle inline images specially - they have raw bytes
+        if (operation is InlineImageOperation inlineImg)
+        {
+            // Flush the StreamWriter to ensure proper byte positioning
+            writer.Flush();
+            var baseStream = writer.BaseStream;
+
+            // Write the raw inline image data (BI...ID...EI)
+            baseStream.Write(inlineImg.RawData, 0, inlineImg.RawData.Length);
+            baseStream.WriteByte((byte)'\n');  // Add newline after inline image
+
+            _logger.LogDebug("Wrote inline image operation: {Length} bytes", inlineImg.RawData.Length);
+            return;
+        }
+
         // Get the original CObject and serialize it
         if (operation.OriginalObject is COperator op)
         {
