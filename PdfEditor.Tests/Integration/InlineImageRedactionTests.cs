@@ -270,10 +270,9 @@ public class InlineImageRedactionTests : IDisposable
 
         using (var gfx = XGraphics.FromPdfPage(page))
         {
-            // Draw a small image - XGraphics may or may not create inline images
-            // depending on size and settings
-            var bitmap = new XBitmap(10, 10);
-            gfx.DrawImage(bitmap, 100, 100);
+            // Draw some content - we'll rely on raw content stream tests for inline images
+            // since XBitmap doesn't exist in PdfSharpCore
+            gfx.DrawRectangle(XBrushes.Red, 100, 100, 10, 10);
         }
 
         document.Save(path);

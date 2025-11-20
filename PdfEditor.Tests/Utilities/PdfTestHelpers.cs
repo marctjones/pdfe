@@ -198,13 +198,75 @@ public static class PdfTestHelpers
         }
 
         var page = document.Pages[pageIndex];
-        var contentStream = page.Contents.Elements.FirstOrDefault();
+        var contentElement = page.Contents.Elements.FirstOrDefault();
 
-        if (contentStream is PdfSharp.Pdf.PdfDictionary dict && dict.Stream != null)
+        // Handle both direct dictionary and reference cases
+        PdfSharp.Pdf.PdfDictionary? dict = null;
+
+        if (contentElement is PdfSharp.Pdf.PdfDictionary directDict)
+        {
+            dict = directDict;
+        }
+        else if (contentElement is PdfSharp.Pdf.Advanced.PdfReference reference)
+        {
+            dict = reference.Value as PdfSharp.Pdf.PdfDictionary;
+        }
+
+        if (dict?.Stream != null)
         {
             return dict.Stream.Value;
         }
 
         return Array.Empty<byte>();
+    }
+
+    /// <summary>
+    /// Check if PDF rendering is available (PDFium native libraries)
+    /// </summary>
+    private static bool? _renderingAvailable;
+    public static bool IsRenderingAvailable()
+    {
+        if (_renderingAvailable.HasValue)
+            return _renderingAvailable.Value;
+
+        try
+        {
+            // Create a minimal test PDF
+            var tempPath = Path.Combine(Path.GetTempPath(), $"render_test_{Guid.NewGuid()}.pdf");
+            TestPdfGenerator.CreateSimpleTextPdf(tempPath, "Test");
+
+            try
+            {
+                using var fileStream = File.OpenRead(tempPath);
+                using var memoryStream = new MemoryStream();
+                fileStream.CopyTo(memoryStream);
+                memoryStream.Position = 0;
+
+                var options = new PDFtoImage.RenderOptions(Dpi: 72);
+                using var bitmap = PDFtoImage.Conversion.ToImage(memoryStream, page: 0, options: options);
+
+                _renderingAvailable = bitmap != null;
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
+            }
+        }
+        catch
+        {
+            _renderingAvailable = false;
+        }
+
+        return _renderingAvailable.Value;
+    }
+
+    /// <summary>
+    /// Get a message explaining why rendering might not be available
+    /// </summary>
+    public static string GetRenderingUnavailableMessage()
+    {
+        return "PDF rendering is not available. PDFium native libraries may not be installed. " +
+               "On Linux, try: apt-get install libgdiplus";
     }
 }

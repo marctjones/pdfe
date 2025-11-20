@@ -57,6 +57,10 @@
               "target": "Package",
               "version": "[17.8.0, )"
             },
+            "Moq": {
+              "target": "Package",
+              "version": "[4.20.72, )"
+            },
             "PdfPig": {
               "target": "Package",
               "version": "[0.1.11, )"

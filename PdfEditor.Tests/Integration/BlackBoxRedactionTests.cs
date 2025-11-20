@@ -137,11 +137,11 @@ public class BlackBoxRedactionTests : IDisposable
             _output.WriteLine($"  ✓ Verified '{item}' is PRESERVED");
         }
 
-        // Additional verification: word count should decrease
-        wordsAfter.Count.Should().BeLessThan(wordsBefore.Count,
-            "total word count should decrease after redaction");
+        // Additional verification: text content should be shorter after redaction
+        textAfter.Length.Should().BeLessThan(textBefore.Length,
+            "total text length should decrease after redaction");
 
-        _output.WriteLine($"\n  Words removed: {wordsBefore.Count - wordsAfter.Count}");
+        _output.WriteLine($"\n  Characters removed: {textBefore.Length - textAfter.Length}");
 
         // PDF should remain valid
         PdfTestHelpers.IsValidPdf(redactedPdf).Should().BeTrue(

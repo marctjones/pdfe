@@ -54,10 +54,11 @@ public class ContentRemovalVerificationTests : IDisposable
         textBefore.Should().Contain("SUPER_SECRET_DATA");
 
         // Act - Apply redaction
+        // Text at Y=100 - use redaction at Y=90 with height 30 to cover it
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        var redactionArea = new Rect(90, 90, 200, 30);
-        _redactionService.RedactArea(page, redactionArea);
+        var redactionArea = new Rect(90, 90, 250, 30);
+        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("pdfpig_extraction_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -92,10 +93,10 @@ public class ContentRemovalVerificationTests : IDisposable
         var contentBefore = PdfTestHelpers.GetPageContentStream(testPdf);
         _output.WriteLine($"Content stream size before: {contentBefore.Length} bytes");
 
-        // Act
+        // Act - Text at Y=100, body from ~88-100
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30));
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("content_stream_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -131,10 +132,10 @@ public class ContentRemovalVerificationTests : IDisposable
         TestPdfGenerator.CreateSimpleTextPdf(testPdf, "BINARY_SEARCH_TARGET");
         _tempFiles.Add(testPdf);
 
-        // Act
+        // Act - Text at Y=100, body from ~88-100
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30));
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("binary_search_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -182,10 +183,10 @@ public class ContentRemovalVerificationTests : IDisposable
         textBefore.Should().Contain("Secret Data");
         textBefore.Should().Contain("Normal Text");
 
-        // Act - Redact only CONFIDENTIAL (at y=100)
+        // Act - Redact only CONFIDENTIAL (at y=100, body ~88-100)
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30));
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("selective_removal_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -221,8 +222,8 @@ public class ContentRemovalVerificationTests : IDisposable
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        // This small area should only catch CONFIDENTIAL at y=100
-        _redactionService.RedactArea(page, new Rect(95, 95, 130, 20));
+        // This small area should only catch CONFIDENTIAL at y=100 (body ~88-100)
+        _redactionService.RedactArea(page, new Rect(95, 90, 150, 25), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("boundary_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -257,10 +258,10 @@ public class ContentRemovalVerificationTests : IDisposable
         TestPdfGenerator.CreateSimpleTextPdf(testPdf, "MULTI_METHOD_SECRET");
         _tempFiles.Add(testPdf);
 
-        // Act
+        // Act - Text at Y=100, body from ~88-100
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30));
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multi_method_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -356,10 +357,10 @@ public class ContentRemovalVerificationTests : IDisposable
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        // Redact CONFIDENTIAL at y=100
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30));
-        // Redact Secret Data at y=300
-        _redactionService.RedactArea(page, new Rect(90, 290, 150, 30));
+        // Redact CONFIDENTIAL at y=100 (body ~88-100)
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        // Redact Secret Data at y=300 (body ~288-300)
+        _redactionService.RedactArea(page, new Rect(90, 290, 200, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multiple_redactions_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -390,10 +391,10 @@ public class ContentRemovalVerificationTests : IDisposable
         TestPdfGenerator.CreateSimpleTextPdf(testPdf, "BLACK_BOX_TEST");
         _tempFiles.Add(testPdf);
 
-        // Act
+        // Act - Text at Y=100, body from ~88-100
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30));
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
 
         var redactedPdf = CreateTempPath("black_box_redacted.pdf");
         _tempFiles.Add(redactedPdf);

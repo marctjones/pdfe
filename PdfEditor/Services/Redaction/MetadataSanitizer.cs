@@ -142,17 +142,8 @@ public class MetadataSanitizer
             }
         }
 
-        // Producer
-        if (!string.IsNullOrEmpty(info.Producer))
-        {
-            var newProducer = RedactTerms(info.Producer, terms);
-            if (newProducer != info.Producer)
-            {
-                info.Producer = newProducer;
-                sanitized++;
-                _logger.LogDebug("Sanitized document Producer");
-            }
-        }
+        // Producer is read-only in PdfSharpCore, cannot be modified
+        // It is automatically set by the library when saving
 
         if (sanitized > 0)
         {
@@ -495,7 +486,7 @@ public class MetadataSanitizer
             document.Info.Subject = string.Empty;
             document.Info.Keywords = string.Empty;
             document.Info.Creator = string.Empty;
-            document.Info.Producer = "pdfe";
+            // Producer is read-only in PdfSharpCore, set automatically by library
 
             // Remove XMP metadata
             var catalog = document.Internals.Catalog;
