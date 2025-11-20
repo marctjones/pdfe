@@ -12,6 +12,27 @@ using System.Linq;
 namespace PdfEditor.Services;
 
 /// <summary>
+/// Options for redaction operations
+/// </summary>
+public class RedactionOptions
+{
+    /// <summary>
+    /// Whether to sanitize metadata after redaction (remove redacted terms from document info, outlines, etc.)
+    /// </summary>
+    public bool SanitizeMetadata { get; set; } = false;
+
+    /// <summary>
+    /// Whether to remove all metadata for maximum security
+    /// </summary>
+    public bool RemoveAllMetadata { get; set; } = false;
+
+    /// <summary>
+    /// Color for the redaction overlay (default: black)
+    /// </summary>
+    public XColor FillColor { get; set; } = XColor.FromArgb(255, 0, 0, 0);
+}
+
+/// <summary>
 /// Service for redacting content from PDF pages
 /// Implements TRUE content-level redaction by parsing and filtering PDF content streams
 /// Uses PdfSharpCore (MIT License) for low-level PDF manipulation
@@ -40,7 +61,14 @@ public class RedactionService
     private readonly ILogger<RedactionService> _logger;
     private readonly ContentStreamParser _parser;
     private readonly ContentStreamBuilder _builder;
+    private readonly MetadataSanitizer _metadataSanitizer;
     private readonly ILoggerFactory _loggerFactory;
+
+    /// <summary>
+    /// List of text strings that have been redacted in the current session.
+    /// Used for metadata sanitization.
+    /// </summary>
+    private readonly List<string> _redactedTerms = new();
 
     public RedactionService(ILogger<RedactionService> logger, ILoggerFactory loggerFactory)
     {
@@ -50,8 +78,23 @@ public class RedactionService
         // Create parsers with logger instances
         _parser = new ContentStreamParser(_loggerFactory.CreateLogger<ContentStreamParser>(), _loggerFactory);
         _builder = new ContentStreamBuilder(_loggerFactory.CreateLogger<ContentStreamBuilder>());
+        _metadataSanitizer = new MetadataSanitizer(_loggerFactory.CreateLogger<MetadataSanitizer>());
 
         _logger.LogDebug("RedactionService instance created with logger-enabled components");
+    }
+
+    /// <summary>
+    /// Get the list of text strings that have been redacted
+    /// </summary>
+    public IReadOnlyList<string> RedactedTerms => _redactedTerms.AsReadOnly();
+
+    /// <summary>
+    /// Clear the list of redacted terms
+    /// </summary>
+    public void ClearRedactedTerms()
+    {
+        _redactedTerms.Clear();
+        _logger.LogDebug("Cleared redacted terms list");
     }
 
     /// <summary>
@@ -171,6 +214,17 @@ public class RedactionService
             _logger.LogInformation("Parsed content stream in {ElapsedMs}ms. Found {OperationCount} operations",
                 sw.ElapsedMilliseconds, operations.Count);
 
+            // Step 1b: Parse inline images (BI...ID...EI sequences)
+            var pageHeight = page.Height.Point;
+            var currentGraphicsState = new PdfGraphicsState();
+            var inlineImages = _parser.ParseInlineImages(page, pageHeight, currentGraphicsState);
+
+            if (inlineImages.Count > 0)
+            {
+                _logger.LogInformation("Found {Count} inline images to check for redaction", inlineImages.Count);
+                operations.AddRange(inlineImages);
+            }
+
             // Step 2: Filter out operations that intersect with the redaction area
             _logger.LogInformation("Filtering operations against redaction area: ({X:F2},{Y:F2},{W:F2}x{H:F2})",
                 area.X, area.Y, area.Width, area.Height);
@@ -203,6 +257,12 @@ public class RedactionService
                             textOp.BoundingBox.X, textOp.BoundingBox.Y,
                             textOp.BoundingBox.Width, textOp.BoundingBox.Height,
                             textOp.FontName, textOp.FontSize);
+
+                        // Track redacted text for metadata sanitization
+                        if (!string.IsNullOrWhiteSpace(textOp.Text))
+                        {
+                            _redactedTerms.Add(textOp.Text);
+                        }
                     }
                     else if (operation is PathOperation pathOp)
                     {
@@ -219,6 +279,14 @@ public class RedactionService
                             imgOp.ResourceName,
                             imgOp.BoundingBox.X, imgOp.BoundingBox.Y,
                             imgOp.BoundingBox.Width, imgOp.BoundingBox.Height);
+                    }
+                    else if (operation is InlineImageOperation inlineImgOp)
+                    {
+                        _logger.LogInformation(
+                            "REMOVING Inline Image: {Width}x{Height} at ({X:F2},{Y:F2},{W:F2}x{H:F2})",
+                            inlineImgOp.ImageWidth, inlineImgOp.ImageHeight,
+                            inlineImgOp.BoundingBox.X, inlineImgOp.BoundingBox.Y,
+                            inlineImgOp.BoundingBox.Width, inlineImgOp.BoundingBox.Height);
                     }
                     else
                     {
@@ -418,5 +486,77 @@ public class RedactionService
         {
             RedactArea(page, area, renderDpi);
         }
+    }
+
+    /// <summary>
+    /// Sanitize document metadata by removing redacted terms from all metadata locations.
+    /// Call this after all redaction operations are complete.
+    /// </summary>
+    /// <param name="document">The PDF document to sanitize</param>
+    public void SanitizeDocumentMetadata(PdfDocument document)
+    {
+        if (_redactedTerms.Count == 0)
+        {
+            _logger.LogInformation("No redacted terms to sanitize from metadata");
+            return;
+        }
+
+        _logger.LogInformation("Sanitizing document metadata for {Count} redacted terms", _redactedTerms.Count);
+        _metadataSanitizer.SanitizeDocument(document, _redactedTerms);
+    }
+
+    /// <summary>
+    /// Sanitize document metadata using a custom list of terms.
+    /// </summary>
+    /// <param name="document">The PDF document to sanitize</param>
+    /// <param name="terms">List of terms to redact from metadata</param>
+    public void SanitizeDocumentMetadata(PdfDocument document, IEnumerable<string> terms)
+    {
+        _logger.LogInformation("Sanitizing document metadata for custom term list");
+        _metadataSanitizer.SanitizeDocument(document, terms);
+    }
+
+    /// <summary>
+    /// Remove all metadata from document for maximum security.
+    /// This removes document info, XMP metadata, etc.
+    /// </summary>
+    /// <param name="document">The PDF document to sanitize</param>
+    public void RemoveAllMetadata(PdfDocument document)
+    {
+        _logger.LogInformation("Removing all metadata from document");
+        _metadataSanitizer.RemoveAllMetadata(document);
+    }
+
+    /// <summary>
+    /// Complete redaction workflow: redact areas and optionally sanitize metadata.
+    /// </summary>
+    /// <param name="document">The PDF document</param>
+    /// <param name="page">The page to redact</param>
+    /// <param name="areas">Areas to redact</param>
+    /// <param name="options">Redaction options</param>
+    /// <param name="renderDpi">The DPI at which the page was rendered</param>
+    public void RedactWithOptions(PdfDocument document, PdfPage page, IEnumerable<Rect> areas,
+                                   RedactionOptions options, int renderDpi = 150)
+    {
+        // Clear previous redacted terms for this operation
+        ClearRedactedTerms();
+
+        // Perform redaction
+        foreach (var area in areas)
+        {
+            RedactArea(page, area, renderDpi);
+        }
+
+        // Sanitize metadata if requested
+        if (options.RemoveAllMetadata)
+        {
+            RemoveAllMetadata(document);
+        }
+        else if (options.SanitizeMetadata)
+        {
+            SanitizeDocumentMetadata(document);
+        }
+
+        _logger.LogInformation("Redaction with options complete. Redacted {Count} text items", _redactedTerms.Count);
     }
 }
