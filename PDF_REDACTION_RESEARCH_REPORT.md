@@ -25,6 +25,7 @@ This report presents comprehensive research showing that redaction is not just a
 6. [Testing Strategy](#6-testing-strategy)
 7. [Implementation Plan](#7-implementation-plan)
 8. [Conclusion](#8-conclusion)
+9. [TOP PRIORITY FEATURES - After Redaction Works](#9-top-priority-features---after-redaction-works)
 
 ---
 
@@ -991,6 +992,94 @@ With bulletproof redaction, this becomes:
 - An **enterprise solution** worth premium pricing
 
 **Redaction is not a feature. It's THE feature that makes this project commercially viable.**
+
+---
+
+## 9. TOP PRIORITY FEATURES - After Redaction Works
+
+Once core redaction is bulletproof (verified by extensive tests), these are the **TOP 3 PRIORITY FEATURES** to implement next:
+
+### Priority 1: Search & Redact
+
+**What it is:** Find all instances of a pattern (text, SSN, email, phone) across a document and redact them at once.
+
+**Why it's critical:**
+- Most time-consuming task for lawyers: manually finding and redacting each occurrence
+- Pattern matching (regex) for SSNs like `\d{3}-\d{2}-\d{4}` is essential
+- Adobe charges $240/year largely because of this feature
+- GDPR/HIPAA compliance requires finding ALL instances of PII
+
+**Implementation complexity:** MEDIUM
+- Already have text extraction via PdfPig
+- Need to map extracted text positions back to content stream
+- Add regex/glob pattern matching UI
+- Track all matches for batch redaction
+
+**User value:** HIGH - This is what lawyers do 100+ times per document
+
+### Priority 2: Batch Processing
+
+**What it is:** Apply the same redaction operations across multiple PDF documents automatically.
+
+**Why it's critical:**
+- Legal discovery involves hundreds/thousands of documents
+- Agencies process massive FOIA request volumes
+- Manual redaction doesn't scale
+- Enterprise customers won't buy without it
+
+**Implementation complexity:** MEDIUM-HIGH
+- Need file queue management
+- Progress tracking and error handling
+- Consistent results across documents
+- Memory management for large batches
+
+**User value:** HIGH - Transforms from single-document to enterprise tool
+
+### Priority 3: Bates Numbering
+
+**What it is:** Sequential page numbering across document sets (e.g., "DOE001-DOE999").
+
+**Why it's critical:**
+- MANDATORY for legal document production
+- Court rules require unique page identification
+- No legal firm will use a tool without it
+- Often combined with redaction workflow
+
+**Implementation complexity:** LOW-MEDIUM
+- Add text at consistent page position
+- Support prefix/suffix customization
+- Maintain sequence across documents
+- Handle existing page numbers
+
+**User value:** HIGH for legal market - it's table stakes for legal professionals
+
+---
+
+### Feature Comparison with Commercial Products
+
+| Feature | Adobe Pro ($240/yr) | Foxit ($179/yr) | **Our Target** |
+|---------|---------------------|-----------------|----------------|
+| True Redaction | Yes | Yes | **Priority 0 (Current)** |
+| Metadata Sanitization | Yes | Yes | **Done** |
+| Search & Redact | Yes | Yes | **Priority 1** |
+| Batch Processing | Yes | Yes | **Priority 2** |
+| Bates Numbering | Yes | Yes | **Priority 3** |
+| AI PII Detection | Yes | Yes | Future |
+| Price | $240/year | $179/year | **Free/OSS** |
+
+### Implementation Order Rationale
+
+1. **Redaction MUST work first** - One failure destroys all credibility
+2. **Search & Redact** - Highest daily-use value, moderate complexity
+3. **Batch Processing** - Enterprise requirement, builds on #2
+4. **Bates Numbering** - Low complexity, high value for legal market
+
+### Success Metrics
+
+- **Redaction:** 100% text removal verified by multiple extraction tools
+- **Search & Redact:** <1 second to find all matches in 100-page document
+- **Batch Processing:** Process 100 documents in <5 minutes
+- **Bates Numbering:** Correct sequential numbering with zero gaps
 
 ---
 
