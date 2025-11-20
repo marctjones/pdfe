@@ -719,7 +719,7 @@ foreach (var knownFailure in RegressionDatabase)
 
 ## 7. Implementation Plan
 
-### Phase 1: Core Content Removal (Current - Completed ✓)
+### Phase 1: Core Content Removal (Current - In Progress)
 
 **Completed Features:**
 - ✓ Basic content stream parsing
@@ -728,45 +728,71 @@ foreach (var knownFailure in RegressionDatabase)
 - ✓ Coordinate transformation
 - ✓ Visual verification (black rectangles)
 - ✓ Integration tests
+- ✓ Inline image parsing (BI...ID...EI)
+- ✓ Extensive test suite (70+ tests)
+- ✓ External tool validation tests
 
-**Quality Metrics Achieved:**
-- 5 passing integration tests
-- Text removal verified with PdfPig
-- Coordinate conversion working
+**External Tool Validation (NEW):**
 
-### Phase 2: Metadata Sanitization (Week 1-2)
+The redaction must be validated by multiple industry-standard tools to ensure TRUE content removal:
+
+```bash
+# Install validation tools
+sudo apt-get install poppler-utils qpdf mupdf-tools
+
+# Validation commands
+pdftotext redacted.pdf -                    # Text extraction
+qpdf --qdf --object-streams=disable in out  # Content stream dump
+strings redacted.pdf                        # Binary string search
+mutool draw -F txt redacted.pdf            # MuPDF extraction
+```
+
+**Test Files Created:**
+- `ExcessiveRedactionTests.cs` - 35+ core tests
+- `ForensicRedactionVerificationTests.cs` - 20+ security tests
+- `MetadataRedactionIntegrationTests.cs` - 15+ metadata tests
+- `ExternalToolRedactionValidationTests.cs` - External tool validation
+
+**Quality Metrics Target:**
+- 100% text removal verified by pdftotext
+- 100% removal from raw content streams (qpdf)
+- 100% removal from binary (strings)
+- Zero false negatives across all tools
+
+### Phase 2: Metadata Sanitization (Completed ✓)
 
 **Objective:** Remove all hidden information sources
 
-**Implementation Tasks:**
-1. **XMP Metadata Removal**
-   ```csharp
-   public void RemoveXMPMetadata(PdfDocument doc)
-   {
-       doc.Info.Elements.Clear();
-       // Remove XMP stream from catalog
-   }
-   ```
+**Completed Implementation:**
+- ✓ MetadataSanitizer service created
+- ✓ Document info sanitization (Title, Author, Subject, Keywords)
+- ✓ XMP metadata removal
+- ✓ Outline/bookmark sanitization
+- ✓ Annotation sanitization
+- ✓ Form field sanitization
+- ✓ Integration with RedactionService via RedactionOptions
+- ✓ 12+ metadata sanitization tests
 
-2. **Incremental Save Prevention**
-   ```csharp
-   public void SaveFullRewrite(PdfDocument doc)
-   {
-       // Force complete rewrite, no incremental
-       doc.Save(path, PdfDocumentSaveMode.Rewrite);
-   }
-   ```
+**Key APIs:**
+```csharp
+// Sanitize metadata containing redacted terms
+var sanitizer = new MetadataSanitizer(logger);
+sanitizer.SanitizeDocument(document, redactedTerms);
 
-3. **Hidden Content Removal**
-   - JavaScript streams
-   - Optional content groups
-   - Embedded files
-   - Annotations
+// Or use integrated workflow
+var options = new RedactionOptions { SanitizeMetadata = true };
+redactionService.RedactWithOptions(doc, page, areas, options);
+```
 
-**Deliverables:**
-- MetadataSanitizer service
-- 10+ new security tests
-- Zero metadata leakage
+**Files Created:**
+- `Services/Redaction/MetadataSanitizer.cs` - Main service
+- `MetadataSanitizationTests.cs` - Unit tests
+- `MetadataRedactionIntegrationTests.cs` - Integration tests
+
+**Deliverables Achieved:**
+- ✓ MetadataSanitizer service
+- ✓ 27+ metadata-related tests
+- ✓ Zero metadata leakage (verified)
 
 ### Phase 3: Advanced Features (Week 3-4)
 
