@@ -68,8 +68,27 @@ public class TextBoundsCalculator
         var minY = transformedCorners.Min(c => c.y);
         var maxY = transformedCorners.Max(c => c.y);
 
-        // Convert from PDF coordinates (bottom-left) to Avalonia coordinates (top-left)
-        var avaloniaY = pageHeight - maxY;
+        // Check if the CTM has a Y-flip (negative D value means Y is already flipped)
+        // When D < 0, the coordinate system is already top-down (like Avalonia)
+        // so we should NOT apply the pageHeight - Y conversion
+        var ctm = graphicsState.TransformationMatrix;
+        var isYFlipped = ctm.D < 0;
+
+        double avaloniaY;
+        if (isYFlipped)
+        {
+            // CTM already flipped Y, coordinates are in top-down system
+            // minY is at top, maxY is at bottom in this case
+            avaloniaY = minY;
+            _logger.LogTrace("CTM has Y-flip (D={D:F2}), using minY={MinY:F2} directly", ctm.D, minY);
+        }
+        else
+        {
+            // Standard PDF coordinates (bottom-up), need to convert
+            avaloniaY = pageHeight - maxY;
+            _logger.LogTrace("Standard PDF coords, converting: pageHeight({PageHeight:F2}) - maxY({MaxY:F2}) = {AvaloniaY:F2}",
+                pageHeight, maxY, avaloniaY);
+        }
 
         var rect = new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
 

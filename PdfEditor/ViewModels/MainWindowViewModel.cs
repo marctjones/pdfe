@@ -32,6 +32,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private Rect _currentTextSelectionArea;
     private string _selectedText = string.Empty;
     private ObservableCollection<string> _recentFiles = new();
+    private double _viewportWidth = 800;
+    private double _viewportHeight = 600;
+    private ObservableCollection<Rect> _currentPageSearchHighlights = new();
 
     public MainWindowViewModel(
         ILogger<MainWindowViewModel> logger,
@@ -61,6 +64,11 @@ public partial class MainWindowViewModel : ViewModelBase
         AddPagesCommand = ReactiveCommand.CreateFromTask(AddPagesAsync);
         ToggleRedactionModeCommand = ReactiveCommand.Create(ToggleRedactionMode);
         ApplyRedactionCommand = ReactiveCommand.CreateFromTask(ApplyRedactionAsync);
+
+        // Subscribe to ThrownExceptions to prevent command from getting stuck
+        ApplyRedactionCommand.ThrownExceptions.Subscribe(ex =>
+            _logger.LogError(ex, "ApplyRedactionCommand threw exception"));
+
         ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
         CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
         ZoomInCommand = ReactiveCommand.Create(ZoomIn);
@@ -139,7 +147,11 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool IsRedactionMode
     {
         get => _isRedactionMode;
-        set => this.RaiseAndSetIfChanged(ref _isRedactionMode, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isRedactionMode, value);
+            this.RaisePropertyChanged(nameof(CurrentModeText));
+        }
     }
 
     public Rect CurrentRedactionArea
@@ -157,6 +169,7 @@ public partial class MainWindowViewModel : ViewModelBase
             // Turn off redaction mode when entering text selection mode
             if (value && _isRedactionMode)
                 IsRedactionMode = false;
+            this.RaisePropertyChanged(nameof(CurrentModeText));
         }
     }
 
@@ -183,6 +196,37 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     public bool HasRecentFiles => RecentFiles.Count > 0;
+
+    // Viewport dimensions (set by View for accurate zoom calculations)
+    public double ViewportWidth
+    {
+        get => _viewportWidth;
+        set => this.RaiseAndSetIfChanged(ref _viewportWidth, value);
+    }
+
+    public double ViewportHeight
+    {
+        get => _viewportHeight;
+        set => this.RaiseAndSetIfChanged(ref _viewportHeight, value);
+    }
+
+    // Search highlight rectangles for current page (in screen coordinates)
+    public ObservableCollection<Rect> CurrentPageSearchHighlights
+    {
+        get => _currentPageSearchHighlights;
+        set => this.RaiseAndSetIfChanged(ref _currentPageSearchHighlights, value);
+    }
+
+    // Mode indicator for status bar
+    public string CurrentModeText
+    {
+        get
+        {
+            if (IsRedactionMode) return "🔴 Redaction Mode";
+            if (IsTextSelectionMode) return "📝 Text Selection Mode";
+            return "👆 View Mode";
+        }
+    }
 
     // Commands
     public ReactiveCommand<Unit, Unit> OpenFileCommand { get; }
@@ -456,44 +500,82 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task ApplyRedactionAsync()
     {
+        _logger.LogInformation(">>> ApplyRedactionAsync START. IsRedactionMode={Mode}, Area=({X:F2},{Y:F2},{W:F2}x{H:F2})",
+            IsRedactionMode, CurrentRedactionArea.X, CurrentRedactionArea.Y, CurrentRedactionArea.Width, CurrentRedactionArea.Height);
+
         if (!IsRedactionMode || CurrentRedactionArea.Width <= 0 || CurrentRedactionArea.Height <= 0)
+        {
+            _logger.LogWarning("ApplyRedactionAsync returning early: IsRedactionMode={Mode}, Width={W}, Height={H}",
+                IsRedactionMode, CurrentRedactionArea.Width, CurrentRedactionArea.Height);
             return;
+        }
+
+        // Capture the area before we clear it
+        var areaToRedact = CurrentRedactionArea;
 
         try
         {
             var document = _documentService.GetCurrentDocument();
             if (document == null)
-                return;
-
-            var page = document.Pages[CurrentPageIndex];
-            _redactionService.RedactArea(page, CurrentRedactionArea);
-
-            // NOTE: Redaction is applied to the in-memory document only
-            // User must click Save to persist changes to disk
-            _logger.LogInformation("Redaction applied to in-memory document (not saved to disk yet)");
-
-            // Render the page from the in-memory document to show the redaction
-            using var docStream = _documentService.GetCurrentDocumentAsStream();
-            if (docStream != null)
             {
-                var bitmap = await _renderService.RenderPageFromStreamAsync(docStream, CurrentPageIndex);
-                if (bitmap != null)
-                {
-                    CurrentPageImage = bitmap;
-                }
+                _logger.LogWarning("ApplyRedactionAsync: document is null");
+                return;
             }
 
-            // Clear the selection
-            CurrentRedactionArea = new Rect();
+            _logger.LogInformation("Applying redaction (selection area: {X:F2},{Y:F2},{W:F2}x{H:F2})",
+                areaToRedact.X, areaToRedact.Y, areaToRedact.Width, areaToRedact.Height);
 
-            // Exit redaction mode after applying
-            IsRedactionMode = false;
+            var page = document.Pages[CurrentPageIndex];
+            _redactionService.RedactArea(page, areaToRedact);
 
-            _logger.LogInformation("Redaction complete - use Save button to persist changes to disk");
+            _logger.LogInformation("Redaction applied to in-memory document, now re-rendering page...");
+
+            // Render the page from the in-memory document to show the redaction
+            // Copy stream to memory to avoid disposal issues
+            var docStream = _documentService.GetCurrentDocumentAsStream();
+            if (docStream != null)
+            {
+                try
+                {
+                    // Copy to MemoryStream to avoid stream disposal issues
+                    var memoryStream = new System.IO.MemoryStream();
+                    await docStream.CopyToAsync(memoryStream);
+                    memoryStream.Position = 0;
+                    docStream.Dispose();
+
+                    var bitmap = await _renderService.RenderPageFromStreamAsync(memoryStream, CurrentPageIndex);
+                    if (bitmap != null)
+                    {
+                        CurrentPageImage = bitmap;
+                        _logger.LogInformation("Page re-rendered successfully after redaction");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("RenderPageFromStreamAsync returned null");
+                    }
+                }
+                catch (Exception renderEx)
+                {
+                    _logger.LogError(renderEx, "Error rendering page after redaction");
+                }
+            }
+            else
+            {
+                _logger.LogWarning("GetCurrentDocumentAsStream returned null");
+            }
+
+            _logger.LogInformation("Redaction complete - draw another selection or click 'Redact Mode' to exit.");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error applying redaction");
+        }
+        finally
+        {
+            // Always clear the selection so user can draw another one
+            // Stay in redaction mode to allow multiple redactions
+            CurrentRedactionArea = new Rect();
+            _logger.LogInformation("<<< ApplyRedactionAsync END. Selection cleared, ready for next redaction.");
         }
     }
 
@@ -519,18 +601,60 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ZoomFitWidth()
     {
         _logger.LogInformation("Setting zoom to fit width");
-        // In a production app, this would calculate based on page width and viewport width
-        // For now, use a reasonable default that typically fits width well
-        ZoomLevel = 1.3;
+
+        if (_currentPageImage == null || ViewportWidth <= 0)
+        {
+            // Fallback to default if no image loaded
+            ZoomLevel = 1.0;
+            this.RaisePropertyChanged(nameof(StatusText));
+            return;
+        }
+
+        // Calculate zoom to fit page width in viewport (with small margin)
+        var pageWidth = _currentPageImage.Size.Width;
+        var margin = 40; // Leave some margin on sides
+        var targetWidth = ViewportWidth - margin;
+
+        if (pageWidth > 0)
+        {
+            ZoomLevel = Math.Max(0.25, Math.Min(5.0, targetWidth / pageWidth));
+            _logger.LogDebug("Fit width: viewport={Viewport}, page={Page}, zoom={Zoom:P0}",
+                ViewportWidth, pageWidth, ZoomLevel);
+        }
+
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
     private void ZoomFitPage()
     {
         _logger.LogInformation("Setting zoom to fit page");
-        // In a production app, this would calculate based on page dimensions and viewport dimensions
-        // For now, use a reasonable default that typically fits the page
-        ZoomLevel = 0.9;
+
+        if (_currentPageImage == null || ViewportWidth <= 0 || ViewportHeight <= 0)
+        {
+            // Fallback to default if no image loaded
+            ZoomLevel = 1.0;
+            this.RaisePropertyChanged(nameof(StatusText));
+            return;
+        }
+
+        // Calculate zoom to fit entire page in viewport (with margins)
+        var pageWidth = _currentPageImage.Size.Width;
+        var pageHeight = _currentPageImage.Size.Height;
+        var marginH = 40;
+        var marginV = 40;
+        var targetWidth = ViewportWidth - marginH;
+        var targetHeight = ViewportHeight - marginV;
+
+        if (pageWidth > 0 && pageHeight > 0)
+        {
+            // Use the smaller ratio to fit both dimensions
+            var zoomW = targetWidth / pageWidth;
+            var zoomH = targetHeight / pageHeight;
+            ZoomLevel = Math.Max(0.25, Math.Min(5.0, Math.Min(zoomW, zoomH)));
+            _logger.LogDebug("Fit page: viewport=({VW}x{VH}), page=({PW}x{PH}), zoom={Zoom:P0}",
+                ViewportWidth, ViewportHeight, pageWidth, pageHeight, ZoomLevel);
+        }
+
         this.RaisePropertyChanged(nameof(StatusText));
     }
 

@@ -164,69 +164,59 @@ public class BatchDocumentProcessor
                 return result;
             }
 
-            // Open document
+            var searchService = new TextSearchService(
+                _loggerFactory.CreateLogger<TextSearchService>());
+
+            // First pass: Search for all matches using PdfPig directly on the file
+            // This avoids the issue of marking the PdfSharp document as "saved"
+            var allMatches = new List<TextMatch>();
+            var piiTypesFound = new HashSet<PIIType>();
+
+            // Search for PII
+            if (rules.PIITypesToRedact.Count > 0)
+            {
+                foreach (var piiType in rules.PIITypesToRedact)
+                {
+                    var matches = searchService.FindPIIInFile(filePath, piiType);
+                    if (matches.Count > 0)
+                    {
+                        allMatches.AddRange(matches);
+                        piiTypesFound.Add(piiType);
+                    }
+                }
+            }
+
+            // Search for text patterns
+            foreach (var pattern in rules.TextPatternsToRedact)
+            {
+                var matches = searchService.FindTextInFile(filePath, pattern, new SearchOptions { UseRegex = false });
+                allMatches.AddRange(matches);
+            }
+
+            // Search for regex patterns
+            foreach (var pattern in rules.RegexPatternsToRedact)
+            {
+                var matches = searchService.FindTextInFile(filePath, pattern, new SearchOptions { UseRegex = true });
+                allMatches.AddRange(matches);
+            }
+
+            // Second pass: Open document and redact all found matches
             using var document = PdfReader.Open(filePath, PdfDocumentOpenMode.Modify);
 
             var batchRedactService = new BatchRedactService(
                 _loggerFactory.CreateLogger<BatchRedactService>(),
                 _loggerFactory);
 
-            int totalRedactions = 0;
-            var piiTypesFound = new HashSet<PIIType>();
-
-            // Apply PII redaction rules
-            if (rules.PIITypesToRedact.Count > 0)
-            {
-                var piiResult = batchRedactService.RedactAllPII(
-                    document,
-                    rules.PIITypesToRedact.ToArray(),
-                    rules.Options);
-
-                totalRedactions += piiResult.RedactedCount;
-
-                // Track which types were found
-                var searchService = new TextSearchService(
-                    _loggerFactory.CreateLogger<TextSearchService>());
-                foreach (var piiType in rules.PIITypesToRedact)
-                {
-                    var matches = searchService.FindPII(document, piiType);
-                    if (matches.Count > 0)
-                        piiTypesFound.Add(piiType);
-                }
-            }
-
-            // Apply text pattern redaction rules
-            foreach (var pattern in rules.TextPatternsToRedact)
-            {
-                var searchResult = batchRedactService.SearchAndRedact(
-                    document,
-                    pattern,
-                    new SearchOptions { UseRegex = false },
-                    rules.Options);
-
-                totalRedactions += searchResult.RedactedCount;
-            }
-
-            // Apply regex pattern redaction rules
-            foreach (var pattern in rules.RegexPatternsToRedact)
-            {
-                var searchResult = batchRedactService.SearchAndRedact(
-                    document,
-                    pattern,
-                    new SearchOptions { UseRegex = true },
-                    rules.Options);
-
-                totalRedactions += searchResult.RedactedCount;
-            }
+            var redactionResult = batchRedactService.RedactMatches(document, allMatches, rules.Options);
 
             // Save the document
             document.Save(result.OutputPath);
 
             result.Success = true;
-            result.RedactionCount = totalRedactions;
+            result.RedactionCount = redactionResult.RedactedCount;
             result.PIITypesFound = piiTypesFound.ToList();
 
-            _logger.LogDebug("Processed {File}: {Count} redactions", result.FileName, totalRedactions);
+            _logger.LogDebug("Processed {File}: {Count} redactions", result.FileName, redactionResult.RedactedCount);
         }
         catch (Exception ex)
         {

@@ -56,12 +56,21 @@ public class BatesNumberingService
         var result = new BatesResult();
         var files = filePaths.ToList();
         var currentNumber = options.StartNumber;
+        var processedFiles = new HashSet<string>(); // Track processed files to avoid duplicates
 
         _logger.LogInformation("Applying Bates numbers to {Count} documents starting at {Start}",
             files.Count, options.StartNumber);
 
         foreach (var filePath in files)
         {
+            // Skip if already processed (defensive check)
+            if (processedFiles.Contains(filePath))
+            {
+                _logger.LogWarning("Skipping duplicate file: {File}", filePath);
+                continue;
+            }
+            processedFiles.Add(filePath);
+
             try
             {
                 var docResult = new BatesDocumentResult
@@ -71,28 +80,34 @@ public class BatesNumberingService
                     FirstBatesNumber = FormatBatesNumber(currentNumber, options)
                 };
 
-                using var document = PdfReader.Open(filePath, PdfDocumentOpenMode.Modify);
+                int pageCount;
+                var outputPath = GenerateOutputPath(filePath, options.OutputDirectory, options.OutputSuffix);
 
-                for (int i = 0; i < document.PageCount; i++)
+                // Use explicit using block for proper disposal
+                using (var document = PdfReader.Open(filePath, PdfDocumentOpenMode.Modify))
                 {
-                    var page = document.Pages[i];
-                    var batesNumber = FormatBatesNumber(currentNumber, options);
+                    pageCount = document.PageCount;
 
-                    ApplyBatesNumberToPage(page, batesNumber, options);
-                    currentNumber++;
+                    for (int i = 0; i < pageCount; i++)
+                    {
+                        var page = document.Pages[i];
+                        var batesNumber = FormatBatesNumber(currentNumber, options);
+
+                        ApplyBatesNumberToPage(page, batesNumber, options);
+                        currentNumber++;
+                    }
+
+                    // Save the document before disposal
+                    document.Save(outputPath);
                 }
 
                 docResult.LastBatesNumber = FormatBatesNumber(currentNumber - 1, options);
-                docResult.PageCount = document.PageCount;
+                docResult.PageCount = pageCount;
                 docResult.Success = true;
-
-                // Save the document
-                var outputPath = GenerateOutputPath(filePath, options.OutputDirectory, options.OutputSuffix);
-                document.Save(outputPath);
                 docResult.OutputPath = outputPath;
 
                 result.Documents.Add(docResult);
-                result.TotalPages += document.PageCount;
+                result.TotalPages += pageCount;
             }
             catch (Exception ex)
             {

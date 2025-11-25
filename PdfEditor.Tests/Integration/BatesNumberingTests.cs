@@ -66,29 +66,30 @@ public class BatesNumberingTests : IDisposable
         var pdfPath = CreateTempFile();
         TestPdfGenerator.CreateMultiPagePdf(pdfPath, 5);
 
-        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
-
-        var service = new BatesNumberingService(_loggerFactory.CreateLogger<BatesNumberingService>());
-
-        var options = new BatesOptions
-        {
-            Prefix = "DOE",
-            StartNumber = 1,
-            NumberOfDigits = 4
-        };
-
-        // Act
-        service.ApplyBatesNumbers(document, options);
         var outputPath = CreateTempFile();
-        document.Save(outputPath);
 
-        // Assert
-        // Verify the document was modified
-        document.PageCount.Should().Be(5);
+        using (var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify))
+        {
+            var service = new BatesNumberingService(_loggerFactory.CreateLogger<BatesNumberingService>());
 
-        // Reload and check text
-        using var reloaded = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
-        var text = PdfTestHelpers.ExtractAllText(reloaded);
+            var options = new BatesOptions
+            {
+                Prefix = "DOE",
+                StartNumber = 1,
+                NumberOfDigits = 4
+            };
+
+            // Act
+            service.ApplyBatesNumbers(document, options);
+
+            // Verify the document was modified (before saving)
+            document.PageCount.Should().Be(5);
+
+            document.Save(outputPath);
+        }
+
+        // Assert - Reload and check text
+        var text = PdfTestHelpers.ExtractAllText(outputPath);
 
         // Should contain Bates numbers
         text.Should().Contain("DOE0001");
@@ -120,8 +121,7 @@ public class BatesNumberingTests : IDisposable
         document.Save(outputPath);
 
         // Assert
-        using var reloaded = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
-        var text = PdfTestHelpers.ExtractAllText(reloaded);
+        var text = PdfTestHelpers.ExtractAllText(outputPath);
 
         text.Should().Contain("SMITH-000100-CONF");
     }

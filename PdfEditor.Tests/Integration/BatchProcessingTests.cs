@@ -93,6 +93,14 @@ public class BatchProcessingTests : IDisposable
 
         // Assert
         result.TotalFiles.Should().Be(1);
+
+        // Show error if failed
+        if (result.FileResults.Any(r => !r.Success))
+        {
+            var errors = string.Join("; ", result.FileResults.Where(r => !r.Success).Select(r => r.ErrorMessage));
+            throw new Exception($"Processing failed with error: {errors}");
+        }
+
         result.SuccessfulFiles.Should().Be(1);
         result.FailedFiles.Should().Be(0);
     }

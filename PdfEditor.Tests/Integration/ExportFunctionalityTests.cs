@@ -7,6 +7,11 @@ using Xunit;
 
 namespace PdfEditor.Tests.Integration;
 
+/// <summary>
+/// Tests for PDF export functionality.
+/// Uses PdfRenderingTests collection to avoid parallel execution issues with PDFium.
+/// </summary>
+[Collection("PdfRenderingTests")]
 public class ExportFunctionalityTests : IDisposable
 {
     private readonly PdfDocumentService _documentService;
@@ -41,6 +46,7 @@ public class ExportFunctionalityTests : IDisposable
 
         // Act
         var exported = 0;
+        var savedFiles = new List<string>();
         for (int i = 0; i < _documentService.PageCount; i++)
         {
             var bitmap = await _renderService.RenderPageAsync(_testPdfPath, i, 150);
@@ -49,6 +55,7 @@ public class ExportFunctionalityTests : IDisposable
                 var fileName = $"page_{i + 1:D3}.png";
                 var filePath = Path.Combine(exportDir, fileName);
                 bitmap.Save(filePath);
+                savedFiles.Add(filePath);
                 exported++;
             }
         }
@@ -57,6 +64,12 @@ public class ExportFunctionalityTests : IDisposable
         if (exported == 0)
         {
             return;
+        }
+
+        // Verify files were actually written
+        foreach (var file in savedFiles)
+        {
+            File.Exists(file).Should().BeTrue($"File {file} should exist after save");
         }
 
         // Assert
@@ -145,6 +158,7 @@ public class ExportFunctionalityTests : IDisposable
 
         // Act
         var exported = 0;
+        var savedFiles = new List<string>();
         for (int i = 0; i < _documentService.PageCount; i++)
         {
             var bitmap = await _renderService.RenderPageAsync(multiPagePdf, i, 150);
@@ -153,6 +167,7 @@ public class ExportFunctionalityTests : IDisposable
                 var fileName = $"page_{i + 1:D3}.png";
                 var filePath = Path.Combine(exportDir, fileName);
                 bitmap.Save(filePath);
+                savedFiles.Add(filePath);
                 exported++;
             }
         }
@@ -161,6 +176,12 @@ public class ExportFunctionalityTests : IDisposable
         if (exported == 0)
         {
             return;
+        }
+
+        // Verify each file was actually written
+        foreach (var file in savedFiles)
+        {
+            File.Exists(file).Should().BeTrue($"File {file} should exist after save");
         }
 
         // Assert

@@ -307,9 +307,13 @@ public class ExternalToolRedactionValidationTests : IDisposable
         TestPdfGenerator.CreateSimpleTextPdf(testPdf, secretText);
         _tempFiles.Add(testPdf);
 
-        // Verify text exists before
+        // Verify text exists before using PdfPig (more reliable than strings for PDFs)
+        var textBefore = PdfTestHelpers.ExtractAllText(testPdf);
+        textBefore.Should().Contain(secretText, "Text should exist in PDF before redaction");
+
+        // Also check strings output (may or may not find it depending on encoding)
         var stringsBefore = RunStrings(testPdf);
-        stringsBefore.Should().Contain(secretText, "Text should be found by strings before redaction");
+        _output.WriteLine($"strings before contains secret: {stringsBefore.Contains(secretText)}");
 
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
@@ -321,10 +325,15 @@ public class ExternalToolRedactionValidationTests : IDisposable
         document.Save(redactedPdf);
         document.Dispose();
 
-        // Assert
+        // Assert - Text should be gone from both extraction methods
         var stringsAfter = RunStrings(redactedPdf);
         stringsAfter.Should().NotContain(secretText,
             "CRITICAL FAILURE: strings command found redacted text!");
+
+        // Double-check with PdfPig
+        var textAfter = PdfTestHelpers.ExtractAllText(redactedPdf);
+        textAfter.Should().NotContain(secretText,
+            "CRITICAL FAILURE: PdfPig can still extract redacted text!");
 
         _output.WriteLine("PASS: strings command cannot find redacted text");
     }
@@ -658,6 +667,27 @@ public class ExternalToolRedactionValidationTests : IDisposable
     {
         try
         {
+            // First check if the tool exists in PATH
+            var whichProcess = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "which",
+                    Arguments = tool,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            whichProcess.Start();
+            var whichOutput = whichProcess.StandardOutput.ReadToEnd();
+            whichProcess.WaitForExit(5000);
+
+            if (whichProcess.ExitCode != 0 || string.IsNullOrWhiteSpace(whichOutput))
+                return false;
+
+            // Tool exists, try to run it
             var result = RunCommand(tool, versionArg, timeoutMs: 5000, ignoreErrors: true);
             return true;
         }

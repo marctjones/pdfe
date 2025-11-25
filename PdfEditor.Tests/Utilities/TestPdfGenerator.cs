@@ -24,7 +24,11 @@ public static class TestPdfGenerator
         if (_fontResolverInitialized)
             return;
 
-        GlobalFontSettings.FontResolver = new TestFontResolver();
+        // Only set if not already set by another test class
+        if (GlobalFontSettings.FontResolver == null)
+        {
+            GlobalFontSettings.FontResolver = new TestFontResolver();
+        }
         _fontResolverInitialized = true;
     }
 

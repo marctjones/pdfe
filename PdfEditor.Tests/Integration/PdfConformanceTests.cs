@@ -11,8 +11,10 @@ namespace PdfEditor.Tests.Integration;
 
 /// <summary>
 /// Tests to verify conformance with basic PDF viewer/editor requirements
-/// Based on ISO 32000 (PDF specification) core functionality
+/// Based on ISO 32000 (PDF specification) core functionality.
+/// Uses PdfRenderingTests collection to avoid parallel execution issues with PDFium.
 /// </summary>
+[Collection("PdfRenderingTests")]
 public class PdfConformanceTests : IDisposable
 {
     private readonly PdfDocumentService _documentService;
@@ -295,12 +297,15 @@ public class PdfConformanceTests : IDisposable
 
         // Act
         var exported = 0;
+        var savedFiles = new List<string>();
         for (int i = 0; i < 3; i++)
         {
             var bitmap = await _renderService.RenderPageAsync(pdfPath, i);
             if (bitmap != null)
             {
-                bitmap.Save(Path.Combine(exportDir, $"page_{i}.png"));
+                var filePath = Path.Combine(exportDir, $"page_{i}.png");
+                bitmap.Save(filePath);
+                savedFiles.Add(filePath);
                 exported++;
             }
         }
@@ -310,6 +315,13 @@ public class PdfConformanceTests : IDisposable
         {
             return;
         }
+
+        // Verify each file was actually written
+        foreach (var file in savedFiles)
+        {
+            File.Exists(file).Should().BeTrue($"File {file} should exist after save");
+        }
+
         Directory.GetFiles(exportDir, "*.png").Should().HaveCount(exported);
     }
 
