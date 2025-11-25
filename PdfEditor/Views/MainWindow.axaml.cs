@@ -1,9 +1,12 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using PdfEditor.ViewModels;
 using System;
+using System.Collections.Specialized;
 using System.Linq;
 
 namespace PdfEditor.Views;
@@ -14,6 +17,7 @@ public partial class MainWindow : Window
     private bool _isSelecting;
     private Point _textSelectionStartPoint;
     private bool _isSelectingText;
+    private Canvas? _searchHighlightsCanvas;
 
     public MainWindow()
     {
@@ -24,6 +28,52 @@ public partial class MainWindow : Window
 
         // Add keyboard handler for Ctrl+C
         this.KeyDown += MainWindow_KeyDown;
+
+        // Subscribe to search highlights changes
+        this.DataContextChanged += OnDataContextChanged;
+    }
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            // Subscribe to search highlights collection changes
+            viewModel.CurrentPageSearchHighlights.CollectionChanged += OnSearchHighlightsChanged;
+        }
+    }
+
+    private void OnSearchHighlightsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        UpdateSearchHighlightsCanvas();
+    }
+
+    private void UpdateSearchHighlightsCanvas()
+    {
+        _searchHighlightsCanvas ??= this.FindControl<Canvas>("SearchHighlightsCanvas");
+
+        if (_searchHighlightsCanvas == null)
+            return;
+
+        _searchHighlightsCanvas.Children.Clear();
+
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        foreach (var rect in viewModel.CurrentPageSearchHighlights)
+        {
+            var highlight = new Rectangle
+            {
+                Fill = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0x00)), // Semi-transparent yellow
+                Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x98, 0x00)), // Orange border
+                StrokeThickness = 1,
+                Width = rect.Width,
+                Height = rect.Height
+            };
+
+            Canvas.SetLeft(highlight, rect.X);
+            Canvas.SetTop(highlight, rect.Y);
+            _searchHighlightsCanvas.Children.Add(highlight);
+        }
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
@@ -226,6 +276,19 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Update viewport dimensions when the PDF scroll viewer size changes.
+    /// This enables accurate zoom fit calculations.
+    /// </summary>
+    private void PdfScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.ViewportWidth = e.NewSize.Width;
+            viewModel.ViewportHeight = e.NewSize.Height;
+        }
+    }
+
     private async System.Threading.Tasks.Task OpenFileDialog()
     {
         var topLevel = GetTopLevel(this);
@@ -323,11 +386,18 @@ public partial class MainWindow : Window
     // Redaction selection handlers
     private void Canvas_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not MainWindowViewModel viewModel || !viewModel.IsRedactionMode)
+        if (DataContext is not MainWindowViewModel viewModel)
             return;
+
+        if (!viewModel.IsRedactionMode)
+        {
+            Console.WriteLine($"[Selection] PointerPressed but NOT in redaction mode");
+            return;
+        }
 
         _selectionStartPoint = e.GetPosition(sender as Control);
         _isSelecting = true;
+        Console.WriteLine($"[Selection] Started at ({_selectionStartPoint.X:F1},{_selectionStartPoint.Y:F1})");
     }
 
     private void Canvas_PointerMoved(object? sender, PointerEventArgs e)
@@ -350,6 +420,10 @@ public partial class MainWindow : Window
 
     private void Canvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_isSelecting && DataContext is MainWindowViewModel viewModel)
+        {
+            Console.WriteLine($"[Selection] Completed: ({viewModel.CurrentRedactionArea.X:F1},{viewModel.CurrentRedactionArea.Y:F1},{viewModel.CurrentRedactionArea.Width:F1}x{viewModel.CurrentRedactionArea.Height:F1})");
+        }
         _isSelecting = false;
     }
 

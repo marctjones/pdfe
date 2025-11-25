@@ -324,16 +324,27 @@
 
             <!-- PDF Viewer -->
             <Border Grid.Column="1" Background="{DynamicResource TertiaryBackgroundBrush}">
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="PdfScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              SizeChanged="PdfScrollViewer_SizeChanged">
                     <Grid>
                         <!-- PDF Page Image -->
-                        <Image Source="{Binding CurrentPageImage}" 
+                        <Image Source="{Binding CurrentPageImage}"
                                Stretch="Uniform"
                                RenderOptions.BitmapInterpolationMode="HighQuality">
                             <Image.RenderTransform>
                                 <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
                             </Image.RenderTransform>
                         </Image>
+
+                        <!-- Search Highlights Overlay -->
+                        <Canvas x:Name="SearchHighlightsCanvas"
+                                IsHitTestVisible="False">
+                            <Canvas.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                            </Canvas.RenderTransform>
+                        </Canvas>
 
                         <!-- Redaction Selection Overlay (shown when in redaction mode) -->
                         <Canvas IsVisible="{Binding IsRedactionMode}"
@@ -443,12 +454,29 @@
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="12,8">
-            <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="{Binding StatusText}"
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <!-- Mode Indicator -->
+                <Border Grid.Column="0"
+                        Background="{DynamicResource CardBrush}"
+                        CornerRadius="4"
+                        Padding="8,4"
+                        Margin="0,0,12,0">
+                    <TextBlock Text="{Binding CurrentModeText}"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               FontWeight="Medium"
+                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                </Border>
+
+                <!-- Status Text -->
+                <TextBlock Grid.Column="1"
+                           Text="{Binding StatusText}"
                            VerticalAlignment="Center"
                            FontSize="12"
                            Foreground="{DynamicResource TextSecondaryBrush}"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+
+                <!-- Page Navigation -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Content="◀" Command="{Binding PreviousPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
                             ToolTip.Tip="Previous Page"/>

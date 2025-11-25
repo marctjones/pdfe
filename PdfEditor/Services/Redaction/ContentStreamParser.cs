@@ -225,9 +225,12 @@ public class ContentStreamParser
         textOp.BoundingBox = _boundsCalculator.CalculateBounds(
             textOp.Text, tState, gState, pageHeight);
 
-        // Get position
-        var (x, y) = tState.TextMatrix.Transform(0, 0);
-        textOp.Position = new Point(x, pageHeight - y);
+        // Get position - need to consider if CTM has Y-flip
+        var (px, py) = tState.TextMatrix.Transform(0, 0);
+        var (tx, ty) = gState.TransformationMatrix.Transform(px, py);
+        var isYFlipped = gState.TransformationMatrix.D < 0;
+        var avaloniaY = isYFlipped ? ty : (pageHeight - ty);
+        textOp.Position = new Point(tx, avaloniaY);
 
         _logger.LogDebug(
             "Text operation created: Text=\"{Text}\" (length={Length}), " +
@@ -357,21 +360,38 @@ public class ContentStreamParser
     private ImageOperation CreateImageOperation(COperator op, PdfGraphicsState gState, double pageHeight)
     {
         var imageOp = new ImageOperation(op);
-        
+
         if (op.Operands.Count > 0 && op.Operands[0] is CName name)
         {
             imageOp.ResourceName = name.Name;
         }
-        
+
         // Image is drawn in a 1x1 unit square, transformed by CTM
         var (x, y) = gState.TransformationMatrix.Transform(0, 0);
         var (x1, y1) = gState.TransformationMatrix.Transform(1, 1);
-        
-        imageOp.Position = new Point(x, pageHeight - y);
+
+        // Check if CTM has Y-flip (negative D value)
+        var isYFlipped = gState.TransformationMatrix.D < 0;
+
+        double avaloniaY, avaloniaY1;
+        if (isYFlipped)
+        {
+            // CTM already flipped Y, use coordinates directly
+            avaloniaY = y;
+            avaloniaY1 = y1;
+        }
+        else
+        {
+            // Standard PDF coords, need to convert
+            avaloniaY = pageHeight - y;
+            avaloniaY1 = pageHeight - y1;
+        }
+
+        imageOp.Position = new Point(x, avaloniaY);
         imageOp.Width = Math.Abs(x1 - x);
         imageOp.Height = Math.Abs(y1 - y);
-        imageOp.BoundingBox = new Rect(x, pageHeight - y1, imageOp.Width, imageOp.Height);
-        
+        imageOp.BoundingBox = new Rect(x, Math.Min(avaloniaY, avaloniaY1), imageOp.Width, imageOp.Height);
+
         return imageOp;
     }
     
@@ -826,8 +846,20 @@ public class ContentStreamParser
         var minY = Math.Min(Math.Min(y1, y2), Math.Min(y3, y4));
         var maxY = Math.Max(Math.Max(y1, y2), Math.Max(y3, y4));
 
-        // Convert to Avalonia coordinates (top-left origin)
-        var avaloniaY = pageHeight - maxY;
+        // Check if CTM has Y-flip (negative D value)
+        var isYFlipped = ctm.D < 0;
+
+        double avaloniaY;
+        if (isYFlipped)
+        {
+            // CTM already flipped Y, use minY directly
+            avaloniaY = minY;
+        }
+        else
+        {
+            // Convert to Avalonia coordinates (top-left origin)
+            avaloniaY = pageHeight - maxY;
+        }
 
         return new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
     }
@@ -965,12 +997,13 @@ public class ContentStreamParser
             }
 
             // Parse the form's content stream
-            var content = ContentReader.ReadContent(formXObject);
-            if (content == null)
-            {
-                _logger.LogDebug("Could not read content from Form XObject {Name}", name);
-                return operations;
-            }
+            // TODO: Implement Form XObject content stream parsing
+            // Currently skipped because CParser is not publicly accessible in PdfSharpCore
+            // Form XObjects are used for repeated graphics/text and should be parsed recursively
+            // For now, we log and skip - most redaction scenarios won't need this
+            _logger.LogDebug("Form XObject {Name} parsing not yet implemented - skipping", name);
+
+            /* TODO: Uncomment and fix when CParser becomes accessible or alternative parsing method is found
 
             // State tracking for form parsing
             var stateStack = new Stack<PdfGraphicsState>();
@@ -1005,6 +1038,7 @@ public class ContentStreamParser
                     operations.AddRange(nestedOps);
                 }
             }
+            */
         }
         catch (Exception ex)
         {

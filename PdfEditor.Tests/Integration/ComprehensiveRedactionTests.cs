@@ -234,36 +234,35 @@ public class ComprehensiveRedactionTests : IDisposable
     public void RedactMultipleRandomAreas_ShouldMaintainDocumentIntegrity()
     {
         // Arrange
-        _output.WriteLine("Test: Multiple random redactions maintain document integrity");
+        _output.WriteLine("Test: Multiple targeted redactions maintain document integrity");
 
         var testPdf = CreateTempPath("multiple_random_test.pdf");
         var (pdfPath, contentMap) = TestPdfGenerator.CreateMappedContentPdf(testPdf);
         _tempFiles.Add(testPdf);
 
         var textBefore = PdfTestHelpers.ExtractAllText(testPdf);
-        var wordsBefore = textBefore.Split(new[] { ' ', '\n', '\r', '\t' },
-            StringSplitOptions.RemoveEmptyEntries).Length;
-        _output.WriteLine($"Words before redaction: {wordsBefore}");
+        _output.WriteLine($"Text before redaction: '{textBefore.Trim()}'");
 
-        // Act - Apply multiple random redactions
+        // Verify we have content to redact
+        textBefore.Should().Contain("CONFIDENTIAL", "Test PDF should contain CONFIDENTIAL");
+        textBefore.Should().Contain("PUBLIC", "Test PDF should contain PUBLIC");
+
+        // Act - Apply redactions that target known content locations
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        // Generate random redaction areas
-        var numRedactions = 3;
-        var redactionAreas = new List<Rect>();
-
-        for (int i = 0; i < numRedactions; i++)
+        // Use specific areas that we know contain content (from CreateMappedContentPdf):
+        // CONFIDENTIAL at (100, 100), PUBLIC at (100, 300), SECRET at (400, 300)
+        var redactionAreas = new List<Rect>
         {
-            var x = _random.Next(50, 400);
-            var y = _random.Next(50, 600);
-            var width = _random.Next(50, 150);
-            var height = _random.Next(30, 80);
+            new Rect(90, 88, 150, 25),   // Covers CONFIDENTIAL at (100, 100) - Y in Avalonia coords
+            new Rect(90, 288, 100, 25),  // Covers PUBLIC at (100, 300)
+            new Rect(390, 288, 120, 25)  // Covers SECRET at (400, 300)
+        };
 
-            var area = new Rect(x, y, width, height);
-            redactionAreas.Add(area);
-
-            _output.WriteLine($"Random redaction {i + 1}: {area}");
+        foreach (var (area, i) in redactionAreas.Select((a, i) => (a, i)))
+        {
+            _output.WriteLine($"Redaction {i + 1}: ({area.X}, {area.Y}, {area.Width}x{area.Height})");
             _redactionService.RedactArea(page, area, renderDpi: 72);
         }
 
@@ -274,23 +273,22 @@ public class ComprehensiveRedactionTests : IDisposable
 
         // Assert
         var textAfter = PdfTestHelpers.ExtractAllText(redactedPdf);
-        var wordsAfter = textAfter.Split(new[] { ' ', '\n', '\r', '\t' },
-            StringSplitOptions.RemoveEmptyEntries).Length;
-        _output.WriteLine($"Words after redaction: {wordsAfter}");
+        _output.WriteLine($"Text after redaction: '{textAfter.Trim()}'");
 
-        // Some content should be removed
-        wordsAfter.Should().BeLessThan(wordsBefore,
-            "some content should be removed by redaction");
+        // Targeted content should be removed
+        textAfter.Should().NotContain("CONFIDENTIAL", "CONFIDENTIAL should be removed");
+        textAfter.Should().NotContain("PUBLIC", "PUBLIC should be removed");
+        textAfter.Should().NotContain("SECRET", "SECRET should be removed");
 
-        // But document should still be valid
+        // But other content should remain
+        textAfter.Should().Contain("PRIVATE", "PRIVATE should remain");
+        textAfter.Should().Contain("INTERNAL", "INTERNAL should remain");
+
+        // Document should still be valid
         PdfTestHelpers.IsValidPdf(redactedPdf).Should().BeTrue(
             "document should remain valid after multiple redactions");
 
-        // Document should still have some content
-        wordsAfter.Should().BeGreaterThan(0,
-            "document should still contain some content");
-
-        _output.WriteLine($"✓ Test passed: {wordsBefore - wordsAfter} words removed, document integrity maintained");
+        _output.WriteLine($"✓ Test passed: Targeted content removed, document integrity maintained");
     }
 
     [Fact]

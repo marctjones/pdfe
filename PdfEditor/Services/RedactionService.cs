@@ -229,6 +229,36 @@ public class RedactionService
             _logger.LogInformation("Filtering operations against redaction area: ({X:F2},{Y:F2},{W:F2}x{H:F2})",
                 area.X, area.Y, area.Width, area.Height);
 
+            // DEBUG: Log first few text operations to see where text actually is
+            var textOps = operations.OfType<TextOperation>().Take(10).ToList();
+            if (textOps.Count > 0)
+            {
+                _logger.LogInformation("DEBUG: Sample of {Count} text operations found (showing first 10):", operations.OfType<TextOperation>().Count());
+                foreach (var t in textOps)
+                {
+                    _logger.LogInformation("  Text: \"{Text}\" at ({X:F2},{Y:F2},{W:F2}x{H:F2})",
+                        t.Text.Length > 20 ? t.Text.Substring(0, 20) + "..." : t.Text,
+                        t.BoundingBox.X, t.BoundingBox.Y, t.BoundingBox.Width, t.BoundingBox.Height);
+                }
+
+                // Find text ops near the redaction area (within 100 points)
+                var nearbyOps = operations.OfType<TextOperation>()
+                    .Where(t => Math.Abs(t.BoundingBox.Y - area.Y) < 100)
+                    .Take(5)
+                    .ToList();
+                if (nearbyOps.Count > 0)
+                {
+                    _logger.LogInformation("DEBUG: Text operations near redaction Y={Y:F2}:", area.Y);
+                    foreach (var t in nearbyOps)
+                    {
+                        var intersects = t.IntersectsWith(area);
+                        _logger.LogInformation("  Text: \"{Text}\" at ({X:F2},{Y:F2},{W:F2}x{H:F2}) - Intersects: {Intersects}",
+                            t.Text.Length > 20 ? t.Text.Substring(0, 20) + "..." : t.Text,
+                            t.BoundingBox.X, t.BoundingBox.Y, t.BoundingBox.Width, t.BoundingBox.Height, intersects);
+                    }
+                }
+            }
+
             var filteredOperations = new List<PdfOperation>();
             var removedCount = 0;
             var removedByType = new Dictionary<string, int>();

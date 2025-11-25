@@ -82,10 +82,15 @@ public class MetadataSanitizer
         var info = document.Info;
         var sanitized = 0;
 
+        _logger.LogDebug("Sanitizing document info. Title='{Title}', Author='{Author}', Subject='{Subject}'",
+            info.Title ?? "(null)", info.Author ?? "(null)", info.Subject ?? "(null)");
+        _logger.LogDebug("Redacted terms to search for: {Terms}", string.Join(", ", terms.Select(t => $"'{t}'")));
+
         // Title
         if (!string.IsNullOrEmpty(info.Title))
         {
             var newTitle = RedactTerms(info.Title, terms);
+            _logger.LogDebug("Title sanitization: '{Original}' -> '{New}'", info.Title, newTitle);
             if (newTitle != info.Title)
             {
                 info.Title = newTitle;
@@ -445,7 +450,9 @@ public class MetadataSanitizer
     }
 
     /// <summary>
-    /// Replace all occurrences of redacted terms with redaction markers
+    /// Replace all occurrences of redacted terms with redaction markers.
+    /// Also extracts significant words (4+ chars) from multi-word terms to catch
+    /// variations like "ACME Corp Report" when "Report from ACME Corp" was redacted.
     /// </summary>
     private string RedactTerms(string text, List<string> terms)
     {
@@ -453,10 +460,37 @@ public class MetadataSanitizer
 
         var result = text;
 
+        // Build a set of all terms to search for, including extracted words
+        var allTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var term in terms)
         {
             if (string.IsNullOrEmpty(term)) continue;
 
+            // Add the full term
+            allTerms.Add(term);
+
+            // Extract significant words (4+ characters, alphanumeric)
+            // This catches cases where the same word appears in different contexts
+            // Note: Don't split on underscore as it often joins compound identifiers like "ACME_CORP"
+            var words = term.Split(new[] { ' ', '\t', '\n', '\r', '-', '.', ',', ';', ':' },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var word in words)
+            {
+                // Only add words that are significant (4+ chars, not common words)
+                if (word.Length >= 4 && !IsCommonWord(word))
+                {
+                    allTerms.Add(word);
+                }
+            }
+        }
+
+        // Sort by length descending to replace longer matches first
+        var sortedTerms = allTerms.OrderByDescending(t => t.Length).ToList();
+
+        foreach (var term in sortedTerms)
+        {
             // Case-insensitive replacement with redaction markers
             var index = 0;
             while ((index = result.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) >= 0)
@@ -469,6 +503,26 @@ public class MetadataSanitizer
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Check if a word is a common word that shouldn't be redacted on its own
+    /// </summary>
+    private bool IsCommonWord(string word)
+    {
+        var commonWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+            "her", "was", "one", "our", "out", "has", "his", "how", "its", "may",
+            "new", "now", "old", "see", "way", "who", "did", "get", "let", "put",
+            "say", "she", "too", "use", "from", "have", "this", "that", "with",
+            "they", "will", "been", "each", "make", "like", "than", "them", "then",
+            "into", "over", "such", "your", "some", "could", "would", "about",
+            "which", "their", "there", "these", "other", "report", "document",
+            "page", "file", "data", "info", "information", "prepared", "quarterly"
+        };
+
+        return commonWords.Contains(word);
     }
 
     /// <summary>

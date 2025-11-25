@@ -187,7 +187,8 @@ public static class PdfTestHelpers
     }
 
     /// <summary>
-    /// Extracts content stream bytes from a page (for low-level verification)
+    /// Extracts content stream bytes from a page (for low-level verification).
+    /// Combines all content streams if there are multiple (common after XGraphics operations).
     /// </summary>
     public static byte[] GetPageContentStream(string pdfPath, int pageIndex = 0)
     {
@@ -198,26 +199,31 @@ public static class PdfTestHelpers
         }
 
         var page = document.Pages[pageIndex];
-        var contentElement = page.Contents.Elements.FirstOrDefault();
 
-        // Handle both direct dictionary and reference cases
-        PdfSharp.Pdf.PdfDictionary? dict = null;
+        // Combine all content streams (there may be multiple after redaction/XGraphics operations)
+        var combinedContent = new System.IO.MemoryStream();
 
-        if (contentElement is PdfSharp.Pdf.PdfDictionary directDict)
+        foreach (var contentElement in page.Contents.Elements)
         {
-            dict = directDict;
-        }
-        else if (contentElement is PdfSharp.Pdf.Advanced.PdfReference reference)
-        {
-            dict = reference.Value as PdfSharp.Pdf.PdfDictionary;
+            PdfSharp.Pdf.PdfDictionary? dict = null;
+
+            if (contentElement is PdfSharp.Pdf.PdfDictionary directDict)
+            {
+                dict = directDict;
+            }
+            else if (contentElement is PdfSharp.Pdf.Advanced.PdfReference reference)
+            {
+                dict = reference.Value as PdfSharp.Pdf.PdfDictionary;
+            }
+
+            if (dict?.Stream?.Value != null)
+            {
+                combinedContent.Write(dict.Stream.Value);
+                combinedContent.WriteByte((byte)'\n'); // Separator between streams
+            }
         }
 
-        if (dict?.Stream != null)
-        {
-            return dict.Stream.Value;
-        }
-
-        return Array.Empty<byte>();
+        return combinedContent.ToArray();
     }
 
     /// <summary>

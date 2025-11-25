@@ -409,11 +409,16 @@ public class ContentRemovalVerificationTests : IDisposable
         var hasBlackColor = content.Contains("0 g") || content.Contains("0 0 0 rg");
         hasBlackColor.Should().BeTrue("Black color should be set for redaction box");
 
-        // Rectangle operation should exist
-        content.Should().Contain(" re ", "Rectangle operation should exist for black box");
+        // Rectangle operation should exist (format: "x y w h re")
+        var hasRectangle = content.Contains(" re\n") || content.Contains(" re\r") ||
+                           content.Contains(" re ") || content.Contains(" re\t");
+        hasRectangle.Should().BeTrue("Rectangle operation should exist for black box");
 
-        // Fill operation should exist
-        var hasFill = content.Contains(" f") || content.Contains(" F");
+        // Fill operation should exist (f, F, or f* for fill)
+        var hasFill = content.Contains("\nf\n") || content.Contains("\nF\n") ||
+                      content.Contains("\nf\r") || content.Contains("\nF\r") ||
+                      content.Contains(" f\n") || content.Contains(" F\n") ||
+                      content.Contains("\rf\n") || content.Contains("\rF\n");
         hasFill.Should().BeTrue("Fill operation should exist for black box");
     }
 

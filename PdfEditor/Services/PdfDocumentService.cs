@@ -27,6 +27,28 @@ public class PdfDocumentService
     /// </summary>
     public string PdfVersion => $"{_originalPdfVersion / 10}.{_originalPdfVersion % 10}";
 
+    /// <summary>
+    /// Gets the width of a specific page in PDF points (72 points per inch)
+    /// </summary>
+    public double GetPageWidth(int pageIndex)
+    {
+        if (_currentDocument == null || pageIndex < 0 || pageIndex >= PageCount)
+            return 612; // Default letter width
+
+        return _currentDocument.Pages[pageIndex].Width.Point;
+    }
+
+    /// <summary>
+    /// Gets the height of a specific page in PDF points (72 points per inch)
+    /// </summary>
+    public double GetPageHeight(int pageIndex)
+    {
+        if (_currentDocument == null || pageIndex < 0 || pageIndex >= PageCount)
+            return 792; // Default letter height
+
+        return _currentDocument.Pages[pageIndex].Height.Point;
+    }
+
     public PdfDocumentService(ILogger<PdfDocumentService> logger)
     {
         _logger = logger;
@@ -221,7 +243,9 @@ public class PdfDocumentService
     public PdfDocument? GetCurrentDocument() => _currentDocument;
 
     /// <summary>
-    /// Get the current document as a memory stream (for rendering without saving to disk)
+    /// Get the current document as a memory stream (for rendering without saving to disk).
+    /// IMPORTANT: This method also reloads the document from the stream to allow further modifications,
+    /// since PdfSharp marks documents as "saved" after calling Save() which prevents further edits.
     /// </summary>
     public MemoryStream? GetCurrentDocumentAsStream()
     {
@@ -232,6 +256,16 @@ public class PdfDocumentService
         {
             var stream = new MemoryStream();
             _currentDocument.Save(stream, false); // false = don't close the stream
+            stream.Position = 0;
+
+            // CRITICAL: PdfSharp marks the document as "saved" after Save() call,
+            // which prevents any further modifications. We must reload the document
+            // from the stream to get a fresh, modifiable copy.
+            var streamCopy = new MemoryStream(stream.ToArray());
+            _currentDocument = PdfReader.Open(streamCopy, PdfDocumentOpenMode.Modify);
+            _logger.LogInformation("Document reloaded from stream to allow further modifications");
+
+            // Return the original stream for rendering
             stream.Position = 0;
             return stream;
         }

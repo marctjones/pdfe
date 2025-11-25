@@ -25,7 +25,7 @@ public class TextSearchService
     /// <summary>
     /// Find all occurrences of text in document with their bounding boxes
     /// </summary>
-    public List<TextMatch> FindText(PdfDocument document, string searchText, SearchOptions options)
+    public List<TextMatch> FindText(PdfSharp.Pdf.PdfDocument document, string searchText, SearchOptions options)
     {
         if (string.IsNullOrEmpty(searchText))
             return new List<TextMatch>();
@@ -41,7 +41,11 @@ public class TextSearchService
             var tempPath = System.IO.Path.GetTempFileName();
             try
             {
-                document.Save(tempPath);
+                // Save to memory stream first to avoid marking the document as "saved"
+                // PdfSharp marks documents as read-only after Save() is called
+                using var memoryStream = new System.IO.MemoryStream();
+                document.Save(memoryStream, false); // false = don't close the stream
+                System.IO.File.WriteAllBytes(tempPath, memoryStream.ToArray());
 
                 using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(tempPath);
                 var pagesToSearch = GetPagesToSearch(pdfPigDoc.NumberOfPages, options.PageRange);
@@ -80,7 +84,7 @@ public class TextSearchService
     /// <summary>
     /// Find all matches for a regex pattern
     /// </summary>
-    public List<TextMatch> FindPattern(PdfDocument document, string regexPattern, SearchOptions options)
+    public List<TextMatch> FindPattern(PdfSharp.Pdf.PdfDocument document, string regexPattern, SearchOptions options)
     {
         options.UseRegex = true;
         return FindText(document, regexPattern, options);
@@ -89,7 +93,7 @@ public class TextSearchService
     /// <summary>
     /// Find all instances of a specific PII type
     /// </summary>
-    public List<TextMatch> FindPII(PdfDocument document, PIIType piiType)
+    public List<TextMatch> FindPII(PdfSharp.Pdf.PdfDocument document, PIIType piiType)
     {
         var matcher = new PIIPatternMatcher(_logger as ILogger<PIIPatternMatcher> ??
             Microsoft.Extensions.Logging.Abstractions.NullLogger<PIIPatternMatcher>.Instance);
@@ -101,7 +105,11 @@ public class TextSearchService
             var tempPath = System.IO.Path.GetTempFileName();
             try
             {
-                document.Save(tempPath);
+                // Save to memory stream first to avoid marking the document as "saved"
+                // PdfSharp marks documents as read-only after Save() is called
+                using var memoryStream = new System.IO.MemoryStream();
+                document.Save(memoryStream, false); // false = don't close the stream
+                System.IO.File.WriteAllBytes(tempPath, memoryStream.ToArray());
 
                 using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(tempPath);
 
@@ -152,7 +160,7 @@ public class TextSearchService
     /// <summary>
     /// Find all PII of any supported type
     /// </summary>
-    public List<TextMatch> FindAllPII(PdfDocument document)
+    public List<TextMatch> FindAllPII(PdfSharp.Pdf.PdfDocument document)
     {
         var allMatches = new List<TextMatch>();
 
@@ -171,6 +179,102 @@ public class TextSearchService
             .ThenBy(m => m.BoundingBox.Y)
             .ThenBy(m => m.BoundingBox.X)
             .ToList();
+    }
+
+    /// <summary>
+    /// Find PII in a PDF file (file-based version that doesn't mark PdfSharp documents as saved)
+    /// </summary>
+    public List<TextMatch> FindPIIInFile(string filePath, PIIType piiType)
+    {
+        var matcher = new PIIPatternMatcher(_logger as ILogger<PIIPatternMatcher> ??
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PIIPatternMatcher>.Instance);
+
+        var matches = new List<TextMatch>();
+
+        try
+        {
+            using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(filePath);
+
+            for (int pageNum = 1; pageNum <= pdfPigDoc.NumberOfPages; pageNum++)
+            {
+                var page = pdfPigDoc.GetPage(pageNum);
+                var pageText = page.Text;
+                var pageHeight = page.Height;
+
+                // Find PII matches in text
+                var piiMatches = matcher.FindPII(pageText, piiType);
+
+                // Map text matches to bounding boxes
+                foreach (var piiMatch in piiMatches)
+                {
+                    var bounds = FindTextBounds(page, piiMatch.MatchedText, piiMatch.StartIndex);
+                    if (bounds.HasValue)
+                    {
+                        matches.Add(new TextMatch
+                        {
+                            PageNumber = pageNum,
+                            BoundingBox = ConvertToAvaloniaRect(bounds.Value, pageHeight),
+                            MatchedText = piiMatch.MatchedText,
+                            StartIndex = piiMatch.StartIndex,
+                            EndIndex = piiMatch.EndIndex,
+                            Confidence = piiMatch.Confidence,
+                            PIIType = piiType
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching for PII type {Type} in file {File}", piiType, filePath);
+        }
+
+        _logger.LogInformation("Found {Count} {Type} matches in {File}", matches.Count, piiType, System.IO.Path.GetFileName(filePath));
+        return matches;
+    }
+
+    /// <summary>
+    /// Find text in a PDF file (file-based version that doesn't mark PdfSharp documents as saved)
+    /// </summary>
+    public List<TextMatch> FindTextInFile(string filePath, string searchText, SearchOptions options)
+    {
+        if (string.IsNullOrEmpty(searchText))
+            return new List<TextMatch>();
+
+        _logger.LogInformation("Searching file {File} for text: \"{Text}\"",
+            System.IO.Path.GetFileName(filePath), searchText);
+
+        var matches = new List<TextMatch>();
+
+        try
+        {
+            using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(filePath);
+            var pagesToSearch = GetPagesToSearch(pdfPigDoc.NumberOfPages, options.PageRange);
+
+            foreach (var pageNum in pagesToSearch)
+            {
+                if (pageNum < 1 || pageNum > pdfPigDoc.NumberOfPages)
+                    continue;
+
+                var page = pdfPigDoc.GetPage(pageNum);
+                var pageMatches = FindTextOnPage(page, pageNum, searchText, options);
+                matches.AddRange(pageMatches);
+
+                if (options.MaxResults > 0 && matches.Count >= options.MaxResults)
+                {
+                    matches = matches.Take(options.MaxResults).ToList();
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching for text in file {File}", filePath);
+        }
+
+        _logger.LogInformation("Found {Count} matches for \"{Text}\" in {File}",
+            matches.Count, searchText, System.IO.Path.GetFileName(filePath));
+        return matches;
     }
 
     private List<TextMatch> FindTextOnPage(Page page, int pageNumber, string searchText, SearchOptions options)

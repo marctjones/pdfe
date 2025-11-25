@@ -242,11 +242,60 @@ public partial class MainWindowViewModel
             Task.Run(async () => await RenderCurrentPageAsync());
         }
 
-        // TODO: Scroll to the match position and highlight it
-        // This would require adding scroll position control and highlight rendering
+        // Update search highlights for the current page
+        UpdateSearchHighlights();
 
         _logger.LogInformation("Navigated to match on page {PageIndex}: '{Text}'",
             match.PageIndex + 1, match.MatchedText);
+    }
+
+    /// <summary>
+    /// Update search highlight rectangles for the current page.
+    /// Converts PDF coordinates to screen coordinates.
+    /// </summary>
+    public void UpdateSearchHighlights()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            CurrentPageSearchHighlights.Clear();
+
+            if (SearchMatches.Count == 0 || _documentService == null)
+                return;
+
+            // Get matches for current page
+            var pageMatches = SearchMatches.Where(m => m.PageIndex == CurrentPageIndex).ToList();
+
+            if (pageMatches.Count == 0)
+                return;
+
+            // Get page height for coordinate conversion (PDF uses bottom-left origin)
+            var pageHeight = _documentService.GetPageHeight(CurrentPageIndex);
+
+            // Convert each match to screen coordinates
+            // The SearchMatch has PDF coordinates (bottom-left origin)
+            // We need to convert to Avalonia coordinates (top-left origin)
+            // Then scale by render DPI (150 DPI rendered / 72 DPI PDF = 2.083x)
+            var dpiScale = 150.0 / 72.0;
+
+            foreach (var match in pageMatches)
+            {
+                // Convert Y from PDF (bottom-left) to Avalonia (top-left)
+                var avaloniaY = pageHeight - match.Y - match.Height;
+
+                // Scale to screen coordinates (150 DPI render)
+                var screenRect = new Rect(
+                    match.X * dpiScale,
+                    avaloniaY * dpiScale,
+                    match.Width * dpiScale,
+                    match.Height * dpiScale
+                );
+
+                CurrentPageSearchHighlights.Add(screenRect);
+            }
+
+            _logger.LogDebug("Updated {Count} search highlights for page {Page}",
+                CurrentPageSearchHighlights.Count, CurrentPageIndex + 1);
+        });
     }
 
     /// <summary>

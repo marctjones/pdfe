@@ -55,12 +55,12 @@ public partial class App : Application
 
     private void ConfigureServices(IServiceCollection services)
     {
-        // Configure logging with TRACE level for maximum verbosity
+        // Configure logging with INFO level to reduce noise
         services.AddLogging(builder =>
         {
             builder.AddConsole();
             builder.AddDebug();
-            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.SetMinimumLevel(LogLevel.Information);
 
             // Configure console formatter for better readability
             builder.AddSimpleConsole(options =>
@@ -88,6 +88,6 @@ public partial class App : Application
         var logger = tempProvider.GetRequiredService<ILogger<App>>();
         logger.LogInformation("Dependency injection container configured");
         logger.LogInformation("Services registered: PdfDocumentService, PdfRenderService, RedactionService, PdfTextExtractionService");
-        logger.LogInformation("Logging level set to: TRACE (maximum verbosity)");
+        logger.LogInformation("Logging level set to: INFORMATION");
     }
 }
