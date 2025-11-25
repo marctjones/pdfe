@@ -86,30 +86,18 @@ public class PdfTextExtractionService
             var extractedText = new StringBuilder();
             var matchedWords = new List<Word>();
 
-            // Scale coordinates from rendered DPI to PDF points (72 DPI)
-            // PDF uses 72 points per inch, but the image is rendered at renderDpi
-            var scale = 72.0 / renderDpi;
-            var scaledX = area.X * scale;
-            var scaledY = area.Y * scale;
-            var scaledWidth = area.Width * scale;
-            var scaledHeight = area.Height * scale;
-
-            _logger.LogInformation(
-                "Scaled coordinates by factor {Scale:F4} ({RenderDpi}→72 DPI): ({X:F2},{Y:F2},{W:F2}x{H:F2}) → ({ScaledX:F2},{ScaledY:F2},{ScaledW:F2}x{ScaledH:F2})",
-                scale, renderDpi, area.X, area.Y, area.Width, area.Height,
-                scaledX, scaledY, scaledWidth, scaledHeight);
-
-            // Convert Avalonia coordinates (top-left origin) to PDF coordinates (bottom-left origin)
+            // Use centralized CoordinateConverter for all coordinate transformations
+            // This converts from image pixels (top-left origin) to PDF coordinates (bottom-left origin)
             var pageHeight = page.Height;
-            var pdfY = pageHeight - scaledY - scaledHeight;
-            var pdfRect = new UglyToad.PdfPig.Core.PdfRectangle(
-                scaledX,
-                pdfY,
-                scaledX + scaledWidth,
-                pdfY + scaledHeight);
+            var (left, bottom, right, top) = CoordinateConverter.ImageSelectionToPdfCoords(
+                area, pageHeight, renderDpi);
+
+            var pdfRect = new UglyToad.PdfPig.Core.PdfRectangle(left, bottom, right, top);
 
             _logger.LogInformation(
-                "Final PDF coordinates (bottom-left origin): ({Left:F2},{Bottom:F2}) to ({Right:F2},{Top:F2})",
+                "Coordinate conversion via CoordinateConverter.ImageSelectionToPdfCoords: " +
+                "({X:F2},{Y:F2},{W:F2}x{H:F2}) → PDF ({Left:F2},{Bottom:F2}) to ({Right:F2},{Top:F2})",
+                area.X, area.Y, area.Width, area.Height,
                 pdfRect.Left, pdfRect.Bottom, pdfRect.Right, pdfRect.Top);
 
             // Find words that intersect with the selection area

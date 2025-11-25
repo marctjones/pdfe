@@ -328,10 +328,12 @@
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               SizeChanged="PdfScrollViewer_SizeChanged">
-                    <Grid>
+                    <!-- Container that sizes to the image content, preventing centering offset issues -->
+                    <Grid HorizontalAlignment="Left" VerticalAlignment="Top">
                         <!-- PDF Page Image -->
-                        <Image Source="{Binding CurrentPageImage}"
-                               Stretch="Uniform"
+                        <Image x:Name="PdfImage"
+                               Source="{Binding CurrentPageImage}"
+                               Stretch="None"
                                RenderOptions.BitmapInterpolationMode="HighQuality">
                             <Image.RenderTransform>
                                 <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
@@ -346,12 +348,19 @@
                             </Canvas.RenderTransform>
                         </Canvas>
 
-                        <!-- Redaction Selection Overlay (shown when in redaction mode) -->
+                        <!-- Redaction Selection Overlay (shown when in redaction mode)
+                             COORDINATE SYSTEM: Canvas coordinates are in rendered image pixels (150 DPI).
+                             The ScaleTransform ensures the selection rectangle visually aligns with the
+                             zoomed image. Mouse events via GetPosition() return coordinates that are
+                             automatically inverse-transformed, giving us image-space coordinates. -->
                         <Canvas IsVisible="{Binding IsRedactionMode}"
                                 Background="Transparent"
                                 PointerPressed="Canvas_PointerPressed"
                                 PointerMoved="Canvas_PointerMoved"
                                 PointerReleased="Canvas_PointerReleased">
+                            <Canvas.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                            </Canvas.RenderTransform>
                             <!-- Selection Rectangle - semi-transparent black with red dashed border -->
                             <Rectangle x:Name="SelectionRectangle"
                                        Fill="#40000000"
@@ -364,13 +373,17 @@
                                        Height="{Binding CurrentRedactionArea.Height}"/>
                         </Canvas>
 
-                        <!-- Text Selection Overlay (shown when in text selection mode) -->
+                        <!-- Text Selection Overlay (shown when in text selection mode)
+                             COORDINATE SYSTEM: Same as Redaction Canvas - image pixels with zoom transform. -->
                         <Canvas IsVisible="{Binding IsTextSelectionMode}"
                                 Background="Transparent"
                                 PointerPressed="TextCanvas_PointerPressed"
                                 PointerMoved="TextCanvas_PointerMoved"
                                 PointerReleased="TextCanvas_PointerReleased">
-                            <!-- Selection Rectangle - semi-transparent blue with blue dashed border -->
+                            <Canvas.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                            </Canvas.RenderTransform>
+                            <!-- Selection Rectangle - semi-transparent green with green dashed border -->
                             <Rectangle x:Name="TextSelectionRectangle"
                                        Fill="#404CAF50"
                                        Stroke="#4CAF50"
