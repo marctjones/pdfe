@@ -831,4 +831,217 @@ public class ContentStreamParser
 
         return new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
     }
+
+    /// <summary>
+    /// Parse a PDF page's content stream recursively, including Form XObjects
+    /// </summary>
+    public List<PdfOperation> ParseContentStreamRecursive(PdfPage page)
+    {
+        var sw = Stopwatch.StartNew();
+        _logger.LogInformation("Starting recursive content stream parsing (including Form XObjects)");
+
+        var operations = new List<PdfOperation>();
+
+        try
+        {
+            // Parse main content stream
+            operations.AddRange(ParseContentStream(page));
+
+            // Get page resources
+            var resources = page.Elements.GetDictionary("/Resources");
+            if (resources == null)
+            {
+                _logger.LogDebug("No resources dictionary found");
+                return operations;
+            }
+
+            // Parse Form XObjects
+            var xObjects = resources.Elements.GetDictionary("/XObject");
+            if (xObjects != null)
+            {
+                var pageHeight = page.Height.Point;
+                var formXObjectOps = ParseFormXObjects(xObjects, pageHeight, new PdfGraphicsState());
+                operations.AddRange(formXObjectOps);
+
+                _logger.LogInformation("Found {Count} operations in Form XObjects", formXObjectOps.Count);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "Recursive parsing complete in {ElapsedMs}ms. Total operations: {Count}",
+                sw.ElapsedMilliseconds, operations.Count);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Error during recursive content stream parsing");
+        }
+
+        return operations;
+    }
+
+    /// <summary>
+    /// Parse all Form XObjects in a resources dictionary
+    /// </summary>
+    public List<PdfOperation> ParseFormXObjects(PdfDictionary xObjects, double pageHeight, PdfGraphicsState parentState)
+    {
+        var operations = new List<PdfOperation>();
+
+        foreach (var key in xObjects.Elements.Keys)
+        {
+            try
+            {
+                PdfDictionary? xObject = null;
+
+                var element = xObjects.Elements[key];
+                if (element is PdfSharp.Pdf.Advanced.PdfReference pdfRef)
+                {
+                    xObject = pdfRef.Value as PdfDictionary;
+                }
+                else if (element is PdfDictionary dict)
+                {
+                    xObject = dict;
+                }
+
+                if (xObject == null)
+                    continue;
+
+                // Check if it's a Form XObject
+                var subtype = xObject.Elements.GetName("/Subtype");
+                if (subtype != "/Form")
+                    continue;
+
+                _logger.LogDebug("Parsing Form XObject: {Key}", key);
+
+                var formOps = ParseSingleFormXObject(xObject, key.ToString(), pageHeight, parentState);
+                operations.AddRange(formOps);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error parsing XObject {Key}", key);
+            }
+        }
+
+        return operations;
+    }
+
+    /// <summary>
+    /// Parse a single Form XObject's content stream
+    /// </summary>
+    private List<PdfOperation> ParseSingleFormXObject(
+        PdfDictionary formXObject,
+        string name,
+        double pageHeight,
+        PdfGraphicsState parentState)
+    {
+        var operations = new List<PdfOperation>();
+
+        try
+        {
+            // Get the form's stream
+            if (formXObject.Stream?.Value == null)
+            {
+                _logger.LogDebug("Form XObject {Name} has no stream", name);
+                return operations;
+            }
+
+            // Get form's BBox for coordinate transformation
+            var bbox = formXObject.Elements.GetArray("/BBox");
+            var matrix = formXObject.Elements.GetArray("/Matrix");
+
+            // Create a modified graphics state for the form
+            var formState = parentState.Clone();
+
+            // Apply form's transformation matrix if present
+            if (matrix != null && matrix.Elements.Count >= 6)
+            {
+                var matrixValues = new double[6];
+                for (int i = 0; i < 6; i++)
+                {
+                    matrixValues[i] = GetArrayDouble(matrix, i);
+                }
+                var formMatrix = PdfMatrix.FromArray(matrixValues);
+                formState.TransformationMatrix = formState.TransformationMatrix.Multiply(formMatrix);
+            }
+
+            // Parse the form's content stream
+            var content = ContentReader.ReadContent(formXObject);
+            if (content == null)
+            {
+                _logger.LogDebug("Could not read content from Form XObject {Name}", name);
+                return operations;
+            }
+
+            // State tracking for form parsing
+            var stateStack = new Stack<PdfGraphicsState>();
+            var textState = new PdfTextState();
+            var inTextObject = false;
+
+            // Get form's resources
+            var formResources = formXObject.Elements.GetDictionary("/Resources");
+
+            // Parse the form's content
+            ParseCObjects(content, operations, stateStack, formState, textState,
+                         ref inTextObject, formResources, pageHeight);
+
+            // Tag operations as coming from Form XObject
+            foreach (var op in operations)
+            {
+                if (op is FormXObjectOperation formOp)
+                {
+                    formOp.SourceXObjectName = name;
+                }
+            }
+
+            _logger.LogDebug("Parsed {Count} operations from Form XObject {Name}", operations.Count, name);
+
+            // Recursively parse nested XObjects
+            if (formResources != null)
+            {
+                var nestedXObjects = formResources.Elements.GetDictionary("/XObject");
+                if (nestedXObjects != null)
+                {
+                    var nestedOps = ParseFormXObjects(nestedXObjects, pageHeight, formState);
+                    operations.AddRange(nestedOps);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error parsing Form XObject {Name}", name);
+        }
+
+        return operations;
+    }
+
+    /// <summary>
+    /// Get a double value from a PdfArray at the specified index
+    /// </summary>
+    private double GetArrayDouble(PdfSharp.Pdf.PdfArray array, int index)
+    {
+        if (index >= array.Elements.Count)
+            return 0;
+
+        var element = array.Elements[index];
+
+        if (element is PdfSharp.Pdf.PdfInteger intVal)
+            return intVal.Value;
+        if (element is PdfSharp.Pdf.PdfReal realVal)
+            return realVal.Value;
+
+        return 0;
+    }
+}
+
+/// <summary>
+/// Represents an operation from a Form XObject
+/// </summary>
+public class FormXObjectOperation : PdfOperation
+{
+    /// <summary>
+    /// Name of the XObject this operation came from
+    /// </summary>
+    public string SourceXObjectName { get; set; } = string.Empty;
+
+    public FormXObjectOperation(CObject obj) : base(obj) { }
 }
