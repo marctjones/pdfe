@@ -522,6 +522,50 @@ public static class TestPdfGenerator
             }
         }
     }
+
+    /// <summary>
+    /// Creates a PDF with text at a specific position in PDF coordinates.
+    /// Useful for testing coordinate conversion accuracy.
+    ///
+    /// COORDINATE SYSTEM:
+    /// - x, y are in PDF coordinates (bottom-left origin)
+    /// - XGraphics uses top-left origin, so we convert internally
+    /// </summary>
+    /// <param name="text">Text to place on the page</param>
+    /// <param name="x">X position in PDF points (from left edge)</param>
+    /// <param name="y">Y position in PDF points (from BOTTOM edge, PDF convention)</param>
+    /// <param name="fontSize">Font size in points</param>
+    /// <returns>PdfDocument with the text at specified position</returns>
+    public static PdfDocument CreatePdfWithTextAt(string text, double x, double y, double fontSize = 12)
+    {
+        EnsureFontResolverInitialized();
+
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(612);  // Letter width
+        page.Height = XUnit.FromPoint(792); // Letter height
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", fontSize);
+
+        // XGraphics uses top-left origin, so convert Y from PDF (bottom-left) to XGraphics (top-left)
+        // XGraphics Y = pageHeight - PDF Y
+        var xGraphicsY = page.Height.Point - y;
+
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(x, xGraphicsY));
+
+        return document;
+    }
+
+    /// <summary>
+    /// Creates a PDF with text at a specific position and saves it.
+    /// </summary>
+    public static string CreatePdfWithTextAt(string outputPath, string text, double x, double y, double fontSize = 12)
+    {
+        using var document = CreatePdfWithTextAt(text, x, y, fontSize);
+        document.Save(outputPath);
+        return outputPath;
+    }
 }
 
 /// <summary>

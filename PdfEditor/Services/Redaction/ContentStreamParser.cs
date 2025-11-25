@@ -225,11 +225,10 @@ public class ContentStreamParser
         textOp.BoundingBox = _boundsCalculator.CalculateBounds(
             textOp.Text, tState, gState, pageHeight);
 
-        // Get position - need to consider if CTM has Y-flip
+        // Get position - convert from PDF (bottom-left origin) to Avalonia (top-left origin)
         var (px, py) = tState.TextMatrix.Transform(0, 0);
         var (tx, ty) = gState.TransformationMatrix.Transform(px, py);
-        var isYFlipped = gState.TransformationMatrix.D < 0;
-        var avaloniaY = isYFlipped ? ty : (pageHeight - ty);
+        var avaloniaY = pageHeight - ty;
         textOp.Position = new Point(tx, avaloniaY);
 
         _logger.LogDebug(

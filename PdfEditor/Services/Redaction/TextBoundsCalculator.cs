@@ -1,5 +1,6 @@
 using Avalonia;
 using Microsoft.Extensions.Logging;
+using PdfEditor.Services;
 using PdfSharp.Pdf;
 using System;
 using System.Collections.Generic;
@@ -9,7 +10,43 @@ using System.Text;
 namespace PdfEditor.Services.Redaction;
 
 /// <summary>
-/// Calculates bounding boxes for text operations
+/// Calculates bounding boxes for text operations in PDF content streams.
+///
+/// ================================================================================
+/// COORDINATE CONVERSION DOCUMENTATION
+/// ================================================================================
+///
+/// INPUT (from PDF content stream):
+/// --------------------------------
+/// - Text position from Text Matrix (Tm) and graphics CTM
+/// - Coordinate system: PDF standard (origin at BOTTOM-LEFT, Y increases upward)
+/// - Units: PDF points (72 per inch)
+///
+/// OUTPUT (for comparison with screen selection):
+/// ----------------------------------------------
+/// - Bounding box in Avalonia coordinate system
+/// - Coordinate system: Top-left origin (Y increases downward)
+/// - Units: PDF points (72 per inch)
+///
+/// CONVERSION FORMULA:
+/// -------------------
+/// avaloniaY = pageHeight - pdfY
+///
+/// EXAMPLE:
+/// --------
+/// Page height: 792 points (Letter size)
+/// Text at PDF position (72, 720) = 72 points from left, 720 from bottom
+/// Converted: (72, 792 - 720) = (72, 72) = 72 points from left, 72 from TOP
+///
+/// This matches the screen selection coordinates which are also in top-left origin.
+///
+/// WHY THIS MATTERS:
+/// -----------------
+/// If we don't convert, text at the TOP of the page (high PDF Y value) would have
+/// a high Y in our bounding box, but screen selections at the TOP have LOW Y values.
+/// The intersection test would fail even when the selection is over the text.
+///
+/// ================================================================================
 /// </summary>
 public class TextBoundsCalculator
 {
@@ -21,8 +58,16 @@ public class TextBoundsCalculator
     }
 
     /// <summary>
-    /// Calculate bounding box for text with given state
+    /// Calculate bounding box for text with given state.
+    ///
+    /// Returns bounds in Avalonia coordinates (top-left origin, PDF points).
+    /// This allows direct comparison with screen selection areas.
     /// </summary>
+    /// <param name="text">The text string</param>
+    /// <param name="textState">Current PDF text state (font, matrix, etc.)</param>
+    /// <param name="graphicsState">Current PDF graphics state (CTM, etc.)</param>
+    /// <param name="pageHeight">Page height in PDF points (needed for Y-flip)</param>
+    /// <returns>Bounding box in Avalonia coordinates (top-left origin)</returns>
     public Rect CalculateBounds(string text, PdfTextState textState, PdfGraphicsState graphicsState, double pageHeight)
     {
         if (string.IsNullOrEmpty(text) || textState.FontSize <= 0)
@@ -62,33 +107,21 @@ public class TextBoundsCalculator
             transformedCorners.Add((tx, ty));
         }
 
-        // Find bounding box of all transformed corners
+        // Find bounding box of all transformed corners (still in PDF coordinates - bottom-left origin)
         var minX = transformedCorners.Min(c => c.x);
         var maxX = transformedCorners.Max(c => c.x);
-        var minY = transformedCorners.Min(c => c.y);
-        var maxY = transformedCorners.Max(c => c.y);
+        var minY = transformedCorners.Min(c => c.y);  // Bottom of text in PDF coords
+        var maxY = transformedCorners.Max(c => c.y);  // Top of text in PDF coords
 
-        // Check if the CTM has a Y-flip (negative D value means Y is already flipped)
-        // When D < 0, the coordinate system is already top-down (like Avalonia)
-        // so we should NOT apply the pageHeight - Y conversion
-        var ctm = graphicsState.TransformationMatrix;
-        var isYFlipped = ctm.D < 0;
+        // Convert from PDF coordinates (bottom-left origin) to Avalonia coordinates (top-left origin)
+        // Using centralized CoordinateConverter for consistency
+        // PDF maxY (top of text) becomes Avalonia Y (top edge of bounding box)
+        var avaloniaY = CoordinateConverter.PdfYToAvaloniaY(maxY, pageHeight);
 
-        double avaloniaY;
-        if (isYFlipped)
-        {
-            // CTM already flipped Y, coordinates are in top-down system
-            // minY is at top, maxY is at bottom in this case
-            avaloniaY = minY;
-            _logger.LogTrace("CTM has Y-flip (D={D:F2}), using minY={MinY:F2} directly", ctm.D, minY);
-        }
-        else
-        {
-            // Standard PDF coordinates (bottom-up), need to convert
-            avaloniaY = pageHeight - maxY;
-            _logger.LogTrace("Standard PDF coords, converting: pageHeight({PageHeight:F2}) - maxY({MaxY:F2}) = {AvaloniaY:F2}",
-                pageHeight, maxY, avaloniaY);
-        }
+        _logger.LogDebug(
+            "Y coordinate conversion via CoordinateConverter: pageHeight={PageHeight:F2}, " +
+            "pdfMinY={MinY:F2}, pdfMaxY={MaxY:F2} → avaloniaY={AvaloniaY:F2}",
+            pageHeight, minY, maxY, avaloniaY);
 
         var rect = new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
 

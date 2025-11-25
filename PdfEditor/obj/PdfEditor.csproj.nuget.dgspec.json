@@ -101,6 +101,10 @@
               "target": "Package",
               "version": "[0.1.11, )"
             },
+            "PdfSharpCore": {
+              "target": "Package",
+              "version": "[1.3.65, )"
+            },
             "ReactiveUI": {
               "target": "Package",
               "version": "[20.1.1, )"

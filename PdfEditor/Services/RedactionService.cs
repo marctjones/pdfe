@@ -98,35 +98,45 @@ public class RedactionService
     }
 
     /// <summary>
-    /// Redact an area of a PDF page by removing content and drawing a black rectangle
+    /// Redact an area of a PDF page by removing content and drawing a black rectangle.
+    ///
+    /// COORDINATE FLOW:
+    /// ================
+    /// Input: Image pixels (renderDpi, top-left origin) from mouse selection
+    ///    ↓ CoordinateConverter.ImageSelectionToPdfPointsTopLeft()
+    /// Output: PDF points (72 DPI, top-left origin) for text comparison
+    ///
+    /// Both text bounding boxes (from TextBoundsCalculator) and selection area
+    /// use PDF points with top-left origin, enabling direct intersection testing.
     /// </summary>
-    /// <param name="renderDpi">The DPI at which the page was rendered (default 150). Used to scale screen coordinates to PDF points (72 DPI)</param>
+    /// <param name="page">The PDF page to redact</param>
+    /// <param name="area">Selection area in rendered image pixels (renderDpi DPI, top-left origin)</param>
+    /// <param name="renderDpi">The DPI at which the page was rendered (default 150)</param>
     public void RedactArea(PdfPage page, Rect area, int renderDpi = 150)
     {
         _logger.LogInformation(
-            "Starting redaction. Screen area: ({X:F2},{Y:F2},{W:F2}x{H:F2}) at {Dpi} DPI",
+            "Starting redaction. Input area: ({X:F2},{Y:F2},{W:F2}x{H:F2}) at {Dpi} DPI [image pixels, top-left origin]",
             area.X, area.Y, area.Width, area.Height, renderDpi);
 
-        // Scale coordinates from rendered DPI to PDF points (72 DPI)
-        // PDF uses 72 points per inch, but the image is rendered at renderDpi
-        var scale = 72.0 / renderDpi;
-        var scaledX = area.X * scale;
-        var scaledY = area.Y * scale;
-        var scaledWidth = area.Width * scale;
-        var scaledHeight = area.Height * scale;
+        // Convert from image pixels to PDF points using centralized converter
+        // Both input and output use top-left origin (Avalonia convention)
+        var scaledArea = CoordinateConverter.ImageSelectionToPdfPointsTopLeft(area, renderDpi);
 
         _logger.LogInformation(
-            "Scaled coordinates by factor {Scale:F4} ({RenderDpi}→72 DPI): ({X:F2},{Y:F2},{W:F2}x{H:F2}) → ({ScaledX:F2},{ScaledY:F2},{ScaledW:F2}x{ScaledH:F2})",
-            scale, renderDpi, area.X, area.Y, area.Width, area.Height,
-            scaledX, scaledY, scaledWidth, scaledHeight);
-
-        // NOTE: TextBoundsCalculator already returns bounds in Avalonia coordinates (top-left origin)
-        // So we keep the redaction area in Avalonia coordinates too for direct comparison
-        var scaledArea = new Rect(scaledX, scaledY, scaledWidth, scaledHeight);
-
-        _logger.LogInformation(
-            "Using Avalonia coordinates for comparison (top-left origin): ({X:F2},{Y:F2},{W:F2}x{H:F2})",
+            "Coordinate conversion via CoordinateConverter: " +
+            "({X:F2},{Y:F2},{W:F2}x{H:F2}) → ({ScaledX:F2},{ScaledY:F2},{ScaledW:F2}x{ScaledH:F2}) [PDF points, top-left origin]",
+            area.X, area.Y, area.Width, area.Height,
             scaledArea.X, scaledArea.Y, scaledArea.Width, scaledArea.Height);
+
+        // Validate coordinates are reasonable for this page
+        var pageWidth = page.Width.Point;
+        var pageHeight = page.Height.Point;
+        if (!CoordinateConverter.IsValidForPage(scaledArea, pageWidth, pageHeight))
+        {
+            _logger.LogWarning(
+                "Selection area may be outside page bounds. Page: ({W}x{H}), Selection: ({X},{Y},{SW}x{SH})",
+                pageWidth, pageHeight, scaledArea.X, scaledArea.Y, scaledArea.Width, scaledArea.Height);
+        }
 
         var sw = Stopwatch.StartNew();
 
@@ -164,22 +174,32 @@ public class RedactionService
     }
 
     /// <summary>
-    /// Draw a black rectangle over the redacted area
-    /// This provides visual redaction
+    /// Draw a black rectangle over the redacted area.
+    /// This provides visual redaction to confirm content removal.
+    ///
+    /// COORDINATE HANDLING:
+    /// ===================
+    /// Input: PDF points with top-left origin (Avalonia convention)
+    /// XGraphics: Uses BOTTOM-LEFT origin (same as PDF native coordinates)
+    /// Result: Y-coordinate is flipped via CoordinateConverter.ForXGraphics(area, pageHeight)
     /// </summary>
-    /// <param name="area">Area in Avalonia coordinates (top-left origin, 72 DPI)</param>
+    /// <param name="page">The PDF page to draw on</param>
+    /// <param name="area">Area in PDF points (72 DPI, top-left origin)</param>
     private void DrawBlackRectangle(PdfPage page, Rect area)
     {
         using var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append);
 
-        // XGraphics with XGraphicsPdfPageOptions.Append uses Avalonia-style coordinates (top-left origin)
-        // No conversion needed - just use the area coordinates directly
+        // Use centralized coordinate converter for XGraphics
+        // XGraphics uses BOTTOM-LEFT origin (verified by testing), so we must flip Y
+        var pageHeight = page.Height.Point;
+        var (x, y, width, height) = CoordinateConverter.ForXGraphics(area, pageHeight);
+
         var brush = new XSolidBrush(XColor.FromArgb(255, 0, 0, 0));
-        gfx.DrawRectangle(brush, area.X, area.Y, area.Width, area.Height);
+        gfx.DrawRectangle(brush, x, y, width, height);
 
         _logger.LogDebug(
-            "Drew black rectangle at ({X:F2},{Y:F2},{W:F2}x{H:F2}) in XGraphics coordinates",
-            area.X, area.Y, area.Width, area.Height);
+            "Drew black rectangle at XGraphics({X:F2},{Y:F2},{W:F2}x{H:F2}) [converted from Avalonia({AX:F2},{AY:F2})]",
+            x, y, width, height, area.X, area.Y);
     }
 
     /// <summary>

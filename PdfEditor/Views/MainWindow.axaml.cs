@@ -383,7 +383,28 @@ public partial class MainWindow : Window
         }
     }
 
-    // Redaction selection handlers
+    // ==================================================================================
+    // REDACTION SELECTION HANDLERS
+    // ==================================================================================
+    // COORDINATE SYSTEM DOCUMENTATION:
+    //
+    // The Canvas has a ScaleTransform(ZoomLevel, ZoomLevel) applied via XAML.
+    // When GetPosition(canvas) is called, Avalonia returns coordinates in the Canvas's
+    // LOCAL coordinate space (before the transform is applied to rendering).
+    //
+    // This means:
+    // - If ZoomLevel = 2.0 and user clicks at screen position (400, 300)
+    // - The Canvas visually appears 2x larger
+    // - GetPosition returns (200, 150) - automatically inverse-transformed!
+    //
+    // Result: Coordinates from GetPosition are already in "image pixel" space (150 DPI),
+    // NOT in "zoomed screen pixel" space. We do NOT need to divide by zoom here.
+    //
+    // The coordinates stored in CurrentRedactionArea are in rendered image pixels (150 DPI).
+    // The ViewModel/Service layer will convert these to PDF points (72 DPI) when applying
+    // the redaction: pdfPoints = imagePixels * (72 / 150)
+    // ==================================================================================
+
     private void Canvas_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)
@@ -395,9 +416,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        // GetPosition returns coordinates in Canvas local space (image pixels at 150 DPI)
+        // because the Canvas has ScaleTransform that inverse-transforms input coordinates
         _selectionStartPoint = e.GetPosition(sender as Control);
         _isSelecting = true;
-        Console.WriteLine($"[Selection] Started at ({_selectionStartPoint.X:F1},{_selectionStartPoint.Y:F1})");
+        Console.WriteLine($"[Selection] Started at ({_selectionStartPoint.X:F1},{_selectionStartPoint.Y:F1}) [image pixels]");
     }
 
     private void Canvas_PointerMoved(object? sender, PointerEventArgs e)
@@ -405,15 +428,15 @@ public partial class MainWindow : Window
         if (!_isSelecting || DataContext is not MainWindowViewModel viewModel)
             return;
 
+        // GetPosition returns image-space coordinates (zoom already handled by Canvas transform)
         var currentPoint = e.GetPosition(sender as Control);
 
-        // Calculate selection rectangle and apply zoom compensation
-        // The image is scaled by ZoomLevel, so we need to divide coordinates to get actual PDF coordinates
-        var zoom = viewModel.ZoomLevel;
-        var x = Math.Min(_selectionStartPoint.X, currentPoint.X) / zoom;
-        var y = Math.Min(_selectionStartPoint.Y, currentPoint.Y) / zoom;
-        var width = Math.Abs(currentPoint.X - _selectionStartPoint.X) / zoom;
-        var height = Math.Abs(currentPoint.Y - _selectionStartPoint.Y) / zoom;
+        // Calculate selection rectangle in image pixel coordinates (150 DPI, top-left origin)
+        // NO zoom division needed - the Canvas ScaleTransform handles coordinate transformation
+        var x = Math.Min(_selectionStartPoint.X, currentPoint.X);
+        var y = Math.Min(_selectionStartPoint.Y, currentPoint.Y);
+        var width = Math.Abs(currentPoint.X - _selectionStartPoint.X);
+        var height = Math.Abs(currentPoint.Y - _selectionStartPoint.Y);
 
         viewModel.CurrentRedactionArea = new Rect(x, y, width, height);
     }
@@ -422,17 +445,24 @@ public partial class MainWindow : Window
     {
         if (_isSelecting && DataContext is MainWindowViewModel viewModel)
         {
-            Console.WriteLine($"[Selection] Completed: ({viewModel.CurrentRedactionArea.X:F1},{viewModel.CurrentRedactionArea.Y:F1},{viewModel.CurrentRedactionArea.Width:F1}x{viewModel.CurrentRedactionArea.Height:F1})");
+            Console.WriteLine($"[Selection] Completed: ({viewModel.CurrentRedactionArea.X:F1},{viewModel.CurrentRedactionArea.Y:F1},{viewModel.CurrentRedactionArea.Width:F1}x{viewModel.CurrentRedactionArea.Height:F1}) [image pixels]");
         }
         _isSelecting = false;
     }
 
-    // Text selection handlers
+    // ==================================================================================
+    // TEXT SELECTION HANDLERS
+    // ==================================================================================
+    // Same coordinate system as redaction - Canvas has ScaleTransform so GetPosition
+    // returns image-space coordinates automatically.
+    // ==================================================================================
+
     private void TextCanvas_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel || !viewModel.IsTextSelectionMode)
             return;
 
+        // GetPosition returns coordinates in Canvas local space (image pixels at 150 DPI)
         _textSelectionStartPoint = e.GetPosition(sender as Control);
         _isSelectingText = true;
     }
@@ -442,15 +472,15 @@ public partial class MainWindow : Window
         if (!_isSelectingText || DataContext is not MainWindowViewModel viewModel)
             return;
 
+        // GetPosition returns image-space coordinates (zoom already handled by Canvas transform)
         var currentPoint = e.GetPosition(sender as Control);
 
-        // Calculate selection rectangle and apply zoom compensation
-        // The image is scaled by ZoomLevel, so we need to divide coordinates to get actual PDF coordinates
-        var zoom = viewModel.ZoomLevel;
-        var x = Math.Min(_textSelectionStartPoint.X, currentPoint.X) / zoom;
-        var y = Math.Min(_textSelectionStartPoint.Y, currentPoint.Y) / zoom;
-        var width = Math.Abs(currentPoint.X - _textSelectionStartPoint.X) / zoom;
-        var height = Math.Abs(currentPoint.Y - _textSelectionStartPoint.Y) / zoom;
+        // Calculate selection rectangle in image pixel coordinates (150 DPI, top-left origin)
+        // NO zoom division needed - the Canvas ScaleTransform handles coordinate transformation
+        var x = Math.Min(_textSelectionStartPoint.X, currentPoint.X);
+        var y = Math.Min(_textSelectionStartPoint.Y, currentPoint.Y);
+        var width = Math.Abs(currentPoint.X - _textSelectionStartPoint.X);
+        var height = Math.Abs(currentPoint.Y - _textSelectionStartPoint.Y);
 
         viewModel.CurrentTextSelectionArea = new Rect(x, y, width, height);
     }

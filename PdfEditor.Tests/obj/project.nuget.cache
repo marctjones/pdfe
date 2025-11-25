@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "pCgEirRIg+A=",
+  "dgSpecHash": "+1ICbSALoQo=",
   "success": true,
   "projectFilePath": "/home/marc/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj",
   "expectedPackageFiles": [
@@ -12,6 +12,8 @@
     "/home/marc/.nuget/packages/avalonia.desktop/11.2.5/avalonia.desktop.11.2.5.nupkg.sha512",
     "/home/marc/.nuget/packages/avalonia.fonts.inter/11.2.5/avalonia.fonts.inter.11.2.5.nupkg.sha512",
     "/home/marc/.nuget/packages/avalonia.freedesktop/11.2.5/avalonia.freedesktop.11.2.5.nupkg.sha512",
+    "/home/marc/.nuget/packages/avalonia.headless/11.2.5/avalonia.headless.11.2.5.nupkg.sha512",
+    "/home/marc/.nuget/packages/avalonia.headless.xunit/11.2.5/avalonia.headless.xunit.11.2.5.nupkg.sha512",
     "/home/marc/.nuget/packages/avalonia.native/11.2.5/avalonia.native.11.2.5.nupkg.sha512",
     "/home/marc/.nuget/packages/avalonia.reactiveui/11.2.5/avalonia.reactiveui.11.2.5.nupkg.sha512",
     "/home/marc/.nuget/packages/avalonia.remote.protocol/11.2.5/avalonia.remote.protocol.11.2.5.nupkg.sha512",
@@ -160,6 +162,7 @@
     "/home/marc/.nuget/packages/system.xml.readerwriter/4.3.0/system.xml.readerwriter.4.3.0.nupkg.sha512",
     "/home/marc/.nuget/packages/system.xml.xdocument/4.3.0/system.xml.xdocument.4.3.0.nupkg.sha512",
     "/home/marc/.nuget/packages/tmds.dbus.protocol/0.20.0/tmds.dbus.protocol.0.20.0.nupkg.sha512",
+    "/home/marc/.nuget/packages/validation/2.4.18/validation.2.4.18.nupkg.sha512",
     "/home/marc/.nuget/packages/xunit/2.5.3/xunit.2.5.3.nupkg.sha512",
     "/home/marc/.nuget/packages/xunit.abstractions/2.0.3/xunit.abstractions.2.0.3.nupkg.sha512",
     "/home/marc/.nuget/packages/xunit.analyzers/1.4.0/xunit.analyzers.1.4.0.nupkg.sha512",
@@ -167,7 +170,8 @@
     "/home/marc/.nuget/packages/xunit.core/2.5.3/xunit.core.2.5.3.nupkg.sha512",
     "/home/marc/.nuget/packages/xunit.extensibility.core/2.5.3/xunit.extensibility.core.2.5.3.nupkg.sha512",
     "/home/marc/.nuget/packages/xunit.extensibility.execution/2.5.3/xunit.extensibility.execution.2.5.3.nupkg.sha512",
-    "/home/marc/.nuget/packages/xunit.runner.visualstudio/2.5.3/xunit.runner.visualstudio.2.5.3.nupkg.sha512"
+    "/home/marc/.nuget/packages/xunit.runner.visualstudio/2.5.3/xunit.runner.visualstudio.2.5.3.nupkg.sha512",
+    "/home/marc/.nuget/packages/xunit.skippablefact/1.4.13/xunit.skippablefact.1.4.13.nupkg.sha512"
   ],
   "logs": []
 }
