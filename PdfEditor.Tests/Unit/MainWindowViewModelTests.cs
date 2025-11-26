@@ -44,6 +44,7 @@ public class MainWindowViewModelTests
 
         return new MainWindowViewModel(
             _loggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,

@@ -250,17 +250,21 @@ public class PdfOperationTests
     #region Edge Cases
 
     [Fact]
-    public void IntersectsWith_VerySmallOverlap_ShouldStillBeTrue()
+    public void IntersectsWith_VerySmallOverlap_ShouldBeFalse()
     {
-        // Arrange - Just 1 point overlap
+        // Arrange - Just 1 point overlap at corner (99,49) to (100,50)
+        // Text spans (0,0) to (100,50), selection spans (99,49) to (149,99)
+        // This tiny overlap should NOT result in intersection to prevent
+        // adjacent content from being accidentally removed during redaction.
         var operation = CreateTextOperationWithBounds(0, 0, 100, 50);
         var redactionArea = new Rect(99, 49, 50, 50); // 1 point overlap
 
         // Act
         var result = operation.IntersectsWith(redactionArea);
 
-        // Assert
-        result.Should().BeTrue("Even tiny overlaps should result in intersection");
+        // Assert - tiny overlaps should NOT intersect
+        // This prevents adjacent lines from being accidentally removed
+        result.Should().BeFalse("Tiny overlaps (< 20% of height) should not result in intersection");
     }
 
     [Fact]

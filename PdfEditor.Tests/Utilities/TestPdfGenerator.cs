@@ -123,6 +123,32 @@ public static class TestPdfGenerator
     }
 
     /// <summary>
+    /// Creates a PDF with text at a specific position (in XGraphics coordinates - top-left origin)
+    /// </summary>
+    /// <param name="outputPath">Path to save the PDF</param>
+    /// <param name="text">Text to write</param>
+    /// <param name="x">X position in XGraphics coordinates (points from left)</param>
+    /// <param name="y">Y position in XGraphics coordinates (points from top)</param>
+    public static string CreateTextAtPosition(string outputPath, string text, double x, double y)
+    {
+        EnsureFontResolverInitialized();
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(612);  // Letter size
+        page.Height = XUnit.FromPoint(792);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 12);
+
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(x, y));
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
+
+    /// <summary>
     /// Creates a PDF with text and graphics (rectangles)
     /// </summary>
     public static string CreateTextWithGraphicsPdf(string outputPath)

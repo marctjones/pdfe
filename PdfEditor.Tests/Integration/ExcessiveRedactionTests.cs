@@ -205,7 +205,14 @@ public class ExcessiveRedactionTests : IDisposable
 
         var areaHeight = fontSize * 1.5;
         var areaWidth = secretText.Length * fontSize * 0.8;
-        var redactionArea = new Rect(95, 95, areaWidth, areaHeight);
+        // Text is drawn at XPoint(100, 100) - this is the BASELINE position in XGraphics
+        // The top of the text is approximately at Y = 100 - fontSize (ascenders extend upward)
+        // After coordinate conversion through ContentStreamParser/TextBoundsCalculator,
+        // the text bounding box Y position reflects the top of the text in Avalonia coords
+        // We need to cover from slightly above the text top to below the baseline
+        var textTopY = 100 - fontSize;  // Approximate top of text in XGraphics coords
+        var redactionY = Math.Max(0, textTopY - 5);  // Start slightly above text top
+        var redactionArea = new Rect(95, redactionY, areaWidth, areaHeight);
 
         _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
 

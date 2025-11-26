@@ -63,6 +63,7 @@ public class ViewModelIntegrationTests : IDisposable
 
         return new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,
@@ -486,6 +487,7 @@ public class ViewModelIntegrationTests : IDisposable
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,
@@ -579,6 +581,7 @@ public class ViewModelIntegrationTests : IDisposable
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,
@@ -655,6 +658,7 @@ public class ViewModelIntegrationTests : IDisposable
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,
@@ -738,6 +742,7 @@ public class ViewModelIntegrationTests : IDisposable
 
         var vm1 = new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService1,
             renderService1,
             redactionService1,
@@ -795,6 +800,7 @@ public class ViewModelIntegrationTests : IDisposable
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,

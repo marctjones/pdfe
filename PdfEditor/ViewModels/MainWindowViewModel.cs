@@ -17,6 +17,7 @@ namespace PdfEditor.ViewModels;
 public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ILogger<MainWindowViewModel> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly PdfDocumentService _documentService;
     private readonly PdfRenderService _renderService;
     private readonly RedactionService _redactionService;
@@ -38,6 +39,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel(
         ILogger<MainWindowViewModel> logger,
+        ILoggerFactory loggerFactory,
         PdfDocumentService documentService,
         PdfRenderService renderService,
         RedactionService redactionService,
@@ -45,6 +47,7 @@ public partial class MainWindowViewModel : ViewModelBase
         PdfSearchService searchService)
     {
         _logger = logger;
+        _loggerFactory = loggerFactory;
         _documentService = documentService;
         _renderService = renderService;
         _redactionService = redactionService;
@@ -522,11 +525,52 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
+            // IMPORTANT: Extract text BEFORE redacting so we can show what was removed
+            string redactedText = string.Empty;
+            if (!string.IsNullOrEmpty(_currentFilePath))
+            {
+                try
+                {
+                    redactedText = _textExtractionService.ExtractTextFromArea(
+                        _currentFilePath, CurrentPageIndex, areaToRedact);
+                    _logger.LogInformation("Text to be redacted: '{Text}'", redactedText);
+                }
+                catch (Exception textEx)
+                {
+                    _logger.LogWarning(textEx, "Could not extract text before redaction");
+                }
+            }
+
             _logger.LogInformation("Applying redaction (selection area: {X:F2},{Y:F2},{W:F2}x{H:F2})",
                 areaToRedact.X, areaToRedact.Y, areaToRedact.Width, areaToRedact.Height);
 
             var page = document.Pages[CurrentPageIndex];
             _redactionService.RedactArea(page, areaToRedact);
+
+            // Add redacted text to clipboard history (so user can see what was removed)
+            if (!string.IsNullOrWhiteSpace(redactedText))
+            {
+                var clipboardEntry = new ClipboardEntry
+                {
+                    Text = redactedText,
+                    Timestamp = DateTime.Now,
+                    PageNumber = CurrentPageIndex + 1,
+                    IsRedacted = true
+                };
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    ClipboardHistory.Insert(0, clipboardEntry);
+
+                    // Keep only last 20 entries
+                    while (ClipboardHistory.Count > 20)
+                    {
+                        ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
+                    }
+                });
+
+                _logger.LogInformation("Added redacted text to clipboard history: '{Text}'", redactedText);
+            }
 
             _logger.LogInformation("Redaction applied to in-memory document, now re-rendering page...");
 
