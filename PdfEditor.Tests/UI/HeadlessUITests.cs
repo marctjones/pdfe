@@ -52,6 +52,7 @@ public class HeadlessUITests
 
         return new MainWindowViewModel(
             _vmLoggerMock.Object,
+            _loggerFactory,
             documentService,
             renderService,
             redactionService,

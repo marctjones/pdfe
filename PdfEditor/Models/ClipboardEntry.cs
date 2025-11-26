@@ -8,6 +8,7 @@ public class ClipboardEntry : ReactiveObject
     private string _text = string.Empty;
     private DateTime _timestamp;
     private int _pageNumber;
+    private bool _isRedacted;
 
     public string Text
     {
@@ -36,7 +37,18 @@ public class ClipboardEntry : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _pageNumber, value);
     }
 
+    public bool IsRedacted
+    {
+        get => _isRedacted;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isRedacted, value);
+            this.RaisePropertyChanged(nameof(TypeIndicator));
+        }
+    }
+
     // Computed properties for UI display
+    public string TypeIndicator => IsRedacted ? "REDACTED" : "Copied";
     public string TimeDisplay
     {
         get

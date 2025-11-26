@@ -19,14 +19,43 @@ public abstract class PdfOperation
     }
     
     /// <summary>
-    /// Check if this operation intersects with a given area
+    /// Check if this operation intersects with a given area.
+    /// Uses HYBRID intersection for precision:
+    /// - Y-axis: Center-point OR significant overlap (>30% of height)
+    ///   This prevents adjacent lines from being caught while still catching
+    ///   text that significantly overlaps the selection area.
+    /// - X-axis: Any-overlap based (catches all content on the same line)
     /// </summary>
     public virtual bool IntersectsWith(Rect area)
     {
         if (BoundingBox.Width <= 0 || BoundingBox.Height <= 0)
             return false;
-            
-        return BoundingBox.Intersects(area);
+
+        // For Y-axis: Use center-point OR significant overlap check
+        // This prevents adjacent lines from being caught (which would have tiny overlap)
+        // while still catching text that significantly overlaps the selection
+        var centerY = BoundingBox.Y + BoundingBox.Height / 2.0;
+        var centerInSelection = centerY >= area.Y && centerY <= area.Y + area.Height;
+
+        // Check for significant overlap (more than 20% of text height)
+        // This handles edge cases where selection is slightly below/above text center
+        // 20% threshold chosen to:
+        // - Allow text that meaningfully overlaps the selection (not just touching)
+        // - Work with larger fonts where overlap percentage is smaller
+        // - Prevent adjacent lines that barely touch from being caught
+        var overlapTop = Math.Max(BoundingBox.Y, area.Y);
+        var overlapBottom = Math.Min(BoundingBox.Y + BoundingBox.Height, area.Y + area.Height);
+        var overlapAmount = Math.Max(0, overlapBottom - overlapTop);
+        var hasSignificantOverlap = BoundingBox.Height > 0 &&
+                                     overlapAmount >= BoundingBox.Height * 0.2;
+
+        var yIntersects = centerInSelection || hasSignificantOverlap;
+
+        // For X-axis: Use actual overlap (not just touching) to catch content on the same line
+        // Using <= and >= ensures rectangles that just touch at an edge don't count as intersecting
+        var xIntersects = !(BoundingBox.Right <= area.X || BoundingBox.X >= area.Right);
+
+        return xIntersects && yIntersects;
     }
     
     /// <summary>

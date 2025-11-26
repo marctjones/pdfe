@@ -424,16 +424,34 @@
                                             Background="{DynamicResource CardBrush}"
                                             BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="1"
-                                            CornerRadius="6">
+                                            CornerRadius="6"
+                                            Classes.redacted="{Binding IsRedacted}">
+                                        <Border.Styles>
+                                            <Style Selector="Border.redacted">
+                                                <Setter Property="BorderBrush" Value="#E53935"/>
+                                                <Setter Property="BorderThickness" Value="2"/>
+                                            </Style>
+                                        </Border.Styles>
                                         <StackPanel Spacing="6">
-                                            <!-- Header: Time and Page -->
-                                            <Grid ColumnDefinitions="*,Auto">
-                                                <TextBlock Grid.Column="0"
+                                            <!-- Header: Type, Time and Page -->
+                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                                <Border Grid.Column="0"
+                                                        Background="#E53935"
+                                                        CornerRadius="3"
+                                                        Padding="6,2"
+                                                        Margin="0,0,8,0"
+                                                        IsVisible="{Binding IsRedacted}">
+                                                    <TextBlock Text="REDACTED"
+                                                               FontSize="9"
+                                                               FontWeight="Bold"
+                                                               Foreground="White"/>
+                                                </Border>
+                                                <TextBlock Grid.Column="1"
                                                            Text="{Binding TimeDisplay}"
                                                            FontSize="11"
                                                            FontWeight="Medium"
                                                            Foreground="{DynamicResource BrandPrimaryBrush}"/>
-                                                <TextBlock Grid.Column="1"
+                                                <TextBlock Grid.Column="2"
                                                            Text="{Binding PageNumber, StringFormat='Page {0}'}"
                                                            FontSize="11"
                                                            Foreground="{DynamicResource TextSecondaryBrush}"/>
