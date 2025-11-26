@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
 
 namespace PdfEditor.Services;
 
@@ -81,10 +82,9 @@ public class PdfTextExtractionService
 
             var page = document.GetPage(pageIndex + 1); // PdfPig uses 1-based indexing
 
-            // Get words from page
+            // Get words from page (we'll iterate their letters for character-level selection)
             var words = page.GetWords();
             var extractedText = new StringBuilder();
-            var matchedWords = new List<Word>();
 
             // Use centralized CoordinateConverter for all coordinate transformations
             // This converts from image pixels (top-left origin) to PDF coordinates (bottom-left origin)
@@ -100,53 +100,59 @@ public class PdfTextExtractionService
                 area.X, area.Y, area.Width, area.Height,
                 pdfRect.Left, pdfRect.Bottom, pdfRect.Right, pdfRect.Top);
 
-            // Find words that intersect with the selection area
+            // CHARACTER-LEVEL SELECTION: Find individual letters whose center point is inside the selection
+            // This allows precise text selection (e.g., selecting "can therefore" from a sentence
+            // without accidentally including adjacent words)
+            var selectedLetters = new List<Letter>();
+
             foreach (var word in words)
             {
-                var wordBox = word.BoundingBox;
-                if (Intersects(wordBox, pdfRect))
+                foreach (var letter in word.Letters)
                 {
-                    matchedWords.Add(word);
+                    if (IsLetterCenterInSelection(letter.GlyphRectangle, pdfRect))
+                    {
+                        selectedLetters.Add(letter);
+                    }
                 }
             }
 
-            _logger.LogInformation("Found {WordCount} words in selection area", matchedWords.Count);
+            _logger.LogInformation("Found {LetterCount} letters in selection area (character-level)", selectedLetters.Count);
 
-            if (matchedWords.Count == 0)
+            if (selectedLetters.Count == 0)
             {
-                _logger.LogWarning("No words found in selection area");
+                _logger.LogWarning("No letters found in selection area");
                 return string.Empty;
             }
 
-            // Group words into lines based on Y coordinate
+            // Group letters into lines based on Y coordinate
             const double lineHeightThreshold = 5.0;
-            var lines = new List<List<Word>>();
+            var lines = new List<List<Letter>>();
 
-            foreach (var word in matchedWords)
+            foreach (var letter in selectedLetters)
             {
-                var wordMid = (word.BoundingBox.Top + word.BoundingBox.Bottom) / 2.0;
+                var letterMid = (letter.GlyphRectangle.Top + letter.GlyphRectangle.Bottom) / 2.0;
                 var line = lines.FirstOrDefault(l =>
                 {
-                    var lineMid = (l[0].BoundingBox.Top + l[0].BoundingBox.Bottom) / 2.0;
-                    return Math.Abs(lineMid - wordMid) < lineHeightThreshold;
+                    var lineMid = (l[0].GlyphRectangle.Top + l[0].GlyphRectangle.Bottom) / 2.0;
+                    return Math.Abs(lineMid - letterMid) < lineHeightThreshold;
                 });
 
                 if (line == null)
                 {
-                    line = new List<Word>();
+                    line = new List<Letter>();
                     lines.Add(line);
                 }
-                line.Add(word);
+                line.Add(letter);
             }
 
             // Sort lines top to bottom
             var sortedLines = lines.OrderByDescending(line =>
-                (line[0].BoundingBox.Top + line[0].BoundingBox.Bottom) / 2.0).ToList();
+                (line[0].GlyphRectangle.Top + line[0].GlyphRectangle.Bottom) / 2.0).ToList();
 
-            // Within each line, sort words left to right
+            // Within each line, sort letters left to right
             foreach (var line in sortedLines)
             {
-                line.Sort((a, b) => a.BoundingBox.Left.CompareTo(b.BoundingBox.Left));
+                line.Sort((a, b) => a.GlyphRectangle.Left.CompareTo(b.GlyphRectangle.Left));
             }
 
             // Build text with proper spacing
@@ -157,39 +163,22 @@ public class PdfTextExtractionService
 
                 for (int j = 0; j < line.Count; j++)
                 {
-                    var word = line[j];
-                    var wordText = word.Text;
+                    var letter = line[j];
 
-                    // Add spaces within concatenated words
-                    // Check each letter to see if we need to insert spaces
-                    var letters = word.Letters.ToList();
-                    for (int k = 0; k < letters.Count; k++)
+                    if (j > 0)
                     {
-                        var letter = letters[k];
-                        if (k > 0)
+                        // Check gap from previous letter
+                        var gap = letter.GlyphRectangle.Left - lastRight;
+                        // If gap is larger than typical letter spacing, add a space
+                        // Threshold: 2.5 points (typical word spacing is 3-4 points)
+                        if (gap > 2.5)
                         {
-                            var prevLetter = letters[k - 1];
-                            var gap = letter.GlyphRectangle.Left - prevLetter.GlyphRectangle.Right;
-                            // If gap is larger than typical letter spacing, add a space
-                            // Threshold: 2.5 points (typical word spacing is 3-4 points)
-                            if (gap > 2.5)
-                            {
-                                extractedText.Append(' ');
-                            }
+                            extractedText.Append(' ');
                         }
-                        else if (lastRight > 0)
-                        {
-                            // Check gap from previous word
-                            var gap = letter.GlyphRectangle.Left - lastRight;
-                            if (gap > 2.5)
-                            {
-                                extractedText.Append(' ');
-                            }
-                        }
-
-                        extractedText.Append(letter.Value);
-                        lastRight = letter.GlyphRectangle.Right;
                     }
+
+                    extractedText.Append(letter.Value);
+                    lastRight = letter.GlyphRectangle.Right;
                 }
 
                 // Add newline after line (except last)
@@ -199,8 +188,8 @@ public class PdfTextExtractionService
 
             var result = extractedText.ToString().Trim();
             _logger.LogInformation(
-                "Text extraction complete: {WordCount} words extracted, {CharCount} characters in result",
-                matchedWords.Count, result.Length);
+                "Text extraction complete: {LetterCount} letters extracted, {CharCount} characters in result",
+                selectedLetters.Count, result.Length);
 
             // Log the actual extracted text (first 200 chars)
             if (result.Length > 0)
@@ -219,11 +208,30 @@ public class PdfTextExtractionService
     }
 
     /// <summary>
-    /// Check if two rectangles intersect
+    /// Check if two rectangles intersect (kept for potential future use)
     /// </summary>
-    private bool Intersects(UglyToad.PdfPig.Core.PdfRectangle a, UglyToad.PdfPig.Core.PdfRectangle b)
+    private bool Intersects(PdfRectangle a, PdfRectangle b)
     {
         return !(a.Right < b.Left || a.Left > b.Right ||
                  a.Top < b.Bottom || a.Bottom > b.Top);
+    }
+
+    /// <summary>
+    /// Check if a letter's center point is inside the selection rectangle.
+    /// This provides precise character-level selection - a letter is only selected
+    /// if its center point falls within the selection bounds.
+    /// </summary>
+    /// <param name="letterBox">The bounding box of the letter (glyph rectangle)</param>
+    /// <param name="selection">The selection rectangle in PDF coordinates</param>
+    /// <returns>True if the letter's center is inside the selection</returns>
+    private bool IsLetterCenterInSelection(PdfRectangle letterBox, PdfRectangle selection)
+    {
+        // Calculate the center point of the letter
+        var centerX = (letterBox.Left + letterBox.Right) / 2.0;
+        var centerY = (letterBox.Top + letterBox.Bottom) / 2.0;
+
+        // Check if center point is inside the selection rectangle
+        return centerX >= selection.Left && centerX <= selection.Right &&
+               centerY >= selection.Bottom && centerY <= selection.Top;
     }
 }
