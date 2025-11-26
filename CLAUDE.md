@@ -8,9 +8,13 @@ This is a cross-platform PDF editor built with **C# + .NET 8 + Avalonia UI** (MV
 
 **Key Features:**
 - Open/view PDFs with zoom and pan controls
-- Add/remove pages
+- Add, remove, and rotate pages
+- Text selection and copy
+- Search with highlighting
 - Content-level redaction (removes text/graphics from PDF structure, not just visual covering)
+- Clipboard history showing redacted text
 - Page thumbnails sidebar
+- Keyboard shortcuts
 - All dependencies use permissive licenses (MIT, Apache 2.0, BSD-3)
 
 ## ⚠️ CRITICAL: Redaction Code Requirements
@@ -130,6 +134,9 @@ The codebase follows strict MVVM separation:
 - `PdfDocumentService.cs` - PDF loading, saving, page add/remove
 - `PdfRenderService.cs` - PDF-to-image rendering (uses PDFium)
 - `RedactionService.cs` - Orchestrates content-level redaction
+- `PdfTextExtractionService.cs` - Text extraction from PDFs
+- `PdfSearchService.cs` - Search functionality
+- `CoordinateConverter.cs` - Coordinate system conversions
 
 ### Data Flow
 
@@ -232,13 +239,22 @@ Located in `PdfEditor.Tests/`:
 
 **Framework**: xUnit 2.5.3 with FluentAssertions 6.12.0
 
+**Test Count**: 600+ tests (598 passing, 2 skipped for VeraPDF)
+
 **Utilities:**
 - `Utilities/TestPdfGenerator.cs` - Creates test PDFs with known content
 - `Utilities/PdfTestHelpers.cs` - PDF inspection and text extraction
 
-**Tests:**
-- `Integration/RedactionIntegrationTests.cs` - 5 comprehensive integration tests
-- Tests verify content removal, not just visual redaction
+**Test Categories:**
+- `Integration/` - End-to-end redaction, coordinate conversion, batch processing
+- `Unit/` - ViewModel, coordinate conversion, PDF operations
+- `UI/` - Headless UI tests, ViewModel integration
+- `Security/` - Content removal verification
+
+**Key Test Files:**
+- `GuiRedactionSimulationTests.cs` - Simulates exact GUI workflow to catch coordinate issues
+- `CoordinateConverterTests.cs` - Validates coordinate math
+- `ComprehensiveRedactionTests.cs` - Full redaction pipeline tests
 
 **Running Tests:** See "Build and Run Commands" section above.
 
@@ -372,7 +388,16 @@ PdfEditor/
 
 PdfEditor.Tests/
 ├── Integration/
-│   └── RedactionIntegrationTests.cs
+│   ├── GuiRedactionSimulationTests.cs  # GUI workflow simulation
+│   ├── ComprehensiveRedactionTests.cs  # Full redaction tests
+│   └── ...
+├── Unit/
+│   ├── CoordinateConverterTests.cs     # Coordinate math tests
+│   └── ...
+├── UI/
+│   └── HeadlessUITests.cs              # UI integration tests
+├── Security/
+│   └── ContentRemovalVerificationTests.cs
 ├── Utilities/
 │   ├── TestPdfGenerator.cs
 │   └── PdfTestHelpers.cs
@@ -380,10 +405,12 @@ PdfEditor.Tests/
 
 Documentation:
 ├── README.md                       # User-facing documentation
+├── CLAUDE.md                       # This file - development guidelines
 ├── ARCHITECTURE_DIAGRAM.md         # Visual architecture diagrams
 ├── REDACTION_ENGINE.md            # Deep dive on redaction
 ├── TESTING_GUIDE.md               # Test infrastructure guide
-└── QUICK_REFERENCE.md             # Quick development reference
+├── REDACTION_AI_GUIDELINES.md     # AI safety guidelines for redaction
+└── LICENSES.md                    # Dependency licenses
 ```
 
 ## Security Notes
