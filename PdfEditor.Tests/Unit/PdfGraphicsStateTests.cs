@@ -232,6 +232,24 @@ public class PdfGraphicsStateTests
     }
 
     [Fact]
+    public void Clone_ModifyingDashPattern_ShouldNotMutateOriginalArray()
+    {
+        // Arrange
+        var original = new PdfGraphicsState
+        {
+            LineDashPattern = new[] { 1.0, 2.0, 3.0 }
+        };
+
+        // Act
+        var clone = original.Clone();
+        clone.LineDashPattern[0] = 42.0;
+
+        // Assert
+        original.LineDashPattern[0].Should().Be(1.0, "original dash pattern should remain unchanged");
+        clone.LineDashPattern[0].Should().Be(42.0, "clone dash pattern should reflect modification");
+    }
+
+    [Fact]
     public void Clone_MultipleClones_ShouldAllBeIndependent()
     {
         // Arrange

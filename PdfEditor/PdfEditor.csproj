@@ -25,7 +25,8 @@
     <PackageReference Include="PDFsharp" Version="6.2.2" /> <!-- MIT License -->
     <PackageReference Include="PdfPig" Version="0.1.11" />
     <PackageReference Include="PdfSharpCore" Version="1.3.65" /> <!-- Apache 2.0 -->
-    <PackageReference Include="PDFtoImage" Version="4.0.2" /> <!-- MIT License -->
+    <PackageReference Include="PDFtoImage" Version="4.0.2" />
+    <PackageReference Include="Portable.BouncyCastle" Version="1.9.0" /> <!-- MIT License -->
     <PackageReference Include="SkiaSharp" Version="2.88.9" /> <!-- MIT License -->
 
     <!-- MVVM and Utilities -->
@@ -37,6 +38,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Tesseract" Version="5.2.0" />
   </ItemGroup>
 
   <ItemGroup>

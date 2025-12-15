@@ -26,6 +26,9 @@ public class ContentStreamBuilder
     /// </summary>
     public byte[] BuildContentStream(List<PdfOperation> operations)
     {
+        if (operations == null)
+            throw new ArgumentNullException(nameof(operations));
+
         var sw = Stopwatch.StartNew();
         _logger.LogInformation("Building content stream from {Count} operations", operations.Count);
 
@@ -85,6 +88,13 @@ public class ContentStreamBuilder
         // Get the original CObject and serialize it
         if (operation.OriginalObject is COperator op)
         {
+            // Inline images are handled exclusively via InlineImageOperation.RawData.
+            // Skip any direct BI/ID/EI operators to avoid re-emitting inline image bytes.
+            if (op.OpCode.Name is "BI" or "ID" or "EI")
+            {
+                _logger.LogDebug("Skipping inline image operator {Op}", op.OpCode.Name);
+                return;
+            }
             WriteOperator(writer, op);
         }
         else if (operation.OriginalObject is CSequence sequence)
@@ -92,7 +102,11 @@ public class ContentStreamBuilder
             foreach (var item in sequence)
             {
                 if (item is COperator seqOp)
+                {
+                    if (seqOp.OpCode.Name is "BI" or "ID" or "EI")
+                        continue;
                     WriteOperator(writer, seqOp);
+                }
             }
         }
     }

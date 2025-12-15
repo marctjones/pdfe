@@ -77,7 +77,7 @@ public class MetadataSanitizationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
+        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.Import);
 
         _output.WriteLine($"Original title: 'Confidential Report - Secret Project'");
         _output.WriteLine($"Sanitized title: '{sanitizedDoc.Info.Title}'");
@@ -126,7 +126,7 @@ public class MetadataSanitizationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
+        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.Import);
 
         _output.WriteLine($"Title: '{sanitizedDoc.Info.Title}'");
         _output.WriteLine($"Author: '{sanitizedDoc.Info.Author}'");
@@ -175,7 +175,7 @@ public class MetadataSanitizationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
+        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.Import);
 
         _output.WriteLine($"Original: 'SECRET report with secret and SECRET data'");
         _output.WriteLine($"Sanitized: '{sanitizedDoc.Info.Title}'");
@@ -225,7 +225,7 @@ public class MetadataSanitizationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
+        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.Import);
 
         _output.WriteLine($"Title: '{sanitizedDoc.Info.Title}'");
         _output.WriteLine($"Author: '{sanitizedDoc.Info.Author}'");
@@ -287,7 +287,7 @@ public class MetadataSanitizationTests : IDisposable
         textAfter.Should().NotContain("CONFIDENTIAL");
 
         // Check metadata is sanitized
-        using var redactedDoc = PdfReader.Open(redactedPath, PdfDocumentOpenMode.ReadOnly);
+        using var redactedDoc = PdfReader.Open(redactedPath, PdfDocumentOpenMode.Import);
         _output.WriteLine($"Title after: '{redactedDoc.Info.Title}'");
         _output.WriteLine($"Subject after: '{redactedDoc.Info.Subject}'");
 
@@ -333,7 +333,7 @@ public class MetadataSanitizationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        using var redactedDoc = PdfReader.Open(redactedPath, PdfDocumentOpenMode.ReadOnly);
+        using var redactedDoc = PdfReader.Open(redactedPath, PdfDocumentOpenMode.Import);
 
         redactedDoc.Info.Title.Should().BeEmpty();
         redactedDoc.Info.Author.Should().BeEmpty();
@@ -420,7 +420,7 @@ public class MetadataSanitizationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.ReadOnly);
+        using var sanitizedDoc = PdfReader.Open(sanitizedPath, PdfDocumentOpenMode.Import);
 
         if (sanitizedDoc.Outlines.Count > 0)
         {

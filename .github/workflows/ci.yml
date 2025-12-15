@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --no-restore
+      - name: Test
+        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!=PdfEditor.Tests.Integration.VeraPdfConformanceTests.OriginalPdf_PassesVeraPdfAutoDetect&FullyQualifiedName!=PdfEditor.Tests.Integration.VeraPdfConformanceTests.RedactedPdf_PassesVeraPdfStructureCheck"
+      - name: Run veraPDF/qpdf checks
+        run: |
+          echo "Skipping external validators in CI placeholder"

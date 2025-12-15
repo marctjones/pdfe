@@ -16,9 +16,11 @@ public class TestSetup : Xunit.Sdk.XunitTestFramework
         : base(messageSink)
     {
         // Initialize font resolver for all tests
+        // Use TestFontResolver instead of CustomFontResolver for performance
+        // TestFontResolver uses a single cached font vs scanning 2,967 system fonts
         if (GlobalFontSettings.FontResolver == null)
         {
-            GlobalFontSettings.FontResolver = new CustomFontResolver();
+            GlobalFontSettings.FontResolver = new TestFontResolver();
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using Xunit;
 using FluentAssertions;
 using PdfEditor.Services.Redaction;
@@ -362,5 +363,34 @@ public class TextBoundsCalculatorTests
 
         _output.WriteLine($"Complex scenario bounds: X={bounds.X}, Y={bounds.Y}, " +
                          $"W={bounds.Width}, H={bounds.Height}");
+    }
+
+    [Fact]
+    public void CalculateBounds_WithRotation_ShouldProduceNonAxisAlignedDimensions()
+    {
+        // Arrange
+        var text = "Rotate";
+        var textState = new PdfTextState { FontSize = 12 };
+        var angle = Math.PI / 4; // 45 degrees
+        textState.TextMatrix = new PdfMatrix
+        {
+            A = Math.Cos(angle),
+            B = Math.Sin(angle),
+            C = -Math.Sin(angle),
+            D = Math.Cos(angle),
+            E = 100,
+            F = 200
+        };
+        var graphicsState = new PdfGraphicsState();
+        var pageHeight = 792.0;
+
+        // Act
+        var bounds = _calculator.CalculateBounds(text, textState, graphicsState, pageHeight);
+
+        // Assert
+        bounds.X.Should().BeGreaterThan(90);
+        bounds.Y.Should().BeLessThan(700);
+        bounds.Width.Should().BeGreaterThan(0);
+        bounds.Height.Should().BeGreaterThan(0);
     }
 }

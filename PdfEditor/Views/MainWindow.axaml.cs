@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using PdfEditor.ViewModels;
 using System;
 using System.Collections.Specialized;
@@ -22,9 +21,6 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-
-        // Wire up file dialog for Open command
-        this.Opened += MainWindow_Opened;
 
         // Add keyboard handler for Ctrl+C
         this.KeyDown += MainWindow_KeyDown;
@@ -264,18 +260,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MainWindow_Opened(object? sender, EventArgs e)
-    {
-        var viewModel = DataContext as MainWindowViewModel;
-        if (viewModel != null)
-        {
-            viewModel.OpenFileCommand.Subscribe(async _ => await OpenFileDialog());
-            viewModel.AddPagesCommand.Subscribe(async _ => await AddPagesDialog());
-            viewModel.SaveAsCommand.Subscribe(async _ => await SaveAsDialog());
-            viewModel.ExportPagesCommand.Subscribe(async _ => await ExportPagesDialog());
-        }
-    }
-
     /// <summary>
     /// Update viewport dimensions when the PDF scroll viewer size changes.
     /// This enables accurate zoom fit calculations.
@@ -286,100 +270,6 @@ public partial class MainWindow : Window
         {
             viewModel.ViewportWidth = e.NewSize.Width;
             viewModel.ViewportHeight = e.NewSize.Height;
-        }
-    }
-
-    private async System.Threading.Tasks.Task OpenFileDialog()
-    {
-        var topLevel = GetTopLevel(this);
-        if (topLevel == null) return;
-
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Open PDF File",
-            AllowMultiple = false,
-            FileTypeFilter = new[]
-            {
-                new FilePickerFileType("PDF Files")
-                {
-                    Patterns = new[] { "*.pdf" }
-                }
-            }
-        });
-
-        if (files.Count >= 1 && DataContext is MainWindowViewModel viewModel)
-        {
-            var filePath = files[0].Path.LocalPath;
-            await viewModel.LoadDocumentAsync(filePath);
-        }
-    }
-
-    private async System.Threading.Tasks.Task AddPagesDialog()
-    {
-        var topLevel = GetTopLevel(this);
-        if (topLevel == null) return;
-
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Select PDF to Add Pages From",
-            AllowMultiple = false,
-            FileTypeFilter = new[]
-            {
-                new FilePickerFileType("PDF Files")
-                {
-                    Patterns = new[] { "*.pdf" }
-                }
-            }
-        });
-
-        if (files.Count >= 1 && DataContext is MainWindowViewModel viewModel)
-        {
-            var filePath = files[0].Path.LocalPath;
-            await viewModel.AddPagesFromFileAsync(filePath);
-        }
-    }
-
-    private async System.Threading.Tasks.Task SaveAsDialog()
-    {
-        var topLevel = GetTopLevel(this);
-        if (topLevel == null) return;
-
-        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "Save PDF As",
-            DefaultExtension = "pdf",
-            SuggestedFileName = "document.pdf",
-            FileTypeChoices = new[]
-            {
-                new FilePickerFileType("PDF Files")
-                {
-                    Patterns = new[] { "*.pdf" }
-                }
-            }
-        });
-
-        if (file != null && DataContext is MainWindowViewModel viewModel)
-        {
-            var filePath = file.Path.LocalPath;
-            await viewModel.SaveFileAsAsync(filePath);
-        }
-    }
-
-    private async System.Threading.Tasks.Task ExportPagesDialog()
-    {
-        var topLevel = GetTopLevel(this);
-        if (topLevel == null) return;
-
-        var folder = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select Folder for Exported Images",
-            AllowMultiple = false
-        });
-
-        if (folder.Count >= 1 && DataContext is MainWindowViewModel viewModel)
-        {
-            var folderPath = folder[0].Path.LocalPath;
-            await viewModel.ExportPagesToImagesAsync(folderPath, "png", 150);
         }
     }
 

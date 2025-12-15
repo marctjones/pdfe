@@ -1,7 +1,10 @@
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
 using PdfSharp.Pdf.IO;
 using System.Text;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace PdfEditor.Validator;
 
@@ -90,6 +93,17 @@ class Program
                     VisualBlockingCommands.DetectBlocking(args[1]);
                     break;
 
+                case "verify":
+                case "verify-redaction":
+                    if (args.Length < 2)
+                    {
+                        Console.WriteLine("Error: PDF file path required");
+                        Console.WriteLine("Usage: PdfEditor.Validator verify <pdf-file>");
+                        return;
+                    }
+                    VerifyRedaction(args[1]);
+                    break;
+
                 default:
                     Console.WriteLine($"Unknown command: {command}");
                     ShowHelp();
@@ -144,6 +158,10 @@ COMMANDS:
         Analyzes drawing order (z-order) to find what's underneath
         This checks if black boxes are actually covering content
 
+    verify <pdf-file>
+        Detect black boxes and report any text that still overlaps them
+        (quick redaction leakage check)
+
 OPTIONS:
     --verbose       Show detailed error messages
 
@@ -159,6 +177,9 @@ EXAMPLES:
 
     # Find potentially hidden content
     PdfEditor.Validator find-hidden suspicious.pdf
+
+    # Verify a redacted PDF for leakage under black boxes
+    PdfEditor.Validator verify redacted.pdf
 
 VALIDATION WORKFLOW:
     1. Run 'extract-text' on redacted PDF
@@ -256,6 +277,138 @@ VALIDATION WORKFLOW:
         Console.WriteLine($"Total characters: {text.Length}");
         Console.WriteLine($"Total words: {words.Length}");
         Console.WriteLine($"Total pages: {document.NumberOfPages}");
+    }
+
+    static void VerifyRedaction(string pdfPath)
+    {
+        if (!File.Exists(pdfPath))
+        {
+            Console.WriteLine($"Error: File not found: {pdfPath}");
+            return;
+        }
+
+        Console.WriteLine($"=== Verifying redaction for {Path.GetFileName(pdfPath)} ===");
+
+        var blackBoxes = DetectBlackRectangles(pdfPath);
+        Console.WriteLine($"Detected {blackBoxes.Count} black box(es)");
+
+        var overlaps = new List<(string text, double x, double y)>();
+
+        using var document = PdfDocument.Open(pdfPath);
+        for (int p = 0; p < document.NumberOfPages; p++)
+        {
+            var page = document.GetPage(p + 1);
+            var pageBoxes = blackBoxes.Where(b => b.PageIndex == p).ToList();
+            if (pageBoxes.Count == 0)
+                continue;
+
+            foreach (var word in page.GetWords())
+            {
+                foreach (var box in pageBoxes)
+                {
+                    if (RectanglesOverlap((box.X, box.Y, box.Width, box.Height), word.BoundingBox))
+                    {
+                        overlaps.Add((word.Text, word.BoundingBox.Left, word.BoundingBox.Bottom));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (overlaps.Count == 0)
+        {
+            Console.WriteLine("✅ No text detected under black boxes.");
+            Environment.ExitCode = 0;
+        }
+        else
+        {
+            Console.WriteLine($"⚠ Found {overlaps.Count} text item(s) under black boxes:");
+            foreach (var item in overlaps.Take(20))
+            {
+                Console.WriteLine($"  '{item.text}' at ({item.x:F1}, {item.y:F1})");
+            }
+            Environment.ExitCode = 1;
+            if (overlaps.Count > 20)
+            {
+                Console.WriteLine($"  ...and {overlaps.Count - 20} more");
+            }
+        }
+    }
+
+    private static List<(int PageIndex, double X, double Y, double Width, double Height)> DetectBlackRectangles(string pdfPath)
+    {
+        var rects = new List<(int PageIndex, double X, double Y, double Width, double Height)>();
+
+        using var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import);
+        for (int pageIndex = 0; pageIndex < doc.PageCount; pageIndex++)
+        {
+            var page = doc.Pages[pageIndex];
+            if (page.Contents.Elements.Count == 0)
+                continue;
+
+            var content = page.Contents.Elements.GetObject(0);
+            var streamProp = content?.GetType().GetProperty("Stream");
+            var streamVal = streamProp?.GetValue(content);
+            var valueProp = streamVal?.GetType().GetProperty("Value");
+            var bytes = valueProp?.GetValue(streamVal) as byte[] ?? Array.Empty<byte>();
+
+            var text = Encoding.ASCII.GetString(bytes);
+            var lines = text.Split('\n');
+            double? pendingX = null, pendingY = null, pendingW = null, pendingH = null;
+            bool inBlackFill = false;
+            var pageHeight = page.Height;
+
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+
+                if (line == "0 g" || line == "0 0 0 rg" || line == "0 G" || line == "0 0 0 RG")
+                    inBlackFill = true;
+                else if (line.EndsWith(" g") || line.EndsWith(" rg") || line.EndsWith(" G") || line.EndsWith(" RG"))
+                    inBlackFill = false;
+
+                if (line.EndsWith(" re"))
+                {
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 5 &&
+                        double.TryParse(parts[0], out var x) &&
+                        double.TryParse(parts[1], out var y) &&
+                        double.TryParse(parts[2], out var w) &&
+                        double.TryParse(parts[3], out var h))
+                    {
+                        pendingX = x;
+                        pendingY = y;
+                        pendingW = Math.Abs(w);
+                        pendingH = Math.Abs(h);
+                        if (w < 0) pendingX = x + w;
+                        if (h < 0) pendingY = y + h;
+                    }
+                }
+
+                if ((line == "f" || line == "F" || line == "f*") && pendingX.HasValue && inBlackFill)
+                {
+                    rects.Add((pageIndex, pendingX.Value, pageHeight - pendingY.Value - pendingH.Value, pendingW.Value, pendingH.Value));
+                    pendingX = pendingY = pendingW = pendingH = null;
+                }
+
+                if (line == "n" || line == "S" || line == "s" || line == "B" || line == "b")
+                {
+                    pendingX = pendingY = pendingW = pendingH = null;
+                }
+            }
+        }
+
+        return rects;
+    }
+
+    private static bool RectanglesOverlap((double X, double Y, double Width, double Height) a, PdfRectangle b)
+    {
+        var aRight = a.X + a.Width;
+        var aBottom = a.Y + a.Height;
+        return a.X < b.Right &&
+               aRight > b.Left &&
+               a.Y < b.Top &&
+               aBottom > b.Bottom;
     }
 
     static void ComparePdfs(string beforePath, string afterPath)

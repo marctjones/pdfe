@@ -466,7 +466,9 @@ public class BlindRedactionVerificationTests : IDisposable
 
             // Check for fill operation
             if ((trimmed == "f" || trimmed == "F" || trimmed == "f*") &&
-                pendingX.HasValue && inBlackFill)
+                pendingX.HasValue && pendingY.HasValue &&
+                pendingW.HasValue && pendingH.HasValue &&
+                inBlackFill)
             {
                 // Convert from PDF coordinates (bottom-left) to our coordinate system
                 var pageHeight = page.Height;
@@ -494,7 +496,7 @@ public class BlindRedactionVerificationTests : IDisposable
 
     private byte[] GetPageContentStream(string pdfPath)
     {
-        using var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import);
         var page = doc.Pages[0];
 
         if (page.Contents.Elements.Count > 0)

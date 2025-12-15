@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PdfEditor.Services;
+using PdfEditor.Services.Verification;
 using PdfEditor.ViewModels;
 using Xunit;
 
@@ -41,6 +42,9 @@ public class MainWindowViewModelTests
         var redactionService = new RedactionService(_redactionLoggerMock.Object, _loggerFactory);
         var textExtractionService = new PdfTextExtractionService(_textLoggerMock.Object);
         var searchService = new PdfSearchService(_searchLoggerMock.Object);
+        var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
+        var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
+        var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
 
         return new MainWindowViewModel(
             _loggerMock.Object,
@@ -49,7 +53,10 @@ public class MainWindowViewModelTests
             renderService,
             redactionService,
             textExtractionService,
-            searchService);
+            searchService,
+            ocrService,
+            signatureService,
+            verifier);
     }
 
     #region Zoom Tests

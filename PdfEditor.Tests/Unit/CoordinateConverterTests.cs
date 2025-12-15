@@ -526,6 +526,10 @@ public class CoordinateConverterTests
         var pdfPigTextBottom = 350.0;
         var pdfPigTextRight = 250.0;
         var pdfPigTextTop = 380.0;
+        _ = pdfPigTextLeft;
+        _ = pdfPigTextBottom;
+        _ = pdfPigTextRight;
+        _ = pdfPigTextTop;
 
         // Selection in PDF: left=36, bottom~=576-36=540, right=252, top~=576
         // Actually let's calculate:

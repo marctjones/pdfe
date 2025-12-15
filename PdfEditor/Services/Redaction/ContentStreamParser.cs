@@ -36,6 +36,9 @@ public class ContentStreamParser
     /// </summary>
     public List<PdfOperation> ParseContentStream(PdfPage page)
     {
+        if (page == null)
+            throw new ArgumentNullException(nameof(page));
+
         var sw = Stopwatch.StartNew();
         _logger.LogInformation("Starting content stream parsing");
 
@@ -369,27 +372,12 @@ public class ContentStreamParser
         var (x, y) = gState.TransformationMatrix.Transform(0, 0);
         var (x1, y1) = gState.TransformationMatrix.Transform(1, 1);
 
-        // Check if CTM has Y-flip (negative D value)
-        var isYFlipped = gState.TransformationMatrix.D < 0;
-
-        double avaloniaY, avaloniaY1;
-        if (isYFlipped)
-        {
-            // CTM already flipped Y, use coordinates directly
-            avaloniaY = y;
-            avaloniaY1 = y1;
-        }
-        else
-        {
-            // Standard PDF coords, need to convert
-            avaloniaY = pageHeight - y;
-            avaloniaY1 = pageHeight - y1;
-        }
-
-        imageOp.Position = new Point(x, avaloniaY);
+        var minX = Math.Min(x, x1);
+        var minY = Math.Min(y, y1);
+        imageOp.Position = new Point(minX, minY);
         imageOp.Width = Math.Abs(x1 - x);
         imageOp.Height = Math.Abs(y1 - y);
-        imageOp.BoundingBox = new Rect(x, Math.Min(avaloniaY, avaloniaY1), imageOp.Width, imageOp.Height);
+        imageOp.BoundingBox = new Rect(minX, minY, imageOp.Width, imageOp.Height);
 
         return imageOp;
     }
@@ -601,81 +589,192 @@ public class ContentStreamParser
                 return inlineImages;
             }
 
-            _logger.LogDebug("Scanning {Length} bytes for inline images", rawBytes.Length);
+            _logger.LogDebug("Scanning {Length} bytes for inline images with state tracking", rawBytes.Length);
 
-            // Scan for BI (Begin Inline Image) operators
+            // State tracking for inline image bounds calculation
+            var stateStack = new Stack<PdfGraphicsState>();
+            // Ensure we work with a clone so we don't modify the passed state
+            var currentState = graphicsState.Clone();
+            var operandStack = new List<double>();
+
             int position = 0;
-            while (position < rawBytes.Length - 2)
+            while (position < rawBytes.Length)
             {
-                // Look for "BI" followed by whitespace
-                if (rawBytes[position] == 'B' && rawBytes[position + 1] == 'I' &&
-                    (position + 2 >= rawBytes.Length || IsWhitespace(rawBytes[position + 2])))
+                byte b = rawBytes[position];
+
+                // Skip whitespace
+                if (IsWhitespace(b))
                 {
-                    // Check that BI is preceded by whitespace or start of stream
-                    if (position == 0 || IsWhitespace(rawBytes[position - 1]))
+                    position++;
+                    continue;
+                }
+
+                // Parse numbers
+                if (IsDigit(b) || b == '-' || b == '.')
+                {
+                    if (TryParseNumber(rawBytes, ref position, out double val))
                     {
-                        var imageStart = position;
-
-                        // Find ID (Image Data) marker
-                        var idPosition = FindSequence(rawBytes, position + 2, "ID");
-                        if (idPosition < 0)
-                        {
-                            position++;
-                            continue;
-                        }
-
-                        // Find EI (End Image) marker
-                        // EI must be preceded by whitespace and followed by whitespace or end
-                        var eiPosition = FindEIMarker(rawBytes, idPosition + 2);
-                        if (eiPosition < 0)
-                        {
-                            position++;
-                            continue;
-                        }
-
-                        // Extract the complete inline image sequence
-                        var imageLength = eiPosition + 2 - imageStart;
-                        var imageData = new byte[imageLength];
-                        Array.Copy(rawBytes, imageStart, imageData, 0, imageLength);
-
-                        // Parse image properties from BI...ID section
-                        var properties = ParseInlineImageProperties(rawBytes, position + 2, idPosition);
-
-                        // Calculate bounding box using CTM
-                        // Inline images are rendered in a 1x1 unit square transformed by CTM
-                        var bounds = CalculateInlineImageBounds(graphicsState, pageHeight,
-                            properties.width, properties.height);
-
-                        var inlineImage = new InlineImageOperation(imageData, bounds, imageStart, imageLength)
-                        {
-                            ImageWidth = properties.width,
-                            ImageHeight = properties.height
-                        };
-
-                        inlineImages.Add(inlineImage);
-
-                        _logger.LogDebug(
-                            "Found inline image at position {Position}: {Width}x{Height}, bounds=({X:F2},{Y:F2},{W:F2}x{H:F2})",
-                            imageStart, properties.width, properties.height,
-                            bounds.X, bounds.Y, bounds.Width, bounds.Height);
-
-                        // Skip past this image
-                        position = eiPosition + 2;
+                        operandStack.Add(val);
                         continue;
                     }
                 }
 
-                position++;
+                // Check for operators
+                // q: Save state
+                if (b == 'q' && IsDelimiter(rawBytes, position + 1))
+                {
+                    stateStack.Push(currentState.Clone());
+                    operandStack.Clear();
+                    position++;
+                    continue;
+                }
+
+                // Q: Restore state
+                if (b == 'Q' && IsDelimiter(rawBytes, position + 1))
+                {
+                    if (stateStack.Count > 0)
+                    {
+                        var restored = stateStack.Pop();
+                        currentState.TransformationMatrix = restored.TransformationMatrix;
+                        // We only care about CTM for bounds, so we don't need to restore other properties
+                    }
+                    operandStack.Clear();
+                    position++;
+                    continue;
+                }
+
+                // cm: Concatenate matrix
+                if (b == 'c' && position + 1 < rawBytes.Length && rawBytes[position + 1] == 'm' && 
+                    IsDelimiter(rawBytes, position + 2))
+                {
+                    if (operandStack.Count >= 6)
+                    {
+                        var a = operandStack[operandStack.Count - 6];
+                        var b_val = operandStack[operandStack.Count - 5];
+                        var c = operandStack[operandStack.Count - 4];
+                        var d = operandStack[operandStack.Count - 3];
+                        var e = operandStack[operandStack.Count - 2];
+                        var f = operandStack[operandStack.Count - 1];
+
+                        var matrix = PdfMatrix.FromArray(new[] { a, b_val, c, d, e, f });
+                        currentState.TransformationMatrix = currentState.TransformationMatrix.Multiply(matrix);
+                    }
+                    operandStack.Clear();
+                    position += 2;
+                    continue;
+                }
+
+                // BI: Begin Inline Image
+                if (b == 'B' && position + 1 < rawBytes.Length && rawBytes[position + 1] == 'I' && 
+                    IsDelimiter(rawBytes, position + 2))
+                {
+                    // Check that BI is preceded by whitespace or start of stream
+                    // (This check might be redundant with the parser loop structure but adds safety)
+                    
+                    var imageStart = position;
+
+                    // Find ID (Image Data) marker
+                    var idPosition = FindSequence(rawBytes, position + 2, "ID");
+                    if (idPosition < 0)
+                    {
+                        position += 2;
+                        operandStack.Clear();
+                        continue;
+                    }
+
+                    // Find EI (End Image) marker
+                    var eiPosition = FindEIMarker(rawBytes, idPosition + 2);
+                    if (eiPosition < 0)
+                    {
+                        position += 2;
+                        operandStack.Clear();
+                        continue;
+                    }
+
+                    // Extract the complete inline image sequence
+                    var imageLength = eiPosition + 2 - imageStart;
+                    var imageData = new byte[imageLength];
+                    Array.Copy(rawBytes, imageStart, imageData, 0, imageLength);
+
+                    // Parse image properties from BI...ID section
+                    var properties = ParseInlineImageProperties(rawBytes, position + 2, idPosition);
+
+                    // Calculate bounding box using CURRENT CTM
+                    var bounds = CalculateInlineImageBounds(currentState, pageHeight,
+                        properties.width, properties.height);
+
+                    var inlineImage = new InlineImageOperation(imageData, bounds, imageStart, imageLength)
+                    {
+                        ImageWidth = properties.width,
+                        ImageHeight = properties.height
+                    };
+
+                    inlineImages.Add(inlineImage);
+
+                    _logger.LogDebug(
+                        "Found inline image at position {Position}: {Width}x{Height}, bounds=({X:F2},{Y:F2},{W:F2}x{H:F2})",
+                        imageStart, properties.width, properties.height,
+                        bounds.X, bounds.Y, bounds.Width, bounds.Height);
+
+                    // Skip past this image
+                    position = eiPosition + 2;
+                    operandStack.Clear();
+                    continue;
+                }
+
+                // Unknown token or other operator - skip and clear operands
+                operandStack.Clear();
+                while (position < rawBytes.Length && !IsDelimiter(rawBytes, position))
+                {
+                    position++;
+                }
+                
+                // Safety: ensure we always make progress
+                // If we didn't match any operator above and landed on a delimiter,
+                // we need to move past it to avoid infinite loop
+                if (position < rawBytes.Length)
+                {
+                    position++;
+                }
             }
 
             _logger.LogInformation("Found {Count} inline images in content stream", inlineImages.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error parsing inline images");
+            _logger.LogError(ex, "Error parsing inline images");
         }
 
         return inlineImages;
+    }
+
+    private bool IsDigit(byte b)
+    {
+        return b >= '0' && b <= '9';
+    }
+
+    private bool IsDelimiter(byte[] bytes, int index)
+    {
+        if (index >= bytes.Length) return true;
+        byte b = bytes[index];
+        return IsWhitespace(b) || b == '(' || b == ')' || b == '<' || b == '>' || b == '[' || b == ']' || b == '/' || b == '%';
+    }
+
+    private bool TryParseNumber(byte[] bytes, ref int position, out double value)
+    {
+        value = 0;
+        int start = position;
+        while (position < bytes.Length && (IsDigit(bytes[position]) || bytes[position] == '.' || bytes[position] == '-'))
+        {
+            position++;
+        }
+        
+        if (position > start)
+        {
+            var str = Encoding.ASCII.GetString(bytes, start, position - start);
+            return double.TryParse(str, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out value);
+        }
+        return false;
     }
 
     /// <summary>
@@ -845,22 +944,10 @@ public class ContentStreamParser
         var minY = Math.Min(Math.Min(y1, y2), Math.Min(y3, y4));
         var maxY = Math.Max(Math.Max(y1, y2), Math.Max(y3, y4));
 
-        // Check if CTM has Y-flip (negative D value)
-        var isYFlipped = ctm.D < 0;
-
-        double avaloniaY;
-        if (isYFlipped)
-        {
-            // CTM already flipped Y, use minY directly
-            avaloniaY = minY;
-        }
-        else
-        {
-            // Convert to Avalonia coordinates (top-left origin)
-            avaloniaY = pageHeight - maxY;
-        }
-
-        return new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
+        // Use Avalonia-style top-left origin directly from transformed coords.
+        // Inline image content often comes from XGraphics streams where Y already behaves
+        // like a top-left origin; using minY keeps bounds aligned with redaction areas.
+        return new Rect(minX, minY, maxX - minX, maxY - minY);
     }
 
     /// <summary>

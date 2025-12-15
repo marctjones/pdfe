@@ -157,7 +157,7 @@ public class PdfConformanceTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert - Verify by reopening
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.PageCount.Should().Be(4);
     }
 
@@ -180,7 +180,7 @@ public class PdfConformanceTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.Pages[0].Rotate.Should().Be(90);
     }
 
@@ -247,6 +247,8 @@ public class PdfConformanceTests : IDisposable
         // Assert - Text should be removed
         var textAfter = _textService.ExtractTextFromPage(savePath, 0);
         textAfter.Should().NotContain(targetText);
+
+        await Task.CompletedTask;
     }
 
     #endregion

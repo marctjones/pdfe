@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PdfEditor.Services;
+using PdfEditor.Services.Verification;
 using PdfEditor.Tests.Utilities;
 using PdfEditor.ViewModels;
 using SkiaSharp;
@@ -70,6 +71,9 @@ public class MouseEventSimulationTests : IDisposable
         var redactionService = new RedactionService(_redactionLoggerMock.Object, _loggerFactory);
         var textExtractionService = new PdfTextExtractionService(_textLoggerMock.Object);
         var searchService = new PdfSearchService(_searchLoggerMock.Object);
+        var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
+        var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
+        var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -78,7 +82,10 @@ public class MouseEventSimulationTests : IDisposable
             renderService,
             redactionService,
             textExtractionService,
-            searchService);
+            searchService,
+            ocrService,
+            signatureService,
+            verifier);
 
         return (vm, documentService);
     }
