@@ -76,6 +76,33 @@
                 <Separator/>
                 <MenuItem Header="_Export Pages as Images..." Command="{Binding ExportPagesCommand}"/>
                 <MenuItem Header="_Print..." Command="{Binding PrintCommand}" InputGesture="Ctrl+P"/>
+                <Separator/>
+                <MenuItem Header="_Verification &amp; OCR Settings">
+                    <StackPanel Margin="8" Spacing="8">
+                        <CheckBox Content="Verify after Save"
+                                  IsChecked="{Binding RunVerifyAfterSave}"/>
+                        <TextBlock Text="OCR Languages (e.g., eng+deu)" FontSize="12"/>
+                        <TextBox Text="{Binding OcrLanguages}" Width="200"/>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <StackPanel Width="120">
+                                <TextBlock Text="OCR Base DPI" FontSize="12"/>
+                                <NumericUpDown Minimum="100" Maximum="600" Value="{Binding OcrBaseDpi}" />
+                            </StackPanel>
+                            <StackPanel Width="120">
+                                <TextBlock Text="OCR High DPI" FontSize="12"/>
+                                <NumericUpDown Minimum="100" Maximum="800" Value="{Binding OcrHighDpi}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Low Confidence Retry &lt;" VerticalAlignment="Center" FontSize="12"/>
+                            <NumericUpDown Minimum="0.1" Maximum="0.99" Increment="0.05" Value="{Binding OcrLowConfidence}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Render Cache Max" VerticalAlignment="Center" FontSize="12"/>
+                            <NumericUpDown Minimum="1" Maximum="200" Value="{Binding RenderCacheMax}" />
+                        </StackPanel>
+                    </StackPanel>
+                </MenuItem>
             </MenuItem>
 
             <MenuItem Header="_Help">
@@ -196,6 +223,22 @@
                 <Button Content="🔍 Find" Command="{Binding ToggleSearchCommand}"
                         Classes="modern-button" Padding="12,6"
                         ToolTip.Tip="Find text (Ctrl+F)"/>
+
+                <!-- Verify Status -->
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <Ellipse Width="10" Height="10"
+                             Fill="{Binding LastVerifyFailed, Converter={StaticResource BooleanToBrushConverter}, ConverterParameter='Red,Green'}"/>
+                    <TextBlock Text="{Binding LastVerifyStatus}" FontSize="11"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <Button Content="Run Verify" Command="{Binding RunVerifyNowCommand}"
+                            Classes="modern-button" Padding="10,4" />
+                    <TextBlock Text="⚠" FontSize="14" Foreground="Red"
+                               IsVisible="{Binding LastVerifyFailed}" Margin="4,0,0,0">
+                        <ToolTip.Tip>
+                            Verification failed. Inspect Validator output/logs for details.
+                        </ToolTip.Tip>
+                    </TextBlock>
+                </StackPanel>
             </StackPanel>
         </Border>
 

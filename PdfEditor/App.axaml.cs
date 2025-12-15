@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.ReactiveUI;
+using Avalonia.Media;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PdfEditor.Services;
@@ -74,12 +75,18 @@ public partial class App : Application
         // Explicitly register ILoggerFactory as singleton (required by RedactionService)
         services.AddSingleton<ILoggerFactory, LoggerFactory>();
 
+        // Simple brush converter for status indicators
+        services.AddSingleton<IBrushConverter, SimpleBooleanToBrushConverter>();
+
         // Register services
         services.AddSingleton<PdfDocumentService>();
         services.AddSingleton<PdfRenderService>();
         services.AddSingleton<RedactionService>();
         services.AddSingleton<PdfTextExtractionService>();
         services.AddSingleton<PdfSearchService>();
+        services.AddSingleton<PdfOcrService>();
+        services.AddSingleton<SignatureVerificationService>();
+        services.AddSingleton<PdfEditor.Services.Verification.RedactionVerifier>();
 
         // Register ViewModels
         services.AddTransient<MainWindowViewModel>();
@@ -89,5 +96,25 @@ public partial class App : Application
         logger.LogInformation("Dependency injection container configured");
         logger.LogInformation("Services registered: PdfDocumentService, PdfRenderService, RedactionService, PdfTextExtractionService");
         logger.LogInformation("Logging level set to: INFORMATION");
+    }
+}
+
+public interface IBrushConverter
+{
+    IBrush Convert(bool value, string parameters);
+}
+
+public class SimpleBooleanToBrushConverter : IBrushConverter
+{
+    public IBrush Convert(bool value, string parameters)
+    {
+        if (string.IsNullOrWhiteSpace(parameters))
+            return value ? Brushes.Green : Brushes.Transparent;
+
+        var parts = parameters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var falseBrush = parts.Length > 0 ? parts[0] : "Transparent";
+        var trueBrush = parts.Length > 1 ? parts[1] : "Green";
+
+        return value ? Brush.Parse(trueBrush) : Brush.Parse(falseBrush);
     }
 }

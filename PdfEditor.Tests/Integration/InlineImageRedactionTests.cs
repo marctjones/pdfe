@@ -4,6 +4,7 @@ using PdfEditor.Services;
 using PdfEditor.Services.Redaction;
 using PdfEditor.Tests.Utilities;
 using PdfSharp.Pdf;
+using PdfSharp.Pdf.Advanced;
 using PdfSharp.Pdf.IO;
 using PdfSharp.Drawing;
 using PdfSharp.Fonts;
@@ -248,6 +249,63 @@ public class InlineImageRedactionTests : IDisposable
         _output.WriteLine("✅ TEST PASSED: Redaction with inline image parsing works");
     }
 
+    [Fact]
+    public void RedactInlineImage_RemovesInlineBytesFromStream()
+    {
+        _output.WriteLine("=== TEST: RedactInlineImage_RemovesInlineBytesFromStream ===");
+
+        var pdfPath = CreateTempPath("inline_bytes_input.pdf");
+        var redactedPath = CreateTempPath("inline_bytes_redacted.pdf");
+
+        // Build a PDF with an actual inline image sequence
+        var document = new PdfDocument();
+        var page = document.AddPage();
+
+        var rawContent = "\n" +
+            "q\n" +
+            "100 0 0 100 100 100 cm\n" +
+            "BI\n" +
+            "/W 2 /H 2 /BPC 8 /CS /RGB /F /AHx\n" +
+            "ID\n" +
+            "FFFF000000FF00FF000000FF>\n" +
+            "EI\n" +
+            "Q\n";
+
+        var contentBytes = Encoding.ASCII.GetBytes(rawContent);
+        var dict = new PdfDictionary(document);
+        dict.CreateStream(contentBytes);
+        document.Internals.AddObject(dict);
+        page.Contents.Elements.Add(dict.Reference!);
+
+        document.Save(pdfPath);
+        document.Dispose();
+        _tempFiles.Add(pdfPath);
+        _tempFiles.Add(redactedPath);
+
+        // Act: redact the area covering the inline image
+        using (var modDoc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify))
+        {
+            var modPage = modDoc.Pages[0];
+            _redactionService.RedactArea(modPage, new Rect(90, 90, 120, 120), renderDpi: 72);
+            modDoc.Save(redactedPath);
+        }
+
+        // Assert: content stream should no longer contain inline image markers
+        using var redactedDoc = PdfReader.Open(redactedPath, PdfDocumentOpenMode.Import);
+        var redactedPage = redactedDoc.Pages[0];
+        var raw = GetFirstContentStreamBytes(redactedPage);
+        var rawString = Encoding.ASCII.GetString(raw);
+
+        rawString.Should().NotContain(" BI", "inline image begin operator should be removed");
+        rawString.Should().NotContain("ID\n", "inline image data marker should be removed");
+        rawString.Should().NotContain("EI", "inline image end operator should be removed");
+
+        var inlineImages = _parser.ParseInlineImages(redactedPage, redactedPage.Height.Point, new PdfGraphicsState());
+        inlineImages.Should().BeEmpty("inline images should be fully stripped from content streams");
+
+        _output.WriteLine("✅ TEST PASSED: Inline image bytes removed from content stream");
+    }
+
     #endregion
 
     #region Helper Methods
@@ -332,6 +390,18 @@ public class InlineImageRedactionTests : IDisposable
         // Note: Modifying content stream directly requires low-level manipulation
         // For testing purposes, we use the standard approach
         // The inline image parsing will be tested with actual inline image PDFs
+    }
+
+    private static byte[] GetFirstContentStreamBytes(PdfPage page)
+    {
+        if (page.Contents.Elements.Count == 0)
+            return Array.Empty<byte>();
+
+        var dict = page.Contents.Elements.GetDictionary(0);
+        if (dict == null && page.Contents.Elements[0] is PdfReference pdfRef)
+            dict = pdfRef.Value as PdfDictionary;
+
+        return dict?.Stream?.Value ?? Array.Empty<byte>();
     }
 
     public void Dispose()

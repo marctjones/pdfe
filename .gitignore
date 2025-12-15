@@ -41,3 +41,9 @@ Thumbs.db
 # Temp files
 *.tmp
 *.temp
+
+.gemini/
+gha-creds-*.json
+
+# Test PDFs (downloaded on demand, not committed)
+test-pdfs/

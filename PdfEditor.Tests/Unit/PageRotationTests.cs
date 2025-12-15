@@ -40,7 +40,7 @@ public class PageRotationTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.Pages[0].Rotate.Should().Be(90);
     }
 
@@ -56,7 +56,7 @@ public class PageRotationTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.Pages[0].Rotate.Should().Be(270);
     }
 
@@ -72,7 +72,7 @@ public class PageRotationTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.Pages[0].Rotate.Should().Be(180);
     }
 
@@ -91,7 +91,7 @@ public class PageRotationTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.Pages[0].Rotate.Should().Be(0); // 360° = 0°
     }
 
@@ -107,7 +107,7 @@ public class PageRotationTests : IDisposable
         _documentService.SaveDocument(savePath);
 
         // Assert
-        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
         doc.Pages[0].Rotate.Should().Be(90);
         doc.Pages[1].Rotate.Should().Be(0); // Unchanged
         doc.Pages[2].Rotate.Should().Be(0); // Unchanged

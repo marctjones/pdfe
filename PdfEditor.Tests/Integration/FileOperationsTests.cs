@@ -38,7 +38,7 @@ public class FileOperationsTests : IDisposable
         // Assert
         File.Exists(destinationPdf).Should().BeTrue();
 
-        using var doc = PdfReader.Open(destinationPdf, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(destinationPdf, PdfDocumentOpenMode.Import);
         doc.PageCount.Should().Be(3);
     }
 
@@ -58,7 +58,7 @@ public class FileOperationsTests : IDisposable
         _documentService.SaveDocument(destinationPdf);
 
         // Assert
-        using var doc = PdfReader.Open(destinationPdf, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(destinationPdf, PdfDocumentOpenMode.Import);
         doc.PageCount.Should().Be(4); // One page removed
         doc.Pages[0].Rotate.Should().Be(90); // First page rotated
     }
@@ -142,7 +142,7 @@ public class FileOperationsTests : IDisposable
         _documentService.SaveDocument(resultPdf);
 
         // Assert
-        using var doc = PdfReader.Open(resultPdf, PdfDocumentOpenMode.ReadOnly);
+        using var doc = PdfReader.Open(resultPdf, PdfDocumentOpenMode.Import);
         doc.PageCount.Should().Be(5); // 2 + 3
     }
 

@@ -744,7 +744,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
 
             return output;
         }
-        catch (Exception ex) when (ignoreErrors)
+        catch (Exception) when (ignoreErrors)
         {
             return "";
         }

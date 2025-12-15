@@ -464,7 +464,7 @@ public class ForensicRedactionVerificationTests : IDisposable
             "Redacted PDF must be valid");
 
         // Can open with PdfSharp
-        var pdfSharpDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var pdfSharpDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         pdfSharpDoc.Should().NotBeNull();
         pdfSharpDoc.PageCount.Should().BeGreaterThan(0);
         pdfSharpDoc.Dispose();
@@ -634,7 +634,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         extractedText.Should().NotContain("CONFIDENTIAL_INFO");
 
         // Check metadata
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Title.Should().NotContain("SECRET_DATA",
             "FORENSIC FAILURE: Redacted text in document title");
         finalDoc.Info.Subject.Should().NotContain("CONFIDENTIAL_INFO",

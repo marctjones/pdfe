@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using PDFtoImage;
 using SkiaSharp;
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
@@ -17,18 +18,57 @@ namespace PdfEditor.Services;
 public class PdfRenderService
 {
     private readonly ILogger<PdfRenderService> _logger;
+    private int _maxCacheEntries = 20;
+    private long _cacheHits;
+    private long _cacheMisses;
+
+    private record RenderCacheEntry(byte[] PngData, int Width, int Height, DateTime LastAccessUtc);
+    private readonly ConcurrentDictionary<string, RenderCacheEntry> _cache = new();
 
     public PdfRenderService(ILogger<PdfRenderService> logger)
     {
         _logger = logger;
         _logger.LogDebug("PdfRenderService instance created");
+
+        var envMax = Environment.GetEnvironmentVariable("PDFEDITOR_RENDER_CACHE_MAX");
+        if (int.TryParse(envMax, out var parsed) && parsed > 0)
+        {
+            _maxCacheEntries = parsed;
+            _logger.LogInformation("Render cache size set from env PDFEDITOR_RENDER_CACHE_MAX={Size}", parsed);
+        }
     }
+
+    /// <summary>
+    /// Maximum number of cached render entries. Defaults to 20.
+    /// </summary>
+    public int MaxCacheEntries
+    {
+        get => _maxCacheEntries;
+        set => _maxCacheEntries = Math.Max(1, value);
+    }
+
+    /// <summary>
+    /// Clear the render cache (force re-render on next request).
+    /// </summary>
+    public void ClearCache() => _cache.Clear();
+
+    /// <summary>
+    /// Get cache statistics (current entries, max limit).
+    /// </summary>
+    public (int Count, int Max, long Hits, long Misses) GetCacheStats() => (_cache.Count, _maxCacheEntries, _cacheHits, _cacheMisses);
 
     /// <summary>
     /// Render a specific page of a PDF to a bitmap
     /// </summary>
     public async Task<Bitmap?> RenderPageAsync(string pdfPath, int pageIndex, int dpi = 150)
     {
+        var cacheKey = BuildCacheKey(pdfPath, pageIndex, dpi);
+        if (TryGetFromCache(cacheKey, out var cachedBitmap))
+        {
+            _logger.LogDebug("Cache hit for {File} page {Page} @ {Dpi} DPI", Path.GetFileName(pdfPath), pageIndex, dpi);
+            return cachedBitmap;
+        }
+
         _logger.LogInformation("Rendering page {PageIndex} from {FileName} at {Dpi} DPI",
             pageIndex, Path.GetFileName(pdfPath), dpi);
 
@@ -44,7 +84,7 @@ public class PdfRenderService
                 fileStream.CopyTo(memoryStream);
                 memoryStream.Position = 0;
 
-                return RenderPageFromStream(memoryStream, pageIndex, dpi, sw);
+                return RenderPageFromStream(memoryStream, pageIndex, dpi, sw, cacheKey);
             }
             catch (Exception ex)
             {
@@ -64,10 +104,10 @@ public class PdfRenderService
         _logger.LogInformation("Rendering page {PageIndex} from stream at {Dpi} DPI", pageIndex, dpi);
         var sw = Stopwatch.StartNew();
 
-        return await Task.Run(() => RenderPageFromStream(pdfStream, pageIndex, dpi, sw));
+        return await Task.Run(() => RenderPageFromStream(pdfStream, pageIndex, dpi, sw, cacheKey: null));
     }
 
-    private Bitmap? RenderPageFromStream(Stream pdfStream, int pageIndex, int dpi, Stopwatch sw)
+    private Bitmap? RenderPageFromStream(Stream pdfStream, int pageIndex, int dpi, Stopwatch sw, string? cacheKey)
     {
         try
         {
@@ -86,7 +126,12 @@ public class PdfRenderService
             _logger.LogDebug("SKBitmap created: {Width}x{Height}", skBitmap.Width, skBitmap.Height);
 
             // Convert SkiaSharp bitmap to Avalonia bitmap
-            var avaBitmap = ConvertSkBitmapToAvalonia(skBitmap);
+            var avaBitmap = ConvertSkBitmapToAvalonia(skBitmap, out var pngBytes);
+
+            if (cacheKey != null && pngBytes.Length > 0)
+            {
+                AddToCache(cacheKey, pngBytes, skBitmap.Width, skBitmap.Height);
+            }
 
             sw.Stop();
             _logger.LogInformation("Page {PageIndex} rendered successfully in {ElapsedMs}ms",
@@ -120,6 +165,11 @@ public class PdfRenderService
     /// </summary>
     private Bitmap ConvertSkBitmapToAvalonia(SKBitmap skBitmap)
     {
+        return ConvertSkBitmapToAvalonia(skBitmap, out _);
+    }
+
+    private Bitmap ConvertSkBitmapToAvalonia(SKBitmap skBitmap, out byte[] pngBytes)
+    {
         _logger.LogDebug("Converting SKBitmap to Avalonia Bitmap");
 
         using var image = SKImage.FromBitmap(skBitmap);
@@ -127,6 +177,8 @@ public class PdfRenderService
         using var stream = new MemoryStream();
         data.SaveTo(stream);
         stream.Seek(0, SeekOrigin.Begin);
+
+        pngBytes = stream.ToArray();
 
         var bitmap = new Bitmap(stream);
         _logger.LogDebug("Conversion complete. Bitmap size: {Width}x{Height}",
@@ -159,6 +211,63 @@ public class PdfRenderService
         {
             _logger.LogWarning(ex, "Failed to get page dimensions for page {PageIndex}, using default", pageIndex);
             return (612, 792); // Default Letter size in points
+        }
+    }
+
+    private string BuildCacheKey(string pdfPath, int pageIndex, int dpi)
+    {
+        var lastWrite = File.Exists(pdfPath) ? File.GetLastWriteTimeUtc(pdfPath).Ticks : 0;
+        return $"{pdfPath}|{pageIndex}|{dpi}|{lastWrite}";
+    }
+
+    private bool TryGetFromCache(string key, out Bitmap? bitmap)
+    {
+        bitmap = null;
+
+        if (_cache.TryGetValue(key, out var entry))
+        {
+            var bytes = entry.PngData;
+            try
+            {
+                using var ms = new MemoryStream(bytes);
+                bitmap = new Bitmap(ms);
+                _cache[key] = entry with { LastAccessUtc = DateTime.UtcNow };
+                System.Threading.Interlocked.Increment(ref _cacheHits);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cache decode failed, evicting entry");
+                _cache.TryRemove(key, out _);
+            }
+        }
+
+        System.Threading.Interlocked.Increment(ref _cacheMisses);
+        return false;
+    }
+
+    private void AddToCache(string key, byte[] pngBytes, int width, int height)
+    {
+        _cache[key] = new RenderCacheEntry(pngBytes, width, height, DateTime.UtcNow);
+
+        if (_cache.Count > _maxCacheEntries)
+        {
+            // Evict oldest entry
+            var oldest = DateTime.MaxValue;
+            string? oldestKey = null;
+            foreach (var kvp in _cache)
+            {
+                if (kvp.Value.LastAccessUtc < oldest)
+                {
+                    oldest = kvp.Value.LastAccessUtc;
+                    oldestKey = kvp.Key;
+                }
+            }
+
+            if (oldestKey != null)
+            {
+                _cache.TryRemove(oldestKey, out _);
+            }
         }
     }
 }

@@ -262,17 +262,9 @@ ET
    
 2. **Simple Coordinate Conversion**
    - Basic top-left/bottom-left conversion
-   - **Enhancement:** Handle rotated pages and complex transformations
+   - **Enhancement:** Handle complex transformations beyond basic rotation
 
-3. **Image Position Tracking**
-   - Images identified but not fully position-tracked
-   - **Enhancement:** Track Do operator positions from parsing
-
-4. **Inline Images**
-   - Not yet handled (BI...ID...EI operators)
-   - **Enhancement:** Add inline image parsing
-
-5. **Advanced Path Operations**
+3. **Advanced Path Operations**
    - Clipping paths not fully handled
    - **Enhancement:** Track clipping state
 
@@ -280,19 +272,16 @@ ET
 
 **Priority 1 (High Impact):**
 1. Improve font metrics reading from font dictionaries
-2. Better image position tracking from Do operators
-3. Handle inline images (BI/ID/EI)
+2. Support form XObjects (nested content streams)
 
 **Priority 2 (Nice to Have):**
-4. Support rotated pages (Rotate entry)
-5. Handle clipping paths (W, W* operators)
-6. Parse font encoding for accurate text extraction
-7. Support form XObjects (nested content streams)
+3. Handle clipping paths (W, W* operators)
+4. Parse font encoding for accurate text extraction
+5. Optimize for very large PDFs (streaming)
 
 **Priority 3 (Advanced):**
-8. Handle encrypted PDFs
-9. Support Type 3 fonts (custom fonts)
-10. Optimize for very large PDFs (streaming)
+6. Handle encrypted PDFs
+7. Support Type 3 fonts (custom fonts)
 
 ## Testing the Redaction Engine
 

@@ -329,7 +329,7 @@ public class ContentRemovalVerificationTests : IDisposable
         // Should be openable by multiple libraries
         Action openWithPdfSharp = () =>
         {
-            using var doc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+            using var doc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
             doc.PageCount.Should().Be(1);
         };
         openWithPdfSharp.Should().NotThrow("PDF should be openable by PdfSharp");

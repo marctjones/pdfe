@@ -1,3 +1,4 @@
+using System;
 using Xunit;
 using FluentAssertions;
 using PdfEditor.Services.Redaction;
@@ -308,5 +309,62 @@ public class PdfMatrixTests
         result.F.Should().Be(30);
         
         _output.WriteLine($"Result matrix: [{result.A} {result.B} {result.C} {result.D} {result.E} {result.F}]");
+    }
+
+    [Fact]
+    public void Multiply_OrderMatters_ShouldProduceDifferentResults()
+    {
+        // Arrange
+        var scale = PdfMatrix.CreateScale(2, 2);
+        var translate = PdfMatrix.CreateTranslation(10, 20);
+        _output.WriteLine("Test: Verify matrix multiply order matters");
+
+        // Act
+        var scaleThenTranslate = scale.Multiply(translate);
+        var translateThenScale = translate.Multiply(scale);
+
+        // Assert
+        scaleThenTranslate.E.Should().NotBe(translateThenScale.E);
+        translateThenScale.E.Should().Be(20, "translation applied after scaling doubles X offset");
+        translateThenScale.F.Should().Be(40, "translation applied after scaling doubles Y offset");
+        _output.WriteLine($"Scale→Translate translation: ({scaleThenTranslate.E},{scaleThenTranslate.F}), Translate→Scale: ({translateThenScale.E},{translateThenScale.F})");
+    }
+
+    [Fact]
+    public void Transform_WithRotationMatrix_ShouldRotatePoint()
+    {
+        // Arrange
+        var angle = Math.PI / 2; // 90 degrees
+        var rotation = new PdfMatrix
+        {
+            A = Math.Cos(angle),
+            B = Math.Sin(angle),
+            C = -Math.Sin(angle),
+            D = Math.Cos(angle),
+            E = 0,
+            F = 0
+        };
+        _output.WriteLine("Test: Rotate point (1,0) by 90 degrees");
+
+        // Act
+        var (x, y) = rotation.Transform(1, 0);
+
+        // Assert
+        x.Should().BeApproximately(0, 1e-6);
+        y.Should().BeApproximately(1, 1e-6);
+    }
+
+    [Fact]
+    public void CreateScale_WithZero_ShouldCollapseAxis()
+    {
+        // Arrange
+        var matrix = PdfMatrix.CreateScale(0, 2);
+
+        // Act
+        var (x, y) = matrix.Transform(5, 5);
+
+        // Assert
+        x.Should().Be(0, "zero scale on X collapses coordinate");
+        y.Should().Be(10, "Y should still scale by 2");
     }
 }

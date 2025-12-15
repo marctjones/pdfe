@@ -92,7 +92,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Title.Should().NotContain("SECRET_CODE",
             "Redacted term must be removed from title");
         finalDoc.Dispose();
@@ -140,7 +140,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Author.Should().NotContain("John_Smith_Secret",
             "Redacted term must be removed from author");
         finalDoc.Dispose();
@@ -186,7 +186,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Subject.Should().NotContain("PROJECT_ALPHA");
         finalDoc.Info.Keywords.Should().NotContain("PROJECT_ALPHA");
         finalDoc.Dispose();
@@ -238,7 +238,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
 
         // All metadata should be empty or cleared
         (string.IsNullOrEmpty(finalDoc.Info.Title) ||
@@ -307,7 +307,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         extractedText.Should().Contain("Public summary", "Non-redacted text should remain");
 
         // Assert - Metadata
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Title.Should().NotContain("ACME_CORP");
         finalDoc.Info.Author.Should().NotContain("Jane_Doe");
         finalDoc.Info.Subject.Should().NotContain("ACME_CORP");
@@ -369,7 +369,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
             pageText.Should().Contain($"Public info page {i + 1}");
         }
 
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Title.Should().NotContain("SECRET_PROJECT");
         finalDoc.Dispose();
 
@@ -425,7 +425,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         extractedText.Should().NotContain("TERM_B");
         extractedText.Should().Contain("Public conclusion");
 
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Title.Should().NotContain("TERM_A");
         finalDoc.Info.Title.Should().NotContain("TERM_B");
         finalDoc.Info.Keywords.Should().NotContain("TERM_A");
@@ -543,7 +543,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         doc.Dispose();
 
         // Assert
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         finalDoc.Info.Title.Should().NotContain("SECRET");
         finalDoc.Dispose();
 
@@ -595,7 +595,7 @@ public class MetadataRedactionIntegrationTests : IDisposable
         extractedText.Should().NotContain("REDACT_ME");
 
         // With default options, metadata is NOT sanitized
-        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.ReadOnly);
+        var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
         // The title may still contain the text since sanitization wasn't requested
         finalDoc.Dispose();
 

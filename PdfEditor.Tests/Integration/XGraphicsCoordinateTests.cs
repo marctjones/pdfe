@@ -45,8 +45,8 @@ public class XGraphicsCoordinateTests
         // Arrange: Create a PDF and draw a rectangle at Y=72 from presumed origin
         var document = new PdfDocument();
         var page = document.AddPage();
-        page.Width = PageWidth;
-        page.Height = PageHeight;
+        page.Width = XUnit.FromPoint(PageWidth);
+        page.Height = XUnit.FromPoint(PageHeight);
 
         using (var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append))
         {

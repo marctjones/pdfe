@@ -1,6 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)tesseract/5.2.0/build/Tesseract.targets" Condition="Exists('$(NuGetPackageRoot)tesseract/5.2.0/build/Tesseract.targets')" />
     <Import Project="$(NuGetPackageRoot)skiasharp.nativeassets.webassembly/2.88.9/buildTransitive/netstandard1.0/SkiaSharp.NativeAssets.WebAssembly.targets" Condition="Exists('$(NuGetPackageRoot)skiasharp.nativeassets.webassembly/2.88.9/buildTransitive/netstandard1.0/SkiaSharp.NativeAssets.WebAssembly.targets')" />
     <Import Project="$(NuGetPackageRoot)fody/6.8.0/build/Fody.targets" Condition="Exists('$(NuGetPackageRoot)fody/6.8.0/build/Fody.targets')" />
     <Import Project="$(NuGetPackageRoot)microsoft.extensions.options/8.0.2/buildTransitive/net6.0/Microsoft.Extensions.Options.targets" Condition="Exists('$(NuGetPackageRoot)microsoft.extensions.options/8.0.2/buildTransitive/net6.0/Microsoft.Extensions.Options.targets')" />

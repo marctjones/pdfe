@@ -1,14 +1,18 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
 using PdfEditor.Models;
 using PdfEditor.Services;
+using PdfEditor.Services.Verification;
 using ReactiveUI;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Reactive;
 using System.Threading.Tasks;
 
@@ -22,6 +26,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly PdfRenderService _renderService;
     private readonly RedactionService _redactionService;
     private readonly PdfTextExtractionService _textExtractionService;
+    private readonly PdfOcrService _ocrService;
+    private readonly SignatureVerificationService _signatureService;
+    private readonly RedactionVerifier _verifier;
 
     private string _currentFilePath = string.Empty;
     private Bitmap? _currentPageImage;
@@ -36,6 +43,14 @@ public partial class MainWindowViewModel : ViewModelBase
     private double _viewportWidth = 800;
     private double _viewportHeight = 600;
     private ObservableCollection<Rect> _currentPageSearchHighlights = new();
+    private bool _runVerifyAfterSave;
+    private string _ocrLanguages = "eng";
+    private int _ocrBaseDpi = 350;
+    private int _ocrHighDpi = 450;
+    private double _ocrLowConfidence = 0.6;
+    private int _renderCacheMax = 20;
+    private string _lastVerifyStatus = string.Empty;
+    private bool _lastVerifyFailed;
 
     public MainWindowViewModel(
         ILogger<MainWindowViewModel> logger,
@@ -44,7 +59,10 @@ public partial class MainWindowViewModel : ViewModelBase
         PdfRenderService renderService,
         RedactionService redactionService,
         PdfTextExtractionService textExtractionService,
-        PdfSearchService searchService)
+        PdfSearchService searchService,
+        PdfOcrService ocrService,
+        SignatureVerificationService signatureService,
+        RedactionVerifier verifier)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -53,6 +71,9 @@ public partial class MainWindowViewModel : ViewModelBase
         _redactionService = redactionService;
         _textExtractionService = textExtractionService;
         _searchService = searchService;
+        _ocrService = ocrService;
+        _signatureService = signatureService;
+        _verifier = verifier;
 
         _logger.LogInformation("MainWindowViewModel initialized");
 
@@ -102,6 +123,13 @@ public partial class MainWindowViewModel : ViewModelBase
         // Help menu commands
         AboutCommand = ReactiveCommand.Create(ShowAbout);
         ShowShortcutsCommand = ReactiveCommand.Create(ShowKeyboardShortcuts);
+        RunVerifyNowCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (!string.IsNullOrEmpty(_currentFilePath))
+            {
+                await RunVerifyAsync(_currentFilePath);
+            }
+        });
 
         // Initialize search commands
         InitializeSearchCommands();
@@ -115,6 +143,7 @@ public partial class MainWindowViewModel : ViewModelBase
     // Properties
     public ObservableCollection<PageThumbnail> PageThumbnails { get; }
     public ObservableCollection<ClipboardEntry> ClipboardHistory { get; }
+    public ReactiveCommand<Unit, Unit> RunVerifyNowCommand { get; }
 
     public Bitmap? CurrentPageImage
     {
@@ -186,6 +215,58 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         get => _selectedText;
         set => this.RaiseAndSetIfChanged(ref _selectedText, value);
+    }
+
+    public bool RunVerifyAfterSave
+    {
+        get => _runVerifyAfterSave;
+        set => this.RaiseAndSetIfChanged(ref _runVerifyAfterSave, value);
+    }
+
+    public string OcrLanguages
+    {
+        get => _ocrLanguages;
+        set => this.RaiseAndSetIfChanged(ref _ocrLanguages, value);
+    }
+
+    public int OcrBaseDpi
+    {
+        get => _ocrBaseDpi;
+        set => this.RaiseAndSetIfChanged(ref _ocrBaseDpi, value);
+    }
+
+    public int OcrHighDpi
+    {
+        get => _ocrHighDpi;
+        set => this.RaiseAndSetIfChanged(ref _ocrHighDpi, value);
+    }
+
+    public double OcrLowConfidence
+    {
+        get => _ocrLowConfidence;
+        set => this.RaiseAndSetIfChanged(ref _ocrLowConfidence, value);
+    }
+
+    public int RenderCacheMax
+    {
+        get => _renderCacheMax;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _renderCacheMax, value);
+            _renderService.MaxCacheEntries = Math.Max(1, value);
+        }
+    }
+
+    public string LastVerifyStatus
+    {
+        get => _lastVerifyStatus;
+        set => this.RaiseAndSetIfChanged(ref _lastVerifyStatus, value);
+    }
+
+    public bool LastVerifyFailed
+    {
+        get => _lastVerifyFailed;
+        set => this.RaiseAndSetIfChanged(ref _lastVerifyFailed, value);
     }
 
     public string StatusText => _documentService.IsDocumentLoaded
@@ -272,9 +353,42 @@ public partial class MainWindowViewModel : ViewModelBase
     // Command Implementations
     private async Task OpenFileAsync()
     {
-        // This would be called from the View with a file path
-        // For now, this is a placeholder
-        await Task.CompletedTask;
+        _logger.LogInformation("Open file command triggered");
+
+        var storageProvider = GetStorageProvider();
+        if (storageProvider == null)
+        {
+            _logger.LogWarning("Storage provider unavailable, cannot show Open dialog");
+            return;
+        }
+
+        var files = await storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Open PDF File",
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("PDF Files")
+                {
+                    Patterns = new[] { "*.pdf" }
+                }
+            }
+        });
+
+        if (files.Count == 0)
+        {
+            _logger.LogInformation("Open dialog cancelled");
+            return;
+        }
+
+        var filePath = files[0].Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _logger.LogWarning("Selected file has no local path");
+            return;
+        }
+
+        await LoadDocumentAsync(filePath);
     }
 
     public async Task LoadDocumentAsync(string filePath)
@@ -322,6 +436,11 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _documentService.SaveDocument();
             _logger.LogInformation("Document saved successfully");
+
+            if (RunVerifyAfterSave && !string.IsNullOrEmpty(_currentFilePath))
+            {
+                await RunVerifyAsync(_currentFilePath);
+            }
         }
         catch (Exception ex)
         {
@@ -369,9 +488,48 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task AddPagesAsync()
     {
-        // This would open a file picker and add pages
-        // Placeholder for now
-        await Task.CompletedTask;
+        _logger.LogInformation("Add pages command triggered");
+
+        if (!_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning("Cannot add pages: No document loaded");
+            return;
+        }
+
+        var storageProvider = GetStorageProvider();
+        if (storageProvider == null)
+        {
+            _logger.LogWarning("Storage provider unavailable, cannot show Add Pages dialog");
+            return;
+        }
+
+        var files = await storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select PDF to Add Pages From",
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("PDF Files")
+                {
+                    Patterns = new[] { "*.pdf" }
+                }
+            }
+        });
+
+        if (files.Count == 0)
+        {
+            _logger.LogInformation("Add pages dialog cancelled");
+            return;
+        }
+
+        var filePath = files[0].Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _logger.LogWarning("Selected file has no local path");
+            return;
+        }
+
+        await AddPagesFromFileAsync(filePath);
     }
 
     public async Task AddPagesFromFileAsync(string sourcePdfPath)
@@ -545,7 +703,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 areaToRedact.X, areaToRedact.Y, areaToRedact.Width, areaToRedact.Height);
 
             var page = document.Pages[CurrentPageIndex];
-            _redactionService.RedactArea(page, areaToRedact);
+            // UI selections are in rendered image pixels at the render DPI (150)
+            _redactionService.RedactArea(page, areaToRedact, CoordinateConverter.DefaultRenderDpi);
 
             // Add redacted text to clipboard history (so user can see what was removed)
             if (!string.IsNullOrWhiteSpace(redactedText))
@@ -885,9 +1044,41 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        // This would show a save file dialog
-        // For now, placeholder
-        await Task.CompletedTask;
+        var storageProvider = GetStorageProvider();
+        if (storageProvider == null)
+        {
+            _logger.LogWarning("Storage provider unavailable, cannot show Save As dialog");
+            return;
+        }
+
+        var file = await storageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save PDF As",
+            DefaultExtension = "pdf",
+            SuggestedFileName = string.IsNullOrWhiteSpace(DocumentName) ? "document.pdf" : DocumentName,
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("PDF Files")
+                {
+                    Patterns = new[] { "*.pdf" }
+                }
+            }
+        });
+
+        if (file == null)
+        {
+            _logger.LogInformation("Save As dialog cancelled");
+            return;
+        }
+
+        var filePath = file.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _logger.LogWarning("Save As target has no local path");
+            return;
+        }
+
+        await SaveFileAsAsync(filePath);
     }
 
     public async Task SaveFileAsAsync(string filePath)
@@ -900,11 +1091,54 @@ public partial class MainWindowViewModel : ViewModelBase
             _currentFilePath = filePath;
             this.RaisePropertyChanged(nameof(DocumentName));
             _logger.LogInformation("Document saved successfully to: {FilePath}", filePath);
+
+            if (RunVerifyAfterSave)
+            {
+                await RunVerifyAsync(filePath);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error saving document to: {FilePath}", filePath);
         }
+
+        await Task.CompletedTask;
+    }
+
+    private Task RunVerifyAsync(string filePath)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                using var doc = PdfSharp.Pdf.IO.PdfReader.Open(filePath, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
+                var result = _verifier.Verify(doc);
+
+                if (result.Passed)
+                {
+                    _logger.LogInformation("Verification passed for {File}", filePath);
+                    LastVerifyFailed = false;
+                    LastVerifyStatus = "Verification passed";
+                }
+                else
+                {
+                    _logger.LogWarning("Verification FAILED for {File}. Leaks: {Count}", filePath, result.Leaks.Count);
+                    foreach (var leak in result.Leaks.Take(5))
+                    {
+                        _logger.LogWarning("Leak on page {Page}: '{Text}' at ({X:F1},{Y:F1})",
+                            leak.PageIndex + 1, leak.Text, leak.BoundingBox.X, leak.BoundingBox.Y);
+                    }
+                    LastVerifyFailed = true;
+                    LastVerifyStatus = $"Verification failed ({result.Leaks.Count} leaks)";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Verification failed for {FilePath}", filePath);
+                LastVerifyFailed = true;
+                LastVerifyStatus = "Verification failed";
+            }
+        });
     }
 
     private void CloseDocument()
@@ -923,6 +1157,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _currentFilePath = string.Empty;
             CurrentPageImage = null;
             PageThumbnails.Clear();
+            _renderService.ClearCache();
             this.RaisePropertyChanged(nameof(DocumentName));
             this.RaisePropertyChanged(nameof(TotalPages));
             this.RaisePropertyChanged(nameof(StatusText));
@@ -959,9 +1194,33 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        // This would show a folder picker and export options dialog
-        // For now, placeholder
-        await Task.CompletedTask;
+        var storageProvider = GetStorageProvider();
+        if (storageProvider == null)
+        {
+            _logger.LogWarning("Storage provider unavailable, cannot show Export dialog");
+            return;
+        }
+
+        var folder = await storageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Folder for Exported Images",
+            AllowMultiple = false
+        });
+
+        if (folder.Count == 0)
+        {
+            _logger.LogInformation("Export dialog cancelled");
+            return;
+        }
+
+        var folderPath = folder[0].Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            _logger.LogWarning("Export target folder has no local path");
+            return;
+        }
+
+        await ExportPagesToImagesAsync(folderPath, "png", 150);
     }
 
     public async Task ExportPagesToImagesAsync(string outputFolder, string format = "png", int dpi = 150)
@@ -1028,6 +1287,14 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _logger.LogInformation("Keyboard shortcuts dialog requested");
         // This would show keyboard shortcuts help
+    }
+
+    private IStorageProvider? GetStorageProvider()
+    {
+        var lifetime = Avalonia.Application.Current?.ApplicationLifetime
+            as IClassicDesktopStyleApplicationLifetime;
+
+        return lifetime?.MainWindow?.StorageProvider;
     }
 
     // Recent Files Management
