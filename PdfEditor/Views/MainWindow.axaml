@@ -23,29 +23,100 @@
 
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}">
+            <!-- FILE MENU -->
             <MenuItem Header="_File">
-                <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGesture="Ctrl+O"/>
-                <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGesture="Ctrl+S"/>
+                <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGesture="Ctrl+O">
+                    <MenuItem.Icon><TextBlock Text="📁"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGesture="Ctrl+S">
+                    <MenuItem.Icon><TextBlock Text="💾"/></MenuItem.Icon>
+                </MenuItem>
                 <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S"/>
                 <Separator/>
                 <MenuItem Header="_Recent Files" Name="RecentFilesMenu">
-                    <!-- Recent files will be populated dynamically -->
                     <MenuItem Header="No recent files" IsEnabled="False" IsVisible="{Binding !HasRecentFiles}"/>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="_Close" Command="{Binding CloseDocumentCommand}" InputGesture="Ctrl+W"/>
-                <Separator/>
+                <MenuItem Header="_Close Document" Command="{Binding CloseDocumentCommand}" InputGesture="Ctrl+W"/>
                 <MenuItem Header="E_xit" Command="{Binding ExitCommand}" InputGesture="Alt+F4"/>
             </MenuItem>
 
+            <!-- EDIT MENU -->
             <MenuItem Header="_Edit">
-                <MenuItem Header="_Copy Text" Command="{Binding CopyTextCommand}" InputGesture="Ctrl+C"/>
-                <Separator/>
-                <MenuItem Header="_Find..." Command="{Binding ToggleSearchCommand}" InputGesture="Ctrl+F"/>
+                <MenuItem Header="_Find..." Command="{Binding ToggleSearchCommand}" InputGesture="Ctrl+F">
+                    <MenuItem.Icon><TextBlock Text="🔍"/></MenuItem.Icon>
+                </MenuItem>
                 <MenuItem Header="Find _Next" Command="{Binding FindNextCommand}" InputGesture="F3"/>
                 <MenuItem Header="Find _Previous" Command="{Binding FindPreviousCommand}" InputGesture="Shift+F3"/>
+                <Separator/>
+                <MenuItem Header="_Select Text Mode" Command="{Binding ToggleTextSelectionModeCommand}" InputGesture="T">
+                    <MenuItem.Icon>
+                        <TextBlock Text="✓" IsVisible="{Binding IsTextSelectionMode}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Copy Selected Text" Command="{Binding CopyTextCommand}" InputGesture="Ctrl+C"
+                          IsEnabled="{Binding IsTextSelectionMode}"/>
             </MenuItem>
 
+            <!-- DOCUMENT MENU -->
+            <MenuItem Header="_Document">
+                <MenuItem Header="_Add Pages..." Command="{Binding AddPagesCommand}">
+                    <MenuItem.Icon><TextBlock Text="➕"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Remove Current Page" Command="{Binding RemoveCurrentPageCommand}"
+                          IsEnabled="{Binding IsDocumentLoaded}">
+                    <MenuItem.Icon><TextBlock Text="🗑"/></MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="Rotate _Left 90°" Command="{Binding RotatePageLeftCommand}" InputGesture="Ctrl+L"/>
+                <MenuItem Header="Rotate _Right 90°" Command="{Binding RotatePageRightCommand}" InputGesture="Ctrl+R"/>
+                <MenuItem Header="Rotate _180°" Command="{Binding RotatePage180Command}"/>
+                <Separator/>
+                <MenuItem Header="_Export Pages as Images..." Command="{Binding ExportPagesCommand}"/>
+                <MenuItem Header="_Print..." Command="{Binding PrintCommand}" InputGesture="Ctrl+P"/>
+            </MenuItem>
+
+            <!-- REDACTION MENU -->
+            <MenuItem Header="_Redaction">
+                <MenuItem Header="_Enable Redaction Mode" Command="{Binding ToggleRedactionModeCommand}" InputGesture="R">
+                    <MenuItem.Icon>
+                        <TextBlock Text="✓" IsVisible="{Binding IsRedactionMode}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Apply Redaction" Command="{Binding ApplyRedactionCommand}" InputGesture="Enter"
+                          IsEnabled="{Binding IsRedactionMode}">
+                    <MenuItem.Icon><TextBlock Text="⬛" Foreground="Red"/></MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Verify Redaction" Command="{Binding RunVerifyNowCommand}"
+                          IsEnabled="{Binding IsDocumentLoaded}">
+                    <MenuItem.Icon><TextBlock Text="✓"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_View Clipboard History">
+                    <MenuItem.Icon><TextBlock Text="📋"/></MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+
+            <!-- TOOLS MENU -->
+            <MenuItem Header="_Tools">
+                <MenuItem Header="_Run OCR on Current Page..." Command="{Binding RunOcrCommand}"
+                          IsEnabled="{Binding IsDocumentLoaded}">
+                    <MenuItem.Icon><TextBlock Text="📝"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="Run OCR on _All Pages..." Command="{Binding RunOcrAllPagesCommand}"
+                          IsEnabled="{Binding IsDocumentLoaded}"/>
+                <Separator/>
+                <MenuItem Header="_Verify Digital Signatures..." Command="{Binding VerifySignaturesCommand}"
+                          IsEnabled="{Binding IsDocumentLoaded}">
+                    <MenuItem.Icon><TextBlock Text="🔐"/></MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Preferences..." Command="{Binding ShowPreferencesCommand}" InputGesture="Ctrl+,">
+                    <MenuItem.Icon><TextBlock Text="⚙"/></MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+
+            <!-- VIEW MENU -->
             <MenuItem Header="_View">
                 <MenuItem Header="_Zoom In" Command="{Binding ZoomInCommand}" InputGesture="Ctrl++"/>
                 <MenuItem Header="Zoom _Out" Command="{Binding ZoomOutCommand}" InputGesture="Ctrl+-"/>
@@ -54,60 +125,24 @@
                 <MenuItem Header="Fit _Width" Command="{Binding ZoomFitWidthCommand}" InputGesture="Ctrl+1"/>
                 <MenuItem Header="Fit _Page" Command="{Binding ZoomFitPageCommand}" InputGesture="Ctrl+2"/>
                 <Separator/>
-                <MenuItem Header="Rotate _Left" Command="{Binding RotatePageLeftCommand}" InputGesture="Ctrl+L"/>
-                <MenuItem Header="Rotate _Right" Command="{Binding RotatePageRightCommand}" InputGesture="Ctrl+R"/>
-                <MenuItem Header="Rotate _180°" Command="{Binding RotatePage180Command}"/>
-            </MenuItem>
-
-            <MenuItem Header="_Tools">
-                <MenuItem Header="_Redaction Mode" Command="{Binding ToggleRedactionModeCommand}">
+                <MenuItem Header="Show _Thumbnails">
                     <MenuItem.Icon>
-                        <TextBlock Text="✓" IsVisible="{Binding IsRedactionMode}"/>
+                        <TextBlock Text="✓"/>
                     </MenuItem.Icon>
                 </MenuItem>
-                <MenuItem Header="_Text Selection Mode" Command="{Binding ToggleTextSelectionModeCommand}">
+                <MenuItem Header="Show _Clipboard History">
                     <MenuItem.Icon>
-                        <TextBlock Text="✓" IsVisible="{Binding IsTextSelectionMode}"/>
+                        <TextBlock Text="✓"/>
                     </MenuItem.Icon>
-                </MenuItem>
-                <Separator/>
-                <MenuItem Header="_Add Pages..." Command="{Binding AddPagesCommand}"/>
-                <MenuItem Header="_Remove Current Page" Command="{Binding RemoveCurrentPageCommand}"/>
-                <Separator/>
-                <MenuItem Header="_Export Pages as Images..." Command="{Binding ExportPagesCommand}"/>
-                <MenuItem Header="_Print..." Command="{Binding PrintCommand}" InputGesture="Ctrl+P"/>
-                <Separator/>
-                <MenuItem Header="_Verification &amp; OCR Settings">
-                    <StackPanel Margin="8" Spacing="8">
-                        <CheckBox Content="Verify after Save"
-                                  IsChecked="{Binding RunVerifyAfterSave}"/>
-                        <TextBlock Text="OCR Languages (e.g., eng+deu)" FontSize="12"/>
-                        <TextBox Text="{Binding OcrLanguages}" Width="200"/>
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <StackPanel Width="120">
-                                <TextBlock Text="OCR Base DPI" FontSize="12"/>
-                                <NumericUpDown Minimum="100" Maximum="600" Value="{Binding OcrBaseDpi}" />
-                            </StackPanel>
-                            <StackPanel Width="120">
-                                <TextBlock Text="OCR High DPI" FontSize="12"/>
-                                <NumericUpDown Minimum="100" Maximum="800" Value="{Binding OcrHighDpi}" />
-                            </StackPanel>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Low Confidence Retry &lt;" VerticalAlignment="Center" FontSize="12"/>
-                            <NumericUpDown Minimum="0.1" Maximum="0.99" Increment="0.05" Value="{Binding OcrLowConfidence}" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Render Cache Max" VerticalAlignment="Center" FontSize="12"/>
-                            <NumericUpDown Minimum="1" Maximum="200" Value="{Binding RenderCacheMax}" />
-                        </StackPanel>
-                    </StackPanel>
                 </MenuItem>
             </MenuItem>
 
+            <!-- HELP MENU -->
             <MenuItem Header="_Help">
-                <MenuItem Header="_About PDF Editor" Command="{Binding AboutCommand}"/>
                 <MenuItem Header="_Keyboard Shortcuts" Command="{Binding ShowShortcutsCommand}" InputGesture="F1"/>
+                <MenuItem Header="_Documentation"/>
+                <Separator/>
+                <MenuItem Header="_About PDF Editor" Command="{Binding AboutCommand}"/>
             </MenuItem>
         </Menu>
 
@@ -132,114 +167,82 @@
                        HorizontalAlignment="Center"/>
         </Grid>
 
-        <!-- Modern Toolbar -->
+        <!-- Simplified Toolbar with Grouped Actions -->
         <Border Grid.Row="1"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,6">
-            <StackPanel Orientation="Horizontal" Spacing="4">
-                <!-- File Operations -->
-                <Button Content="Open" Command="{Binding OpenFileCommand}"
-                        Classes="modern-button" Padding="12,6"/>
-                <Button Content="Save" Command="{Binding SaveFileCommand}"
-                        Classes="modern-button" Padding="12,6"/>
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <!-- Left: Main Actions -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                    <!-- File Group -->
+                    <Button Content="📁 Open" Command="{Binding OpenFileCommand}"
+                            Classes="modern-button" Padding="12,6"
+                            ToolTip.Tip="Open PDF (Ctrl+O)"/>
+                    <Button Content="💾 Save" Command="{Binding SaveFileCommand}"
+                            Classes="modern-button" Padding="12,6"
+                            ToolTip.Tip="Save (Ctrl+S)"/>
 
-                <Border Width="1" Height="24" Margin="4,0"
-                        Background="{DynamicResource DividerBrush}"/>
+                    <Border Width="1" Height="24" Margin="6,0"
+                            Background="{DynamicResource DividerBrush}"/>
 
-                <!-- Page Operations -->
-                <Button Content="Remove Page" Command="{Binding RemoveCurrentPageCommand}"
-                        Classes="modern-button" Padding="12,6"/>
-                <Button Content="Add Pages" Command="{Binding AddPagesCommand}"
-                        Classes="modern-button" Padding="12,6"/>
+                    <!-- Mode Toggles -->
+                    <Button Content="📝 Select Text" Command="{Binding ToggleTextSelectionModeCommand}"
+                            Classes="modern-button toggle"
+                            Classes.active="{Binding IsTextSelectionMode}"
+                            Padding="12,6"
+                            ToolTip.Tip="Text Selection Mode (T)"/>
 
-                <Border Width="1" Height="24" Margin="4,0"
-                        Background="{DynamicResource DividerBrush}"/>
+                    <Button Content="⬛ Redact" Command="{Binding ToggleRedactionModeCommand}"
+                            Classes="modern-button toggle"
+                            Classes.active="{Binding IsRedactionMode}"
+                            Padding="12,6"
+                            ToolTip.Tip="Redaction Mode (R)"/>
 
-                <!-- Text Selection -->
-                <Button Content="Select Text" Command="{Binding ToggleTextSelectionModeCommand}"
-                        Classes="modern-button toggle"
-                        Classes.active="{Binding IsTextSelectionMode}"
-                        Padding="12,6"/>
-                <Button Content="Copy Text" Command="{Binding CopyTextCommand}"
-                        Classes="modern-button" Padding="12,6"
-                        IsEnabled="{Binding IsTextSelectionMode}"/>
+                    <Border Width="1" Height="24" Margin="6,0"
+                            Background="{DynamicResource DividerBrush}"/>
 
-                <Border Width="1" Height="24" Margin="4,0"
-                        Background="{DynamicResource DividerBrush}"/>
+                    <!-- Tools Group -->
+                    <Button Content="🔍 Find" Command="{Binding ToggleSearchCommand}"
+                            Classes="modern-button" Padding="12,6"
+                            ToolTip.Tip="Find Text (Ctrl+F)"/>
 
-                <!-- Redaction -->
-                <Button Content="Redact Mode" Command="{Binding ToggleRedactionModeCommand}"
-                        Classes="modern-button toggle"
-                        Classes.active="{Binding IsRedactionMode}"
-                        Padding="12,6"/>
-                <Button Content="Apply Redaction" Command="{Binding ApplyRedactionCommand}"
-                        Classes="modern-button accent" Padding="12,6"
-                        IsEnabled="{Binding IsRedactionMode}"/>
+                    <Button Content="📝 OCR" Command="{Binding RunOcrCommand}"
+                            Classes="modern-button" Padding="12,6"
+                            IsEnabled="{Binding IsDocumentLoaded}"
+                            ToolTip.Tip="Run OCR on Current Page"/>
 
-                <Border Width="1" Height="24" Margin="4,0"
-                        Background="{DynamicResource DividerBrush}"/>
+                    <Border Width="1" Height="24" Margin="6,0"
+                            Background="{DynamicResource DividerBrush}"/>
 
-                <!-- Rotation Controls -->
-                <Button Content="↺" Command="{Binding RotatePageLeftCommand}"
-                        Classes="modern-button" Padding="12,6" FontSize="16" FontWeight="Bold"
-                        ToolTip.Tip="Rotate Left (Ctrl+L)"/>
-                <Button Content="↻" Command="{Binding RotatePageRightCommand}"
-                        Classes="modern-button" Padding="12,6" FontSize="16" FontWeight="Bold"
-                        ToolTip.Tip="Rotate Right (Ctrl+R)"/>
-                <Button Content="⟲" Command="{Binding RotatePage180Command}"
-                        Classes="modern-button" Padding="12,6" FontSize="16" FontWeight="Bold"
-                        ToolTip.Tip="Rotate 180°"/>
-
-                <Border Width="1" Height="24" Margin="4,0"
-                        Background="{DynamicResource DividerBrush}"/>
-
-                <!-- Zoom Controls -->
-                <Button Content="+" Command="{Binding ZoomInCommand}"
-                        Classes="modern-button" Padding="12,6" FontWeight="Bold"
-                        ToolTip.Tip="Zoom In (Ctrl++)"/>
-                <TextBlock Text="{Binding ZoomLevel, StringFormat='{}{0:P0}'}"
-                           VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextSecondaryBrush}"
-                           MinWidth="50" TextAlignment="Center"/>
-                <Button Content="−" Command="{Binding ZoomOutCommand}"
-                        Classes="modern-button" Padding="12,6" FontWeight="Bold"
-                        ToolTip.Tip="Zoom Out (Ctrl+-)"/>
-                <Button Content="100%" Command="{Binding ZoomActualSizeCommand}"
-                        Classes="modern-button" Padding="10,6" FontSize="11"
-                        ToolTip.Tip="Actual Size (Ctrl+0)"/>
-                <Button Content="Fit Width" Command="{Binding ZoomFitWidthCommand}"
-                        Classes="modern-button" Padding="10,6" FontSize="11"
-                        ToolTip.Tip="Fit Width (Ctrl+1)"/>
-                <Button Content="Fit Page" Command="{Binding ZoomFitPageCommand}"
-                        Classes="modern-button" Padding="10,6" FontSize="11"
-                        ToolTip.Tip="Fit Page (Ctrl+2)"/>
-
-                <Border Width="1" Height="24" Margin="4,0"
-                        Background="{DynamicResource DividerBrush}"/>
-
-                <!-- Search -->
-                <Button Content="🔍 Find" Command="{Binding ToggleSearchCommand}"
-                        Classes="modern-button" Padding="12,6"
-                        ToolTip.Tip="Find text (Ctrl+F)"/>
-
-                <!-- Verify Status -->
-                <StackPanel Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
-                    <Ellipse Width="10" Height="10"
-                             Fill="{Binding LastVerifyFailed, Converter={StaticResource BooleanToBrushConverter}, ConverterParameter='Red,Green'}"/>
-                    <TextBlock Text="{Binding LastVerifyStatus}" FontSize="11"
-                               Foreground="{DynamicResource TextSecondaryBrush}" />
-                    <Button Content="Run Verify" Command="{Binding RunVerifyNowCommand}"
-                            Classes="modern-button" Padding="10,4" />
-                    <TextBlock Text="⚠" FontSize="14" Foreground="Red"
-                               IsVisible="{Binding LastVerifyFailed}" Margin="4,0,0,0">
-                        <ToolTip.Tip>
-                            Verification failed. Inspect Validator output/logs for details.
-                        </ToolTip.Tip>
-                    </TextBlock>
+                    <!-- Page Rotation -->
+                    <Button Content="↺" Command="{Binding RotatePageLeftCommand}"
+                            Classes="modern-button" Padding="10,6" FontSize="16"
+                            ToolTip.Tip="Rotate Left (Ctrl+L)"/>
+                    <Button Content="↻" Command="{Binding RotatePageRightCommand}"
+                            Classes="modern-button" Padding="10,6" FontSize="16"
+                            ToolTip.Tip="Rotate Right (Ctrl+R)"/>
                 </StackPanel>
-            </StackPanel>
+
+                <!-- Right: Zoom Controls -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                    <Button Content="−" Command="{Binding ZoomOutCommand}"
+                            Classes="modern-button" Padding="10,6" FontWeight="Bold"
+                            ToolTip.Tip="Zoom Out (Ctrl+-)"/>
+                    <TextBlock Text="{Binding ZoomLevel, StringFormat='{}{0:P0}'}"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               MinWidth="45" TextAlignment="Center"
+                               FontSize="12" FontWeight="Medium"/>
+                    <Button Content="+" Command="{Binding ZoomInCommand}"
+                            Classes="modern-button" Padding="10,6" FontWeight="Bold"
+                            ToolTip.Tip="Zoom In (Ctrl++)"/>
+                    <Button Content="Fit" Command="{Binding ZoomFitWidthCommand}"
+                            Classes="modern-button" Padding="10,6" FontSize="11"
+                            ToolTip.Tip="Fit Width (Ctrl+1)"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- Search Bar -->
