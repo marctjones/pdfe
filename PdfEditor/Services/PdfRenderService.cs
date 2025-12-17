@@ -29,13 +29,7 @@ public class PdfRenderService
     {
         _logger = logger;
         _logger.LogDebug("PdfRenderService instance created");
-
-        var envMax = Environment.GetEnvironmentVariable("PDFEDITOR_RENDER_CACHE_MAX");
-        if (int.TryParse(envMax, out var parsed) && parsed > 0)
-        {
-            _maxCacheEntries = parsed;
-            _logger.LogInformation("Render cache size set from env PDFEDITOR_RENDER_CACHE_MAX={Size}", parsed);
-        }
+        // Cache size is now configured through UI preferences (default: 20)
     }
 
     /// <summary>

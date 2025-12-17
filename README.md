@@ -109,23 +109,17 @@ PdfEditor includes built-in OCR support using Tesseract for extracting text from
 - Tesseract trained data files in `tessdata/` directory
 - Download from: https://github.com/tesseract-ocr/tessdata
 
-**Configuration** (via environment variables):
-- `PDFEDITOR_OCR_LANGS` - Languages (default: `eng`, examples: `eng+deu`, `fra+spa`)
-- `PDFEDITOR_OCR_BASE_DPI` - Base resolution (default: 350)
-- `PDFEDITOR_OCR_HIGH_DPI` - High resolution retry (default: 450)
-- `PDFEDITOR_OCR_LOW_CONFIDENCE` - Confidence threshold for retry (default: 0.6)
-- `PDFEDITOR_OCR_PREPROCESS` - Enable preprocessing (default: true)
-- `PDFEDITOR_OCR_DENOISE_RADIUS` - Denoise radius (default: 0.8)
-- `PDFEDITOR_OCR_BINARIZE` - Enable binarization (default: true)
+**Configuration:**
+All OCR and performance settings can be configured through the application:
+- Go to **Tools** → **Preferences** (Ctrl+,)
+- Configure OCR languages, DPI settings, preprocessing options
+- Adjust render cache size for performance
 
 **Features:**
+- Multi-language support (English, German, French, Spanish, etc.)
 - Automatic grayscale preprocessing for better accuracy
 - Low-confidence page retry at higher DPI
-- Multi-language support
-
-### Performance Tuning
-- `PDFEDITOR_RENDER_CACHE_MAX` - Maximum cached rendered pages (default: 20)
-- Cache is automatically cleared when closing documents
+- Configurable image preprocessing and binarization
 
 ### Digital Signature Verification
 

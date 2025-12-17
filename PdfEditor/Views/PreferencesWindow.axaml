@@ -1,0 +1,212 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:PdfEditor.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
+        x:Class="PdfEditor.Views.PreferencesWindow"
+        x:DataType="vm:PreferencesViewModel"
+        Title="Preferences"
+        Width="600" Height="500"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+
+    <Design.DataContext>
+        <vm:PreferencesViewModel/>
+    </Design.DataContext>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Header -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource SecondaryBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="20,15">
+            <TextBlock Text="Preferences"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+        </Border>
+
+        <!-- Content -->
+        <ScrollViewer Grid.Row="1" Padding="20">
+            <StackPanel Spacing="20">
+
+                <!-- OCR Settings Section -->
+                <Border Background="{DynamicResource CardBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="20">
+                    <StackPanel Spacing="15">
+                        <TextBlock Text="OCR (Optical Character Recognition)"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+
+                        <TextBlock Text="Configure text extraction from scanned PDFs"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+
+                        <Separator/>
+
+                        <!-- OCR Languages -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Languages" FontWeight="Medium"/>
+                            <TextBox Text="{Binding OcrLanguages}"
+                                     Watermark="e.g., eng, eng+deu, fra+spa"
+                                     ToolTip.Tip="Language codes separated by + (e.g., eng for English, eng+deu for English and German)"/>
+                            <TextBlock Text="Available: eng (English), deu (German), fra (French), spa (Spanish), etc."
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        </StackPanel>
+
+                        <!-- OCR DPI Settings -->
+                        <Grid ColumnDefinitions="*,20,*" RowDefinitions="Auto,Auto,Auto">
+                            <StackPanel Grid.Column="0" Spacing="8">
+                                <TextBlock Text="Base DPI" FontWeight="Medium"/>
+                                <NumericUpDown Value="{Binding OcrBaseDpi}"
+                                               Minimum="100" Maximum="600"
+                                               Increment="50"
+                                               FormatString="0"/>
+                                <TextBlock Text="Standard resolution for OCR"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Spacing="8">
+                                <TextBlock Text="High DPI" FontWeight="Medium"/>
+                                <NumericUpDown Value="{Binding OcrHighDpi}"
+                                               Minimum="200" Maximum="800"
+                                               Increment="50"
+                                               FormatString="0"/>
+                                <TextBlock Text="Retry resolution for low confidence"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Low Confidence Threshold -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Low Confidence Threshold" FontWeight="Medium"/>
+                            <NumericUpDown Value="{Binding OcrLowConfidence}"
+                                           Minimum="0.1" Maximum="0.99"
+                                           Increment="0.05"
+                                           FormatString="0.00"/>
+                            <TextBlock Text="Retry at higher DPI if confidence is below this value"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        </StackPanel>
+
+                        <!-- OCR Preprocessing Options -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Preprocessing" FontWeight="Medium"/>
+                            <CheckBox Content="Enable preprocessing"
+                                      IsChecked="{Binding OcrPreprocess}"
+                                      ToolTip.Tip="Apply image preprocessing for better accuracy"/>
+                            <CheckBox Content="Enable binarization"
+                                      IsChecked="{Binding OcrBinarize}"
+                                      ToolTip.Tip="Convert to black and white for improved recognition"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Denoise Radius" FontWeight="Medium"/>
+                            <NumericUpDown Value="{Binding OcrDenoiseRadius}"
+                                           Minimum="0.1" Maximum="5.0"
+                                           Increment="0.1"
+                                           FormatString="0.0"/>
+                            <TextBlock Text="Image noise reduction strength"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Rendering Settings Section -->
+                <Border Background="{DynamicResource CardBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="20">
+                    <StackPanel Spacing="15">
+                        <TextBlock Text="Rendering &amp; Performance"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+
+                        <TextBlock Text="Configure PDF rendering and caching"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+
+                        <Separator/>
+
+                        <!-- Render Cache -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Render Cache Size" FontWeight="Medium"/>
+                            <NumericUpDown Value="{Binding RenderCacheMax}"
+                                           Minimum="1" Maximum="200"
+                                           Increment="5"
+                                           FormatString="0"/>
+                            <TextBlock Text="Maximum number of pages to keep in memory (higher = faster navigation, more RAM)"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Redaction Settings Section -->
+                <Border Background="{DynamicResource CardBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="20">
+                    <StackPanel Spacing="15">
+                        <TextBlock Text="Redaction"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+
+                        <TextBlock Text="Configure redaction verification"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+
+                        <Separator/>
+
+                        <CheckBox Content="Verify redactions after saving"
+                                  IsChecked="{Binding RunVerifyAfterSave}"
+                                  ToolTip.Tip="Automatically run verification to ensure content is removed"/>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer Buttons -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource SecondaryBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="20,15">
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10">
+                <Button Content="Reset to Defaults"
+                        Command="{Binding ResetToDefaultsCommand}"
+                        Classes="modern-button"
+                        Padding="15,8"/>
+                <Button Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Classes="modern-button"
+                        Padding="15,8"/>
+                <Button Content="Save"
+                        Command="{Binding SaveCommand}"
+                        Classes="modern-button accent"
+                        Padding="15,8"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
