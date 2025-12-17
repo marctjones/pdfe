@@ -105,21 +105,44 @@ dotnet run
 
 PdfEditor includes built-in OCR support using Tesseract for extracting text from scanned or image-based PDFs.
 
-**Requirements:**
-- Tesseract trained data files in `tessdata/` directory
-- Download from: https://github.com/tesseract-ocr/tessdata
+**Zero Setup Required:**
+- **Auto-download**: Language data files are automatically downloaded on first use
+- **Bundled**: English language data included in releases (no internet required)
+- **Just works**: Click OCR button and it handles everything automatically
+
+**Usage:**
+1. Open a PDF with scanned/image content
+2. Click the **📝 OCR** button in the toolbar (or Tools → Run OCR)
+3. Wait for processing (status shown in status bar)
+4. Extracted text appears in Clipboard History panel
 
 **Configuration:**
-All OCR and performance settings can be configured through the application:
-- Go to **Tools** → **Preferences** (Ctrl+,)
-- Configure OCR languages, DPI settings, preprocessing options
-- Adjust render cache size for performance
+Customize OCR settings through **Tools** → **Preferences** (Ctrl+,):
+- **Languages**: English (eng) by default, supports 100+ languages (eng+deu for English+German, etc.)
+- **DPI Settings**: Base DPI (350) and high DPI (450) for quality/speed balance
+- **Preprocessing**: Grayscale conversion, denoising, binarization options
 
-**Features:**
-- Multi-language support (English, German, French, Spanish, etc.)
-- Automatic grayscale preprocessing for better accuracy
-- Low-confidence page retry at higher DPI
-- Configurable image preprocessing and binarization
+**Advanced Features:**
+- **Auto-download**: Missing language files download automatically from GitHub
+- **Smart retry**: Low-confidence pages re-processed at higher DPI
+- **Multi-language**: Process documents with mixed languages (e.g., "eng+fra+deu")
+- **Progress feedback**: Status messages and completion dialogs
+- **Manual download**: If auto-download fails, clear instructions provided
+
+**Supported Languages:**
+Download additional languages automatically by setting in Preferences:
+- `eng` - English (bundled)
+- `deu` - German
+- `fra` - French
+- `spa` - Spanish
+- `ita` - Italian
+- `por` - Portuguese
+- `rus` - Russian
+- `chi_sim` - Simplified Chinese
+- `jpn` - Japanese
+- ...and 90+ more languages
+
+For multiple languages, use `+` separator (e.g., `eng+deu+fra`)
 
 ### Digital Signature Verification
 
