@@ -423,6 +423,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             this.RaisePropertyChanged(nameof(TotalPages));
             this.RaisePropertyChanged(nameof(StatusText));
+            this.RaisePropertyChanged(nameof(IsDocumentLoaded));
 
             // Add to recent files
             AddToRecentFiles(filePath);
@@ -1174,6 +1175,7 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaisePropertyChanged(nameof(DocumentName));
             this.RaisePropertyChanged(nameof(TotalPages));
             this.RaisePropertyChanged(nameof(StatusText));
+            this.RaisePropertyChanged(nameof(IsDocumentLoaded));
             _logger.LogInformation("Document closed successfully");
         }
         catch (Exception ex)
