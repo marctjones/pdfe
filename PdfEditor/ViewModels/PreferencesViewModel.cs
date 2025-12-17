@@ -14,7 +14,7 @@ public class PreferencesViewModel : ViewModelBase
     private bool _ocrBinarize = true;
     private double _ocrDenoiseRadius = 0.8;
     private int _renderCacheMax = 20;
-    private bool _runVerifyAfterSave = false;
+    private bool _runVerifyAfterSave = true; // Enabled by default for security
 
     public PreferencesViewModel()
     {
@@ -109,7 +109,7 @@ public class PreferencesViewModel : ViewModelBase
         OcrBinarize = true;
         OcrDenoiseRadius = 0.8;
         RenderCacheMax = 20;
-        RunVerifyAfterSave = false;
+        RunVerifyAfterSave = true; // Enabled by default for security
     }
 
     private void CloseWindow()

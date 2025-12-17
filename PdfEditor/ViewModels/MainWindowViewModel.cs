@@ -43,7 +43,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private double _viewportWidth = 800;
     private double _viewportHeight = 600;
     private ObservableCollection<Rect> _currentPageSearchHighlights = new();
-    private bool _runVerifyAfterSave;
+    private bool _runVerifyAfterSave = true; // Enabled by default for security
     private string _ocrLanguages = "eng";
     private int _ocrBaseDpi = 350;
     private int _ocrHighDpi = 450;
