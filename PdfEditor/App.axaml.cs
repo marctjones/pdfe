@@ -118,3 +118,28 @@ public class SimpleBooleanToBrushConverter : IBrushConverter
         return value ? Brush.Parse(trueBrush) : Brush.Parse(falseBrush);
     }
 }
+
+public class BooleanToBrushConverter : Avalonia.Data.Converters.IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, System.Globalization.CultureInfo culture)
+    {
+        if (value is not bool boolValue)
+            return Brushes.Transparent;
+
+        var paramString = parameter?.ToString() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(paramString))
+            return boolValue ? Brushes.Green : Brushes.Transparent;
+
+        var parts = paramString.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var trueBrush = parts.Length > 0 ? parts[0] : "Green";
+        var falseBrush = parts.Length > 1 ? parts[1] : "Transparent";
+
+        return boolValue ? Brush.Parse(trueBrush) : Brush.Parse(falseBrush);
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, System.Globalization.CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
