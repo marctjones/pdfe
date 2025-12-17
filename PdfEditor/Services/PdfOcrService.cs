@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Tesseract;
 using PdfEditor.Services;
@@ -55,6 +56,59 @@ public class PdfOcrService
     }
 
     /// <summary>
+    /// Download Tesseract language data files if not present
+    /// </summary>
+    public async Task<bool> EnsureLanguageDataAsync(string language = "eng")
+    {
+        try
+        {
+            // Create tessdata directory if it doesn't exist
+            if (!Directory.Exists(_tessDataPath))
+            {
+                _logger.LogInformation("Creating tessdata directory at {Path}", _tessDataPath);
+                Directory.CreateDirectory(_tessDataPath);
+            }
+
+            var trainedDataFile = Path.Combine(_tessDataPath, $"{language}.traineddata");
+
+            if (File.Exists(trainedDataFile))
+            {
+                _logger.LogDebug("Language data already exists: {File}", trainedDataFile);
+                return true;
+            }
+
+            _logger.LogInformation("Downloading Tesseract language data for {Language}...", language);
+
+            // Use fast model for smaller download size and faster loading
+            var url = $"https://github.com/tesseract-ocr/tessdata_fast/raw/main/{language}.traineddata";
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(5); // Large files may take time
+
+            var response = await httpClient.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to download {Language} language data. HTTP {StatusCode}", language, response.StatusCode);
+                return false;
+            }
+
+            var data = await response.Content.ReadAsByteArrayAsync();
+            await File.WriteAllBytesAsync(trainedDataFile, data);
+
+            _logger.LogInformation("Successfully downloaded {Language} language data ({Size:N0} bytes)",
+                language, data.Length);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading Tesseract language data for {Language}", language);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Perform OCR on a PDF document and return the extracted text
     /// </summary>
     public Task<string> PerformOcrAsync(string pdfPath, string language = "eng")
@@ -80,9 +134,27 @@ public class PdfOcrService
     /// </summary>
     public async Task<string> PerformOcrAsync(string pdfPath, OcrOptions options)
     {
+        // Auto-download language data if not available
         if (!IsOcrAvailable())
         {
-            throw new InvalidOperationException($"OCR data not found at {_tessDataPath}. Please install Tesseract training data.");
+            _logger.LogInformation("OCR data not found. Attempting to download...");
+
+            // Parse language string (supports "eng", "eng+deu", etc.)
+            var languages = options.Languages.Split(new[] { '+', ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var lang in languages)
+            {
+                var langCode = lang.Trim();
+                var success = await EnsureLanguageDataAsync(langCode);
+
+                if (!success)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to download language data for '{langCode}'. " +
+                        $"Please check your internet connection or manually download from: " +
+                        $"https://github.com/tesseract-ocr/tessdata_fast/raw/main/{langCode}.traineddata");
+                }
+            }
         }
 
         _logger.LogInformation("Starting OCR for {File} with language {Lang}", Path.GetFileName(pdfPath), options.Languages);

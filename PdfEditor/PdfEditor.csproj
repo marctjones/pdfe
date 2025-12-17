@@ -46,4 +46,12 @@
     <AvaloniaResource Include="Styles\**\*.axaml" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Include tessdata files in output if they exist -->
+    <None Include="..\tessdata\*.traineddata" Condition="Exists('..\tessdata')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>tessdata\%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
 </Project>
