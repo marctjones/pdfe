@@ -131,6 +131,12 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         });
 
+        // Tools menu commands
+        RunOcrCommand = ReactiveCommand.CreateFromTask(RunOcrOnCurrentPageAsync);
+        RunOcrAllPagesCommand = ReactiveCommand.CreateFromTask(RunOcrOnAllPagesAsync);
+        VerifySignaturesCommand = ReactiveCommand.CreateFromTask(VerifySignaturesAsync);
+        ShowPreferencesCommand = ReactiveCommand.Create(ShowPreferences);
+
         // Initialize search commands
         InitializeSearchCommands();
 
@@ -345,10 +351,17 @@ public partial class MainWindowViewModel : ViewModelBase
     // Tools Menu Commands
     public ReactiveCommand<Unit, Unit> ExportPagesCommand { get; }
     public ReactiveCommand<Unit, Unit> PrintCommand { get; }
+    public ReactiveCommand<Unit, Unit> RunOcrCommand { get; }
+    public ReactiveCommand<Unit, Unit> RunOcrAllPagesCommand { get; }
+    public ReactiveCommand<Unit, Unit> VerifySignaturesCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowPreferencesCommand { get; }
 
     // Help Menu Commands
     public ReactiveCommand<Unit, Unit> AboutCommand { get; }
     public ReactiveCommand<Unit, Unit> ShowShortcutsCommand { get; }
+
+    // Document status property
+    public bool IsDocumentLoaded => _documentService.IsDocumentLoaded;
 
     // Command Implementations
     private async Task OpenFileAsync()
@@ -1388,5 +1401,156 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _logger.LogInformation("Loading recent file: {FilePath}", filePath);
         await LoadDocumentAsync(filePath);
+    }
+
+    // OCR Commands
+    private async Task RunOcrOnCurrentPageAsync()
+    {
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogWarning("No document loaded for OCR");
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation("Running OCR on current page {PageNumber}", CurrentPageIndex + 1);
+
+            if (!_ocrService.IsOcrAvailable())
+            {
+                _logger.LogWarning("OCR not available - tessdata files missing");
+                // TODO: Show dialog to user: "OCR requires Tesseract data files. Please install tessdata."
+                return;
+            }
+
+            var options = new OcrOptions
+            {
+                Languages = OcrLanguages,
+                BaseDpi = OcrBaseDpi,
+                HighDpi = OcrHighDpi,
+                LowConfidenceThreshold = (float)OcrLowConfidence
+            };
+
+            // For now, OCR the entire document and show only current page result
+            // TODO: Implement single-page OCR extraction
+            var result = await _ocrService.PerformOcrAsync(_currentFilePath, options);
+
+            if (!string.IsNullOrWhiteSpace(result))
+            {
+                _logger.LogInformation("OCR completed. Extracted {CharCount} characters", result.Length);
+
+                // Add to clipboard history
+                ClipboardHistory.Insert(0, new ClipboardEntry
+                {
+                    Text = result,
+                    PageNumber = CurrentPageIndex + 1,
+                    Timestamp = DateTime.Now,
+                    IsRedacted = false
+                });
+
+                _logger.LogInformation("OCR text added to clipboard history");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running OCR");
+        }
+    }
+
+    private async Task RunOcrOnAllPagesAsync()
+    {
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogWarning("No document loaded for OCR");
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation("Running OCR on all {PageCount} pages", TotalPages);
+
+            if (!_ocrService.IsOcrAvailable())
+            {
+                _logger.LogWarning("OCR not available - tessdata files missing");
+                // TODO: Show dialog to user
+                return;
+            }
+
+            var options = new OcrOptions
+            {
+                Languages = OcrLanguages,
+                BaseDpi = OcrBaseDpi,
+                HighDpi = OcrHighDpi,
+                LowConfidenceThreshold = (float)OcrLowConfidence
+            };
+
+            var result = await _ocrService.PerformOcrAsync(_currentFilePath, options);
+
+            if (!string.IsNullOrWhiteSpace(result))
+            {
+                // Add to clipboard history
+                ClipboardHistory.Insert(0, new ClipboardEntry
+                {
+                    Text = result,
+                    PageNumber = 0, // All pages
+                    Timestamp = DateTime.Now,
+                    IsRedacted = false
+                });
+
+                _logger.LogInformation("OCR completed for all pages. Total characters: {CharCount}", result.Length);
+                // TODO: Show completion dialog
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running OCR on all pages");
+        }
+    }
+
+    // Signature Verification Command
+    private async Task VerifySignaturesAsync()
+    {
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogWarning("No document loaded for signature verification");
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation("Verifying digital signatures");
+
+            var results = _signatureService.VerifySignatures(_currentFilePath);
+
+            if (results == null || results.Count == 0)
+            {
+                _logger.LogInformation("No digital signatures found in document");
+                // TODO: Show dialog: "No digital signatures found"
+                return;
+            }
+
+            _logger.LogInformation("Found {SignatureCount} signatures", results.Count);
+
+            // TODO: Show signature verification results dialog
+            foreach (var result in results)
+            {
+                _logger.LogInformation("Signature: Valid={IsValid}, Signer={Signer}, Time={SigningTime}",
+                    result.IsValid, result.SignedBy, result.SigningTime);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error verifying signatures");
+        }
+
+        await Task.CompletedTask;
+    }
+
+    // Preferences Command
+    private void ShowPreferences()
+    {
+        _logger.LogInformation("Show preferences dialog");
+        // TODO: Implement preferences dialog
+        // For now, preferences are in Tools menu as inline controls
     }
 }
