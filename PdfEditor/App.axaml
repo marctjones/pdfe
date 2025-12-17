@@ -1,6 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:sty="using:FluentAvalonia.Styling"
+             xmlns:local="using:PdfEditor"
              x:Class="PdfEditor.App"
              RequestedThemeVariant="Light">
 
@@ -12,6 +13,9 @@
                 <ResourceInclude Source="/Styles/Colors.axaml"/>
                 <ResourceInclude Source="/Styles/Brushes.axaml"/>
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Converters -->
+            <local:BooleanToBrushConverter x:Key="BooleanToBrushConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 
