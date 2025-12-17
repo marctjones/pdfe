@@ -545,12 +545,23 @@
                                Foreground="{DynamicResource TextPrimaryBrush}"/>
                 </Border>
 
-                <!-- Status Text -->
-                <TextBlock Grid.Column="1"
-                           Text="{Binding StatusText}"
-                           VerticalAlignment="Center"
-                           FontSize="12"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                <!-- Status Text / Operation Status -->
+                <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="2">
+                    <!-- Operation Status (shown when an operation is in progress) -->
+                    <TextBlock Text="{Binding OperationStatus}"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AccentBrush}"
+                               IsVisible="{Binding OperationStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+                    <!-- Regular Status Text (shown when no operation) -->
+                    <TextBlock Text="{Binding StatusText}"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               IsVisible="{Binding OperationStatus, Converter={x:Static StringConverters.IsNullOrEmpty}}"/>
+                </StackPanel>
 
                 <!-- Page Navigation -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">

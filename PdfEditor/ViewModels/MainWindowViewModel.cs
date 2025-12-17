@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -51,6 +52,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private int _renderCacheMax = 20;
     private string _lastVerifyStatus = string.Empty;
     private bool _lastVerifyFailed;
+    private string _operationStatus = string.Empty;
 
     public MainWindowViewModel(
         ILogger<MainWindowViewModel> logger,
@@ -278,6 +280,12 @@ public partial class MainWindowViewModel : ViewModelBase
     public string StatusText => _documentService.IsDocumentLoaded
         ? $"Page {CurrentPageIndex + 1} of {TotalPages} - Zoom: {ZoomLevel:P0}"
         : "No document loaded";
+
+    public string OperationStatus
+    {
+        get => _operationStatus;
+        set => this.RaiseAndSetIfChanged(ref _operationStatus, value);
+    }
 
     public ObservableCollection<string> RecentFiles
     {
@@ -1411,17 +1419,22 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
         {
             _logger.LogWarning("No document loaded for OCR");
+            OperationStatus = "No document loaded";
             return;
         }
 
         try
         {
             _logger.LogInformation("Running OCR on current page {PageNumber}", CurrentPageIndex + 1);
+            OperationStatus = $"Running OCR on page {CurrentPageIndex + 1}...";
 
             if (!_ocrService.IsOcrAvailable())
             {
                 _logger.LogWarning("OCR not available - tessdata files missing");
-                // TODO: Show dialog to user: "OCR requires Tesseract data files. Please install tessdata."
+                OperationStatus = "OCR Error: Tesseract data files not found. Please install tessdata.";
+                await ShowMessageDialog("OCR Not Available",
+                    "OCR requires Tesseract language data files.\n\n" +
+                    "Please install tessdata to use OCR functionality.");
                 return;
             }
 
@@ -1451,11 +1464,29 @@ public partial class MainWindowViewModel : ViewModelBase
                 });
 
                 _logger.LogInformation("OCR text added to clipboard history");
+                OperationStatus = $"OCR complete: Extracted {result.Length} characters (see Clipboard History)";
+
+                await ShowMessageDialog("OCR Complete",
+                    $"Successfully extracted {result.Length} characters from page {CurrentPageIndex + 1}.\n\n" +
+                    $"The text has been added to the Clipboard History panel.");
+            }
+            else
+            {
+                OperationStatus = "OCR complete: No text found";
+                await ShowMessageDialog("OCR Complete",
+                    "No text was extracted from the page.\n\n" +
+                    "This may be because:\n" +
+                    "• The page contains no text\n" +
+                    "• The text quality is too poor\n" +
+                    "• The language setting doesn't match the document");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error running OCR");
+            OperationStatus = $"OCR Error: {ex.Message}";
+            await ShowMessageDialog("OCR Error",
+                $"An error occurred while running OCR:\n\n{ex.Message}");
         }
     }
 
@@ -1577,6 +1608,56 @@ public partial class MainWindowViewModel : ViewModelBase
         else
         {
             _logger.LogWarning("Could not find main window to show preferences dialog");
+        }
+    }
+
+    private async Task ShowMessageDialog(string title, string message)
+    {
+        var mainWindow = GetMainWindow();
+        if (mainWindow != null)
+        {
+            // Create a simple dialog window
+            var dialog = new Window
+            {
+                Title = title,
+                Width = 450,
+                Height = 200,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false
+            };
+
+            var panel = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 15
+            };
+
+            var messageText = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 400
+            };
+
+            var okButton = new Button
+            {
+                Content = "OK",
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                Padding = new Thickness(30, 5),
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            okButton.Click += (s, e) => dialog.Close();
+
+            panel.Children.Add(messageText);
+            panel.Children.Add(okButton);
+            dialog.Content = panel;
+
+            await dialog.ShowDialog(mainWindow);
+        }
+        else
+        {
+            _logger.LogWarning("Could not show message dialog: Main window not found. Message was: {Message}", message);
         }
     }
 
