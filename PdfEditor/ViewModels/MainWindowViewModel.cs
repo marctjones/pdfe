@@ -1430,12 +1430,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
             if (!_ocrService.IsOcrAvailable())
             {
-                _logger.LogWarning("OCR not available - tessdata files missing");
-                OperationStatus = "OCR Error: Tesseract data files not found. Please install tessdata.";
-                await ShowMessageDialog("OCR Not Available",
-                    "OCR requires Tesseract language data files.\n\n" +
-                    "Please install tessdata to use OCR functionality.");
-                return;
+                _logger.LogInformation("OCR data not available. Will auto-download on first use.");
+                OperationStatus = "Downloading OCR language data (one-time setup)...";
+                // Note: The OCR service will auto-download the data when PerformOcrAsync is called
             }
 
             var options = new OcrOptions
