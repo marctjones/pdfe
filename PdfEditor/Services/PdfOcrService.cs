@@ -134,33 +134,8 @@ public class PdfOcrService
 
     private OcrOptions BuildDefaultOptions()
     {
-        var opts = OcrOptions.Default;
-
-        var envLang = Environment.GetEnvironmentVariable("PDFEDITOR_OCR_LANGS");
-        if (!string.IsNullOrWhiteSpace(envLang))
-            opts.Languages = envLang;
-
-        if (int.TryParse(Environment.GetEnvironmentVariable("PDFEDITOR_OCR_BASE_DPI"), out var baseDpi) && baseDpi > 0)
-            opts.BaseDpi = baseDpi;
-
-        if (int.TryParse(Environment.GetEnvironmentVariable("PDFEDITOR_OCR_HIGH_DPI"), out var highDpi) && highDpi > 0)
-            opts.HighDpi = highDpi;
-
-        if (float.TryParse(Environment.GetEnvironmentVariable("PDFEDITOR_OCR_LOW_CONFIDENCE"), out var lowConf) && lowConf > 0 && lowConf < 1)
-            opts.LowConfidenceThreshold = lowConf;
-
-        var envPre = Environment.GetEnvironmentVariable("PDFEDITOR_OCR_PREPROCESS");
-        if (!string.IsNullOrWhiteSpace(envPre) && bool.TryParse(envPre, out var pre))
-            opts.Preprocess = pre;
-
-        if (float.TryParse(Environment.GetEnvironmentVariable("PDFEDITOR_OCR_DENOISE_RADIUS"), out var radius) && radius >= 0)
-            opts.DenoiseRadius = radius;
-
-        var envBin = Environment.GetEnvironmentVariable("PDFEDITOR_OCR_BINARIZE");
-        if (!string.IsNullOrWhiteSpace(envBin) && bool.TryParse(envBin, out var bin))
-            opts.Binarize = bin;
-
-        return opts;
+        // Return standard defaults - all configuration is now done through UI preferences
+        return OcrOptions.Default;
     }
 
     private async Task<(string text, float confidence)> OcrPageAsync(TesseractEngine engine, string pdfPath, int pageIndex, int dpi, OcrOptions options)

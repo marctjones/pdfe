@@ -1550,7 +1550,40 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ShowPreferences()
     {
         _logger.LogInformation("Show preferences dialog");
-        // TODO: Implement preferences dialog
-        // For now, preferences are in Tools menu as inline controls
+
+        var preferencesViewModel = new PreferencesViewModel();
+        preferencesViewModel.LoadFromMainViewModel(this);
+
+        var window = new Views.PreferencesWindow
+        {
+            DataContext = preferencesViewModel
+        };
+
+        // Get the main window
+        var mainWindow = GetMainWindow();
+        if (mainWindow != null)
+        {
+            window.ShowDialog(mainWindow).ContinueWith(task =>
+            {
+                if (preferencesViewModel.DialogResult)
+                {
+                    preferencesViewModel.SaveToMainViewModel(this);
+                    _logger.LogInformation("Preferences saved");
+                }
+            });
+        }
+        else
+        {
+            _logger.LogWarning("Could not find main window to show preferences dialog");
+        }
+    }
+
+    private Window? GetMainWindow()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            return desktop.MainWindow;
+        }
+        return null;
     }
 }
