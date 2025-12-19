@@ -9,6 +9,7 @@ using SixLabors.ImageSharp.Processing;
 using Microsoft.Extensions.Logging;
 using Xunit.Abstractions;
 using FluentAssertions;
+using SkiaSharp;
 
 namespace PdfEditor.Tests;
 
@@ -95,9 +96,10 @@ public class VisualRenderingTests
                     continue;
                 }
 
-                // Save to stream for ImageSharp
-                using var stream = new MemoryStream();
-                bitmap.Save(stream);
+                // Convert SKBitmap to PNG MemoryStream for ImageSharp
+                using var skImage = SKImage.FromBitmap(bitmap);
+                using var encodedData = skImage.Encode(SKEncodedImageFormat.Png, 100);
+                using var stream = new MemoryStream(encodedData.ToArray());
                 stream.Position = 0;
 
                 if (!File.Exists(baselinePath))

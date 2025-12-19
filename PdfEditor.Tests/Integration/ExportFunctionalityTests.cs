@@ -4,6 +4,8 @@ using Moq;
 using PdfEditor.Services;
 using PdfEditor.Tests.Utilities;
 using Xunit;
+using System.IO; // Added for FileStream
+using SkiaSharp; // Added for SKBitmap operations
 
 namespace PdfEditor.Tests.Integration;
 
@@ -54,7 +56,12 @@ public class ExportFunctionalityTests : IDisposable
             {
                 var fileName = $"page_{i + 1:D3}.png";
                 var filePath = Path.Combine(exportDir, fileName);
-                bitmap.Save(filePath);
+
+                using var image = SKImage.FromBitmap(bitmap);
+                using var encodedData = image.Encode(SKEncodedImageFormat.Png, 100);
+                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+                encodedData.SaveTo(fileStream);
+
                 savedFiles.Add(filePath);
                 exported++;
             }
@@ -96,7 +103,11 @@ public class ExportFunctionalityTests : IDisposable
         }
 
         var filePath = Path.Combine(exportDir, "test_page.png");
-        bitmap!.Save(filePath);
+        
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encodedData = image.Encode(SKEncodedImageFormat.Png, 100);
+        using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+        encodedData.SaveTo(fileStream);
 
         // Assert
         File.Exists(filePath).Should().BeTrue();
@@ -136,9 +147,9 @@ public class ExportFunctionalityTests : IDisposable
         }
 
         // Higher DPI should produce larger images
-        var size72 = bitmap72!.PixelSize.Width * bitmap72.PixelSize.Height;
-        var size150 = bitmap150!.PixelSize.Width * bitmap150.PixelSize.Height;
-        var size300 = bitmap300!.PixelSize.Width * bitmap300.PixelSize.Height;
+        var size72 = bitmap72!.Width * bitmap72.Height;
+        var size150 = bitmap150!.Width * bitmap150.Height;
+        var size300 = bitmap300!.Width * bitmap300.Height;
 
         size150.Should().BeGreaterThan(size72);
         size300.Should().BeGreaterThan(size150);
@@ -166,7 +177,12 @@ public class ExportFunctionalityTests : IDisposable
             {
                 var fileName = $"page_{i + 1:D3}.png";
                 var filePath = Path.Combine(exportDir, fileName);
-                bitmap.Save(filePath);
+                
+                using var image = SKImage.FromBitmap(bitmap);
+                using var encodedData = image.Encode(SKEncodedImageFormat.Png, 100);
+                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+                encodedData.SaveTo(fileStream);
+
                 savedFiles.Add(filePath);
                 exported++;
             }
