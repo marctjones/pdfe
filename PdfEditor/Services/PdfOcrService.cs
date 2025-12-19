@@ -8,6 +8,7 @@ using PdfEditor.Services;
 using System.Collections.Generic;
 using System.Text;
 using SkiaSharp;
+using Avalonia.Media.Imaging; // Still needed for the main app's UI, not removed
 
 namespace PdfEditor.Services;
 
@@ -43,8 +44,8 @@ public class PdfOcrService
     }
 
     /// <summary>
-    /// Check if Tesseract data is available
-    /// </summary>
+/// Check if Tesseract data is available
+/// </summary>
     public bool IsOcrAvailable()
     {
         var available = Directory.Exists(_tessDataPath) && Directory.GetFiles(_tessDataPath, "*.traineddata").Length > 0;
@@ -56,8 +57,8 @@ public class PdfOcrService
     }
 
     /// <summary>
-    /// Download Tesseract language data files if not present
-    /// </summary>
+/// Download Tesseract language data files if not present
+/// </summary>
     public async Task<bool> EnsureLanguageDataAsync(string language = "eng")
     {
         try
@@ -109,8 +110,8 @@ public class PdfOcrService
     }
 
     /// <summary>
-    /// Perform OCR on a PDF document and return the extracted text
-    /// </summary>
+/// Perform OCR on a PDF document and return the extracted text
+/// </summary>
     public Task<string> PerformOcrAsync(string pdfPath, string language = "eng")
     {
         var opts = BuildDefaultOptions();
@@ -119,8 +120,8 @@ public class PdfOcrService
     }
 
     /// <summary>
-    /// Perform OCR using multiple languages (comma or plus separated).
-    /// </summary>
+/// Perform OCR using multiple languages (comma or plus separated).
+/// </summary>
     public Task<string> PerformOcrAsync(string pdfPath, IEnumerable<string> languages)
     {
         var lang = string.Join("+", languages ?? Array.Empty<string>());
@@ -130,8 +131,8 @@ public class PdfOcrService
     }
 
     /// <summary>
-    /// Perform OCR with custom options.
-    /// </summary>
+/// Perform OCR with custom options.
+/// </summary>
     public async Task<string> PerformOcrAsync(string pdfPath, OcrOptions options)
     {
         // Auto-download language data if not available
@@ -212,40 +213,36 @@ public class PdfOcrService
 
     private async Task<(string text, float confidence)> OcrPageAsync(TesseractEngine engine, string pdfPath, int pageIndex, int dpi, OcrOptions options)
     {
-        using var bitmap = await _renderService.RenderPageAsync(pdfPath, pageIndex, dpi);
-        if (bitmap == null) return (string.Empty, 0f);
+        // Now directly receive SKBitmap from render service
+        using var skBitmap = await _renderService.RenderPageAsync(pdfPath, pageIndex, dpi);
+        if (skBitmap == null) return (string.Empty, 0f);
 
-        using var pix = options.Preprocess ? PreprocessForOcr(bitmap, options) : PixFromBitmap(bitmap);
+        using var pix = options.Preprocess ? PreprocessForOcr(skBitmap, options) : Pix.LoadFromMemory(SKImage.FromBitmap(skBitmap).Encode(SKEncodedImageFormat.Png, 100).ToArray());
         using var page = engine.Process(pix);
 
         return (page.GetText(), page.GetMeanConfidence());
     }
 
-    private Pix PixFromBitmap(Avalonia.Media.Imaging.Bitmap bitmap)
+    // This is no longer needed as PixFromBitmap is gone and we get SKBitmap directly
+    // private Pix PixFromBitmap(Avalonia.Media.Imaging.Bitmap bitmap)
+    // {
+    //     using var stream = new MemoryStream();
+    //     bitmap.Save(stream);
+    //     stream.Position = 0;
+    //     return Pix.LoadFromMemory(stream.ToArray());
+    // }
+
+    private Pix PreprocessForOcr(SKBitmap skBitmap, OcrOptions options)
     {
-        using var stream = new MemoryStream();
-        bitmap.Save(stream);
-        stream.Position = 0;
-        return Pix.LoadFromMemory(stream.ToArray());
-    }
-
-    private Pix PreprocessForOcr(Avalonia.Media.Imaging.Bitmap bitmap, OcrOptions options)
-    {
-        // Convert Avalonia Bitmap -> SKBitmap -> grayscale to reduce noise for OCR
-        using var stream = new MemoryStream();
-        bitmap.Save(stream);
-        stream.Position = 0;
-
-        using var src = SKBitmap.Decode(stream);
-        if (src == null)
-            throw new InvalidOperationException("Failed to decode bitmap for OCR preprocessing.");
-
-        var info = new SKImageInfo(src.Width, src.Height, SKColorType.Gray8, SKAlphaType.Opaque);
-        var gray = new SKBitmap(info);
+        // Preprocessing is now done directly on SKBitmap
+        // Convert SKBitmap to grayscale and apply blur if needed
+        var info = new SKImageInfo(skBitmap.Width, skBitmap.Height, SKColorType.Gray8, SKAlphaType.Opaque);
+        using var gray = new SKBitmap(info);
 
         using (var surface = new SKCanvas(gray))
         using (var paint = new SKPaint())
         {
+            // Apply color matrix for grayscale conversion
             paint.ColorFilter = SKColorFilter.CreateColorMatrix(new float[]
             {
                 0.2126f, 0.2126f, 0.2126f, 0, 0,
@@ -257,7 +254,7 @@ public class PdfOcrService
             {
                 paint.ImageFilter = SKImageFilter.CreateBlur(options.DenoiseRadius, options.DenoiseRadius);
             }
-            surface.DrawBitmap(src, 0, 0, paint);
+            surface.DrawBitmap(skBitmap, 0, 0, paint);
         }
 
         using var img = SKImage.FromBitmap(gray);

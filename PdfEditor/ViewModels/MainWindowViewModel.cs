@@ -16,6 +16,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Reactive;
 using System.Threading.Tasks;
+using SkiaSharp;
 
 namespace PdfEditor.ViewModels;
 
@@ -768,10 +769,10 @@ public partial class MainWindowViewModel : ViewModelBase
                     memoryStream.Position = 0;
                     docStream.Dispose();
 
-                    var bitmap = await _renderService.RenderPageFromStreamAsync(memoryStream, CurrentPageIndex);
-                    if (bitmap != null)
+                    var skBitmap = await _renderService.RenderPageFromStreamAsync(memoryStream, CurrentPageIndex);
+                    if (skBitmap != null)
                     {
-                        CurrentPageImage = bitmap;
+                        CurrentPageImage = ToAvaloniaBitmap(skBitmap);
                         _logger.LogInformation("Page re-rendered successfully after redaction");
                     }
                     else
@@ -991,8 +992,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var bitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex);
-            CurrentPageImage = bitmap;
+            var skBitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex);
+            var avaloniaBitmap = ToAvaloniaBitmap(skBitmap);
+            CurrentPageImage = avaloniaBitmap;
         }
         catch (Exception ex)
         {
@@ -1040,7 +1042,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 // Update UI on UI thread
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    thumbnail.ThumbnailImage = image;
+                    thumbnail.ThumbnailImage = ToAvaloniaBitmap(image);
                     _logger.LogDebug("Thumbnail {PageIndex} loaded and set", pageIndex);
                 });
             });
@@ -1269,7 +1271,17 @@ public partial class MainWindowViewModel : ViewModelBase
                     var fileName = $"page_{i + 1:D3}.{format}";
                     var filePath = System.IO.Path.Combine(outputFolder, fileName);
 
-                    bitmap.Save(filePath);
+                    // Determine the image format based on the 'format' parameter
+                    SKEncodedImageFormat imageFormat = SKEncodedImageFormat.Png;
+                    if (format.Equals("jpg", StringComparison.OrdinalIgnoreCase) || format.Equals("jpeg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        imageFormat = SKEncodedImageFormat.Jpeg;
+                    }
+
+                    using var image = SKImage.FromBitmap(bitmap);
+                    using var encodedData = image.Encode(imageFormat, 90); // 90% quality for JPG
+                    using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+                    encodedData.SaveTo(fileStream);
                     _logger.LogDebug("Page {PageIndex} exported to: {FilePath}", i, filePath);
                 }
             }
@@ -1665,5 +1677,31 @@ public partial class MainWindowViewModel : ViewModelBase
             return desktop.MainWindow;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Converts an SKBitmap to an Avalonia.Media.Imaging.Bitmap.
+    /// </summary>
+    /// <param name="skBitmap">The SKBitmap to convert.</param>
+    /// <returns>An Avalonia.Media.Imaging.Bitmap, or null if conversion fails.</returns>
+    private Avalonia.Media.Imaging.Bitmap? ToAvaloniaBitmap(SKBitmap? skBitmap)
+    {
+        if (skBitmap == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var image = SKImage.FromBitmap(skBitmap);
+            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+            using var stream = new MemoryStream(data.ToArray());
+            return new Avalonia.Media.Imaging.Bitmap(stream);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting SKBitmap to Avalonia.Media.Imaging.Bitmap");
+            return null;
+        }
     }
 }

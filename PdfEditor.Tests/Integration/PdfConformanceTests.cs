@@ -6,6 +6,7 @@ using PdfEditor.Tests.Utilities;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 using Xunit;
+using SkiaSharp;
 
 namespace PdfEditor.Tests.Integration;
 
@@ -72,8 +73,8 @@ public class PdfConformanceTests : IDisposable
             // PDFium rendering not available in this environment
             return;
         }
-        bitmap.PixelSize.Width.Should().BeGreaterThan(0);
-        bitmap.PixelSize.Height.Should().BeGreaterThan(0);
+        bitmap.Width.Should().BeGreaterThan(0);
+        bitmap.Height.Should().BeGreaterThan(0);
     }
 
     [Fact]
@@ -306,7 +307,10 @@ public class PdfConformanceTests : IDisposable
             if (bitmap != null)
             {
                 var filePath = Path.Combine(exportDir, $"page_{i}.png");
-                bitmap.Save(filePath);
+                using var image = SKImage.FromBitmap(bitmap);
+                using var encodedData = image.Encode(SKEncodedImageFormat.Png, 100);
+                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+                encodedData.SaveTo(fileStream);
                 savedFiles.Add(filePath);
                 exported++;
             }
