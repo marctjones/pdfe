@@ -143,7 +143,7 @@ create_issue \
 - Only essential INFO-level logs remain
 
 **Depends On:** #1" \
-    "technical-debt,component: file-management,priority: medium,effort: small"
+    "enhancement,component: file-management,priority: medium,effort: small"
 
 # Issue 5: Restore logging level to INFO from DEBUG
 create_issue \
@@ -160,7 +160,7 @@ create_issue \
 - [ ] Logging level set to INFO
 - [ ] Console output is clean and readable
 - [ ] Essential operations still logged" \
-    "technical-debt,priority: medium,effort: small"
+    "enhancement,priority: medium,effort: small"
 
 # Issue 6: Improve Recent Files menu display - show basenames instead of full paths
 create_issue \
@@ -350,7 +350,7 @@ create_issue \
 - [ ] All command properties have null-forgiving operator
 - [ ] Build produces 0 warnings
 - [ ] Pattern is documented for future properties" \
-    "technical-debt,priority: medium,effort: small"
+    "enhancement,priority: medium,effort: small"
 
 # Issue 14: Verify PDF 1.7 and PDF 2.0 conformance for mark-then-apply workflow
 create_issue \
