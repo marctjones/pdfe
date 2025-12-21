@@ -1,5 +1,6 @@
 using Avalonia;
 using Microsoft.Extensions.Logging;
+using PdfEditor.Models;
 using PdfEditor.Services.Redaction;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
@@ -161,14 +162,28 @@ public class RedactionService
         // Content removal MUST succeed for redaction to be valid.
         // We will NEVER do visual-only redaction as it creates a false sense of security.
 
+        RedactionResult result;
+
         try
         {
             // Step 1: Remove content within the area (TRUE REDACTION - REQUIRED)
             _logger.LogDebug("Step 1: Removing content within redaction area");
-            RemoveContentInArea(page, scaledArea);
+            result = RemoveContentInArea(page, scaledArea);
 
             sw.Stop();
-            _logger.LogInformation("Content removed successfully in {ElapsedMs}ms. Redaction is secure.", sw.ElapsedMilliseconds);
+
+            if (result.Mode == RedactionMode.TrueRedaction)
+            {
+                _logger.LogInformation("Content removed successfully in {ElapsedMs}ms. Redaction is secure.", sw.ElapsedMilliseconds);
+            }
+            else if (result.Mode == RedactionMode.VisualOnly)
+            {
+                _logger.LogWarning("Visual-only redaction in {ElapsedMs}ms. No content found to remove.", sw.ElapsedMilliseconds);
+            }
+            else
+            {
+                _logger.LogError("Redaction failed in {ElapsedMs}ms. Content removal threw exception.", sw.ElapsedMilliseconds);
+            }
 
             // Step 2: Draw black rectangle over the area (OPTIONAL - visual confirmation only)
             // This is done by directly appending PDF operators to avoid XGraphics issues
@@ -176,12 +191,22 @@ public class RedactionService
             try
             {
                 DrawBlackRectangleDirectly(page, scaledArea);
+                result.VisualCoverageDrawn = true;
                 _logger.LogDebug("Visual black rectangle drawn successfully");
             }
             catch (Exception visualEx)
             {
-                // Visual drawing failed, but content was already removed, so redaction is still secure
-                _logger.LogWarning(visualEx, "Could not draw visual black rectangle, but content was successfully removed. Redaction is secure.");
+                // Visual drawing failed, but if content was removed, redaction is still secure
+                result.VisualCoverageDrawn = false;
+
+                if (result.Mode == RedactionMode.TrueRedaction)
+                {
+                    _logger.LogWarning(visualEx, "Could not draw visual black rectangle, but content was successfully removed. Redaction is secure.");
+                }
+                else
+                {
+                    _logger.LogError(visualEx, "CRITICAL: Visual rectangle drawing failed AND content was not removed. Redaction completely failed.");
+                }
             }
         }
         catch (Exception ex)
@@ -283,8 +308,10 @@ public class RedactionService
     ///
     /// If you remove/simplify this, text will still be extractable = SECURITY VULNERABILITY.
     /// </remarks>
-    private void RemoveContentInArea(PdfPage page, Rect area)
+    private RedactionResult RemoveContentInArea(PdfPage page, Rect area)
     {
+        var result = new RedactionResult();
+
         try
         {
             _logger.LogDebug("Parsing PDF content stream");
@@ -368,10 +395,30 @@ public class RedactionService
 
                 // Step 4: Replace the page's content stream
                 ReplacePageContent(page, newContentBytes);
+
+                // Set result for TRUE redaction
+                result.Mode = RedactionMode.TrueRedaction;
+                result.ContentRemoved = true;
+                result.TextOperationsRemoved = removedByType.GetValueOrDefault("TextOperation", 0);
+                result.ImageOperationsRemoved = removedByType.GetValueOrDefault("ImageOperation", 0);
+                result.GraphicsOperationsRemoved = removedByType.GetValueOrDefault("PathOperation", 0);
+
+                // MANDATORY LOGGING - Cannot be silenced by log level
+                Console.WriteLine($"[REDACTION-SECURITY] TRUE REDACTION: Removed {removedCount} operations " +
+                    $"(Text: {result.TextOperationsRemoved}, Images: {result.ImageOperationsRemoved}, Graphics: {result.GraphicsOperationsRemoved})");
+                _logger.LogWarning("TRUE REDACTION PERFORMED: {TotalCount} operations removed (Text: {TextCount}, Images: {ImageCount}, Graphics: {GraphicsCount})",
+                    removedCount, result.TextOperationsRemoved, result.ImageOperationsRemoved, result.GraphicsOperationsRemoved);
             }
             else
             {
-                _logger.LogInformation("No content found in redaction area - nothing to remove");
+                // No content found - will be visual-only redaction
+                result.Mode = RedactionMode.VisualOnly;
+                result.ContentRemoved = false;
+
+                // MANDATORY WARNING - Visual-only is not secure for sensitive data
+                Console.WriteLine($"[REDACTION-WARNING] VISUAL ONLY - No content found in redaction area (may be blank area or unsupported content type)");
+                _logger.LogWarning("Visual-only redaction - no content operations found in redaction area. " +
+                    "This may indicate: 1) Blank area, 2) Unsupported content type, 3) Coordinate mismatch");
             }
 
             // Step 5: Handle images separately
@@ -382,11 +429,24 @@ public class RedactionService
             var keptImageOps = filteredOperations.OfType<ImageOperation>().ToList();
 
             RemoveImagesInArea(page, removedImageOps, keptImageOps);
+
+            return result;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not remove content in area - will fall back to visual-only redaction");
-            // Don't throw - we'll fall back to visual redaction
+            // CRITICAL SECURITY FAILURE
+            result.Mode = RedactionMode.Failed;
+            result.ContentRemoved = false;
+
+            // MANDATORY CRITICAL ERROR - Always visible
+            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Redaction FAILED - Content removal threw exception!");
+            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Exception: {ex.Message}");
+            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Will fall back to visual-only (UNSAFE for sensitive data)");
+
+            _logger.LogError(ex, "CRITICAL SECURITY FAILURE: Content removal threw exception. " +
+                "Falling back to visual-only redaction which is UNSAFE for sensitive data.");
+
+            return result;
         }
     }
 
