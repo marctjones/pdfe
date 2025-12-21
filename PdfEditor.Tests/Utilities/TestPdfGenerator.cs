@@ -592,4 +592,37 @@ public static class TestPdfGenerator
         document.Save(outputPath);
         return outputPath;
     }
+
+    /// <summary>
+    /// Creates a simple PDF with text and returns it as byte array (for stream-based tests)
+    /// </summary>
+    public static byte[] CreateSimplePdf(string text = "Test Content")
+    {
+        EnsureFontResolverInitialized();
+        var document = new PdfDocument();
+        var page = document.AddPage();
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 12);
+
+        // Draw text at known position (100, 100)
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(100, 100));
+
+        using var stream = new MemoryStream();
+        document.Save(stream, false);
+        document.Dispose();
+
+        return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Creates a PDF with text at a specific position and returns it as byte array (for stream-based tests)
+    /// </summary>
+    public static byte[] CreatePdfWithTextAtPosition(string text, double x, double y, double fontSize = 12)
+    {
+        using var document = CreatePdfWithTextAt(text, x, y, fontSize);
+        using var stream = new MemoryStream();
+        document.Save(stream, false);
+        return stream.ToArray();
+    }
 }
