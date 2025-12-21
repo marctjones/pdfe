@@ -61,8 +61,11 @@ public class PdfRenderService
         if (TryGetFromCache(cacheKey, out var cachedPngData))
         {
             _logger.LogDebug("Cache hit for {File} page {Page} @ {Dpi} DPI", Path.GetFileName(pdfPath), pageIndex, dpi);
-            using var stream = new MemoryStream(cachedPngData);
-            return SKBitmap.Decode(stream); // Decode from cached PNG data
+            if (cachedPngData != null)
+            {
+                using var stream = new MemoryStream(cachedPngData);
+                return SKBitmap.Decode(stream); // Decode from cached PNG data
+            }
         }
 
         _logger.LogInformation("Rendering page {PageIndex} from {FileName} at {Dpi} DPI",
@@ -140,7 +143,7 @@ public class PdfRenderService
         {
             sw.Stop();
             _logger.LogError(ex, "Error rendering page {PageIndex} from stream after {ElapsedMs}ms",
-                pageIndex, Path.GetFileName("Stream"), sw.ElapsedMilliseconds); // Filename is not available for stream
+                pageIndex, sw.ElapsedMilliseconds);
             return null;
         }
     }
