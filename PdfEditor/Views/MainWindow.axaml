@@ -8,6 +8,7 @@
         mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
         x:Class="PdfEditor.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:Name="MainWin"
         Title="PDF Editor"
         Width="1200" Height="800"
         ExtendClientAreaToDecorationsHint="True"
@@ -456,20 +457,84 @@
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1,0,0,0">
-                <Grid RowDefinitions="Auto,*">
-                    <!-- Header -->
+                <Grid RowDefinitions="Auto,*,Auto">
+                    <!-- Header - Shows "Pending Redactions" in redaction mode, "Clipboard History" otherwise -->
                     <Border Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="12,10">
-                        <TextBlock Text="Clipboard History"
-                                   FontWeight="SemiBold"
-                                   FontSize="13"
-                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <!-- Title changes based on mode -->
+                            <TextBlock Grid.Column="0"
+                                       Text="Pending Redactions"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                       IsVisible="{Binding IsRedactionMode}"/>
+                            <TextBlock Grid.Column="0"
+                                       Text="Clipboard History"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                       IsVisible="{Binding !IsRedactionMode}"/>
+                            <!-- Count badge (only in redaction mode) -->
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding RedactionWorkflow.PendingCount, StringFormat='({0})'}"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource BrandPrimaryBrush}"
+                                       IsVisible="{Binding IsRedactionMode}"/>
+                        </Grid>
                     </Border>
 
-                    <!-- Clipboard History List -->
-                    <ScrollViewer Grid.Row="1">
+                    <!-- Pending Redactions List (visible in redaction mode) -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding IsRedactionMode}">
+                        <ItemsControl ItemsSource="{Binding RedactionWorkflow.PendingRedactions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="8" Padding="10"
+                                            Background="{DynamicResource CardBrush}"
+                                            BorderBrush="#E53935"
+                                            BorderThickness="2"
+                                            CornerRadius="6">
+                                        <StackPanel Spacing="6">
+                                            <!-- Header: Page Number -->
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding PageNumber, StringFormat='Page {0}'}"
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           Foreground="{DynamicResource BrandPrimaryBrush}"/>
+                                                <Button Grid.Column="1"
+                                                        Content="×"
+                                                        FontSize="16"
+                                                        Padding="4,0"
+                                                        Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).RemovePendingRedactionCommand}"
+                                                        CommandParameter="{Binding Id}"
+                                                        Background="Transparent"
+                                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </Grid>
+
+                                            <!-- Preview Text -->
+                                            <TextBlock Text="{Binding PreviewText}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       MaxHeight="60"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+
+                                            <!-- Area info -->
+                                            <TextBlock Text="{Binding DisplayText}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- Clipboard History List (visible when NOT in redaction mode) -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding !IsRedactionMode}">
                         <ItemsControl ItemsSource="{Binding ClipboardHistory}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="models:ClipboardEntry">
