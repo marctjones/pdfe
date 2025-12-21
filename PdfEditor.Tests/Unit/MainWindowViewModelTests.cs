@@ -45,6 +45,7 @@ public class MainWindowViewModelTests
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         return new MainWindowViewModel(
             _loggerMock.Object,
@@ -56,7 +57,8 @@ public class MainWindowViewModelTests
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
     }
 
     #region Zoom Tests
@@ -673,6 +675,88 @@ public class MainWindowViewModelTests
 
         // Assert
         displayPageNumberChanged.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Pending Redactions UI Tests
+
+    [Fact]
+    public void PendingRedactions_Collection_IsAccessible()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Act & Assert
+        vm.RedactionWorkflow.Should().NotBeNull("RedactionWorkflow should be initialized");
+        vm.RedactionWorkflow.PendingRedactions.Should().NotBeNull("PendingRedactions collection should be accessible");
+        vm.RedactionWorkflow.PendingRedactions.Should().BeEmpty("PendingRedactions should start empty");
+    }
+
+    [Fact]
+    public void PendingRedactions_AddedToCollection_CountIncreases()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        var initialCount = vm.RedactionWorkflow.PendingRedactions.Count;
+
+        // Act
+        vm.RedactionWorkflow.MarkArea(0, new Rect(10, 10, 100, 50), "Test text");
+
+        // Assert
+        vm.RedactionWorkflow.PendingRedactions.Count.Should().Be(initialCount + 1, "adding a redaction should increase count");
+        vm.RedactionWorkflow.PendingRedactions[0].PageNumber.Should().Be(0, "page number should be stored");
+        vm.RedactionWorkflow.PendingRedactions[0].Area.Should().Be(new Rect(10, 10, 100, 50), "area should be stored");
+        vm.RedactionWorkflow.PendingRedactions[0].PreviewText.Should().Be("Test text", "preview text should be stored");
+    }
+
+    [Fact]
+    public void PendingRedactions_ObservableCollection_NotifiesChanges()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        var collectionChanged = false;
+        vm.RedactionWorkflow.PendingRedactions.CollectionChanged += (s, e) => collectionChanged = true;
+
+        // Act
+        vm.RedactionWorkflow.MarkArea(0, new Rect(10, 10, 100, 50), "Test");
+
+        // Assert
+        collectionChanged.Should().BeTrue("ObservableCollection should notify when items are added");
+    }
+
+    [Fact]
+    public void PendingRedactions_MultipleRedactions_AllStored()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Act
+        vm.RedactionWorkflow.MarkArea(0, new Rect(10, 10, 100, 50), "Text 1");
+        vm.RedactionWorkflow.MarkArea(0, new Rect(20, 20, 100, 50), "Text 2");
+        vm.RedactionWorkflow.MarkArea(1, new Rect(30, 30, 100, 50), "Text 3");
+
+        // Assert
+        vm.RedactionWorkflow.PendingRedactions.Count.Should().Be(3, "all three redactions should be stored");
+        vm.RedactionWorkflow.PendingRedactions[0].PreviewText.Should().Be("Text 1");
+        vm.RedactionWorkflow.PendingRedactions[1].PreviewText.Should().Be("Text 2");
+        vm.RedactionWorkflow.PendingRedactions[2].PreviewText.Should().Be("Text 3");
+    }
+
+    [Fact]
+    public void PendingRedactions_CollectionIsObservable_ForUIBinding()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Act
+        var collection = vm.RedactionWorkflow.PendingRedactions;
+
+        // Assert - Verify it's the right type for UI binding
+        collection.Should().BeAssignableTo<System.Collections.Specialized.INotifyCollectionChanged>(
+            "PendingRedactions must be ObservableCollection for UI binding to work");
+        collection.Should().BeAssignableTo<System.Collections.IEnumerable>(
+            "PendingRedactions must be enumerable for ItemsControl binding");
     }
 
     #endregion
