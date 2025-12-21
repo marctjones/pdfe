@@ -136,6 +136,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CloseDocumentCommand = ReactiveCommand.Create(CloseDocument);
         ExitCommand = ReactiveCommand.Create(Exit);
         LoadRecentFileCommand = ReactiveCommand.CreateFromTask<string>(LoadRecentFileAsync);
+        _logger.LogDebug(">>> LoadRecentFileCommand initialized: {Command}", LoadRecentFileCommand != null ? "SUCCESS" : "FAILED");
 
         // Tools menu commands
         ExportPagesCommand = ReactiveCommand.CreateFromTask(ExportPagesAsync);
@@ -325,9 +326,11 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         get
         {
+            _logger.LogDebug(">>> RecentFileMenuItems getter called. RecentFiles.Count = {Count}", RecentFiles.Count);
             var items = new ObservableCollection<Avalonia.Controls.MenuItem>();
             foreach (var filePath in RecentFiles)
             {
+                _logger.LogDebug(">>> Creating menu item for: {FilePath}", filePath);
                 var menuItem = new Avalonia.Controls.MenuItem
                 {
                     Header = filePath,
@@ -335,7 +338,10 @@ public partial class MainWindowViewModel : ViewModelBase
                     CommandParameter = filePath
                 };
                 items.Add(menuItem);
+                _logger.LogDebug(">>> Menu item created. Command = {Command}, Parameter = {Parameter}",
+                    menuItem.Command != null ? "SET" : "NULL", menuItem.CommandParameter);
             }
+            _logger.LogDebug(">>> RecentFileMenuItems returning {Count} items", items.Count);
             return items;
         }
     }
@@ -1554,7 +1560,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task LoadRecentFileAsync(string filePath)
     {
-        _logger.LogInformation("Loading recent file: {FilePath}", filePath);
+        _logger.LogInformation(">>> LoadRecentFileAsync CALLED with filePath: '{FilePath}'", filePath ?? "(null)");
 
         if (string.IsNullOrWhiteSpace(filePath))
         {

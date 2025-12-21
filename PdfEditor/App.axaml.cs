@@ -56,12 +56,12 @@ public partial class App : Application
 
     private void ConfigureServices(IServiceCollection services)
     {
-        // Configure logging with INFO level to reduce noise
+        // Configure logging with DEBUG level for detailed diagnostics
         services.AddLogging(builder =>
         {
             builder.AddConsole();
             builder.AddDebug();
-            builder.SetMinimumLevel(LogLevel.Information);
+            builder.SetMinimumLevel(LogLevel.Debug);
 
             // Configure console formatter for better readability
             builder.AddSimpleConsole(options =>
@@ -96,7 +96,7 @@ public partial class App : Application
         var logger = tempProvider.GetRequiredService<ILogger<App>>();
         logger.LogInformation("Dependency injection container configured");
         logger.LogInformation("Services registered: PdfDocumentService, PdfRenderService, RedactionService, PdfTextExtractionService");
-        logger.LogInformation("Logging level set to: INFORMATION");
+        logger.LogInformation("Logging level set to: DEBUG");
     }
 }
 
