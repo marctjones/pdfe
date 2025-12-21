@@ -387,4 +387,40 @@ public partial class MainWindow : Window
             viewModel.CopyTextCommand.Execute().Subscribe();
         }
     }
+
+    private void RecentFilesMenu_SubmenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem || DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        Console.WriteLine($">>> RecentFilesMenu_SubmenuOpened: RecentFiles.Count = {viewModel.RecentFiles.Count}");
+
+        // Clear existing items
+        menuItem.Items.Clear();
+
+        if (viewModel.RecentFiles.Count == 0)
+        {
+            var noFilesItem = new MenuItem
+            {
+                Header = "No recent files",
+                IsEnabled = false
+            };
+            menuItem.Items.Add(noFilesItem);
+            Console.WriteLine(">>> Added 'No recent files' placeholder");
+            return;
+        }
+
+        // Add menu items for each recent file
+        foreach (var filePath in viewModel.RecentFiles)
+        {
+            var item = new MenuItem
+            {
+                Header = filePath,
+                Command = viewModel.LoadRecentFileCommand,
+                CommandParameter = filePath
+            };
+            menuItem.Items.Add(item);
+            Console.WriteLine($">>> Added menu item: {filePath}");
+        }
+    }
 }
