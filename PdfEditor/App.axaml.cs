@@ -87,6 +87,7 @@ public partial class App : Application
         services.AddSingleton<PdfOcrService>();
         services.AddSingleton<SignatureVerificationService>();
         services.AddSingleton<PdfEditor.Services.Verification.RedactionVerifier>();
+        services.AddSingleton<FilenameSuggestionService>();
 
         // Register ViewModels
         services.AddTransient<MainWindowViewModel>();

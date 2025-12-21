@@ -31,6 +31,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly PdfOcrService _ocrService;
     private readonly SignatureVerificationService _signatureService;
     private readonly RedactionVerifier _verifier;
+    private readonly FilenameSuggestionService _filenameSuggestionService;
+
+    // State managers
+    public DocumentStateManager FileState { get; }
+    public RedactionWorkflowManager RedactionWorkflow { get; }
 
     private string _currentFilePath = string.Empty;
     private Bitmap? _currentPageImage;
@@ -70,7 +75,8 @@ public partial class MainWindowViewModel : ViewModelBase
         PdfSearchService searchService,
         PdfOcrService ocrService,
         SignatureVerificationService signatureService,
-        RedactionVerifier verifier)
+        RedactionVerifier verifier,
+        FilenameSuggestionService filenameSuggestionService)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -82,6 +88,11 @@ public partial class MainWindowViewModel : ViewModelBase
         _ocrService = ocrService;
         _signatureService = signatureService;
         _verifier = verifier;
+        _filenameSuggestionService = filenameSuggestionService;
+
+        // Initialize state managers
+        FileState = new DocumentStateManager();
+        RedactionWorkflow = new RedactionWorkflowManager();
 
         _logger.LogInformation("MainWindowViewModel initialized");
 
@@ -96,6 +107,7 @@ public partial class MainWindowViewModel : ViewModelBase
         AddPagesCommand = ReactiveCommand.CreateFromTask(AddPagesAsync);
         ToggleRedactionModeCommand = ReactiveCommand.Create(ToggleRedactionMode);
         ApplyRedactionCommand = ReactiveCommand.CreateFromTask(ApplyRedactionAsync);
+        RemovePendingRedactionCommand = ReactiveCommand.Create<Guid>(RemovePendingRedaction);
 
         // Subscribe to ThrownExceptions to prevent command from getting stuck
         ApplyRedactionCommand.ThrownExceptions.Subscribe(ex =>
@@ -345,6 +357,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> AddPagesCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleRedactionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> ApplyRedactionCommand { get; }
+    public ReactiveCommand<Guid, Unit> RemovePendingRedactionCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleTextSelectionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyTextCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomInCommand { get; }
@@ -430,8 +443,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            _logger.LogInformation(">>> STEP 2: Setting _currentFilePath");
+            _logger.LogInformation(">>> STEP 2: Setting _currentFilePath and FileState");
             _currentFilePath = filePath;
+            FileState.SetDocument(filePath);
+            RedactionWorkflow.Reset(); // Clear any pending redactions from previous document
 
             _logger.LogInformation(">>> STEP 3: RaisePropertyChanged(DocumentName)");
             this.RaisePropertyChanged(nameof(DocumentName));
@@ -711,10 +726,80 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Mark a redaction area (mark-then-apply workflow) - adds to pending list
+    /// </summary>
+    private void MarkRedactionArea()
+    {
+        _logger.LogInformation(">>> MarkRedactionArea START. Area=({X:F2},{Y:F2},{W:F2}x{H:F2})",
+            CurrentRedactionArea.X, CurrentRedactionArea.Y, CurrentRedactionArea.Width, CurrentRedactionArea.Height);
+
+        if (!IsRedactionMode || CurrentRedactionArea.Width <= 0 || CurrentRedactionArea.Height <= 0)
+        {
+            _logger.LogWarning("MarkRedactionArea returning early: IsRedactionMode={Mode}, Width={W}, Height={H}",
+                IsRedactionMode, CurrentRedactionArea.Width, CurrentRedactionArea.Height);
+            return;
+        }
+
+        // Extract preview text for the pending redaction
+        string previewText = string.Empty;
+        if (!string.IsNullOrEmpty(_currentFilePath))
+        {
+            try
+            {
+                previewText = _textExtractionService.ExtractTextFromArea(
+                    _currentFilePath, CurrentPageIndex, CurrentRedactionArea);
+                _logger.LogInformation("Preview text extracted: '{Text}'", previewText);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not extract preview text");
+            }
+        }
+
+        // Add to pending redactions
+        RedactionWorkflow.MarkArea(CurrentPageIndex + 1, CurrentRedactionArea, previewText);
+        FileState.PendingRedactionsCount = RedactionWorkflow.PendingCount;
+
+        _logger.LogInformation("Redaction marked. Total pending: {Count}", RedactionWorkflow.PendingCount);
+
+        // Clear the current selection
+        CurrentRedactionArea = default;
+    }
+
+    /// <summary>
+    /// Remove a pending redaction by ID
+    /// </summary>
+    private void RemovePendingRedaction(Guid id)
+    {
+        _logger.LogInformation("Removing pending redaction: {Id}", id);
+
+        if (RedactionWorkflow.RemovePending(id))
+        {
+            FileState.PendingRedactionsCount = RedactionWorkflow.PendingCount;
+            _logger.LogInformation("Pending redaction removed. Remaining: {Count}", RedactionWorkflow.PendingCount);
+        }
+        else
+        {
+            _logger.LogWarning("Could not find pending redaction with ID: {Id}", id);
+        }
+    }
+
+    /// <summary>
+    /// Apply redaction immediately (legacy immediate-apply workflow)
+    /// TODO: This will be used by "Apply All" button in mark-then-apply workflow
+    /// </summary>
     private async Task ApplyRedactionAsync()
     {
         _logger.LogInformation(">>> ApplyRedactionAsync START. IsRedactionMode={Mode}, Area=({X:F2},{Y:F2},{W:F2}x{H:F2})",
             IsRedactionMode, CurrentRedactionArea.X, CurrentRedactionArea.Y, CurrentRedactionArea.Width, CurrentRedactionArea.Height);
+
+        // NEW: In mark-then-apply mode, just mark the area instead of applying
+        if (IsRedactionMode && CurrentRedactionArea.Width > 0 && CurrentRedactionArea.Height > 0)
+        {
+            MarkRedactionArea();
+            return;
+        }
 
         if (!IsRedactionMode || CurrentRedactionArea.Width <= 0 || CurrentRedactionArea.Height <= 0)
         {
