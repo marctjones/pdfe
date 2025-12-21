@@ -34,9 +34,7 @@
                 </MenuItem>
                 <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S"/>
                 <Separator/>
-                <MenuItem Header="_Recent Files" Name="RecentFilesMenu" ItemsSource="{Binding RecentFileMenuItems}">
-                    <MenuItem Header="No recent files" IsEnabled="False" IsVisible="{Binding !HasRecentFiles}"/>
-                </MenuItem>
+                <MenuItem Header="_Recent Files" Name="RecentFilesMenu" SubmenuOpened="RecentFilesMenu_SubmenuOpened"/>
                 <Separator/>
                 <MenuItem Header="_Close Document" Command="{Binding CloseDocumentCommand}" InputGesture="Ctrl+W"/>
                 <MenuItem Header="E_xit" Command="{Binding ExitCommand}" InputGesture="Alt+F4"/>
