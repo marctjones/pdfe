@@ -258,30 +258,25 @@ ET
 
 1. **Font Metrics Approximation**
    - Uses average character width estimate
-   - **Enhancement:** Parse actual font dictionaries and widths arrays
-   
+   - See issue #36 for documentation on current approach
+
 2. **Simple Coordinate Conversion**
    - Basic top-left/bottom-left conversion
-   - **Enhancement:** Handle complex transformations beyond basic rotation
+   - See issue #36 for coordinate system documentation
 
 3. **Advanced Path Operations**
    - Clipping paths not fully handled
-   - **Enhancement:** Track clipping state
+   - Graphics state tracking available but clipping not implemented
 
-### Recommended Enhancements
+### Future Enhancements
 
-**Priority 1 (High Impact):**
-1. Improve font metrics reading from font dictionaries
-2. Support form XObjects (nested content streams)
+See GitHub Issues with label `component: redaction-engine` for planned enhancements:
+- Issue #19: Apply All Redactions workflow
+- Issue #38: Visual distinction for pending/applied redactions
+- Issue #42: Comprehensive text extraction verification tests
+- Issue #43: Original file protection tests
 
-**Priority 2 (Nice to Have):**
-3. Handle clipping paths (W, W* operators)
-4. Parse font encoding for accurate text extraction
-5. Optimize for very large PDFs (streaming)
-
-**Priority 3 (Advanced):**
-6. Handle encrypted PDFs
-7. Support Type 3 fonts (custom fonts)
+For additional enhancement ideas, search GitHub Issues or create new issues with the `component: redaction-engine` label.
 
 ## Testing the Redaction Engine
 
