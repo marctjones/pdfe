@@ -303,6 +303,18 @@ Located in `PdfEditor.Tests/`:
 - Ensure .NET 8.0 SDK installed: `dotnet --version`
 - Clear build artifacts: `dotnet clean`
 
+### Build Warnings
+
+**IMPORTANT**: Always maintain a clean build (0 warnings, 0 errors).
+
+Common warnings and fixes:
+- **CS8618** (Non-nullable property not initialized):
+  - Add `= null!;` to properties initialized in constructor
+  - Example: `public ReactiveCommand<Unit, Unit> SaveCommand { get; } = null!;`
+  - See issue #29 for systematic fix
+
+Never let warnings accumulate - fix them proactively when they appear.
+
 ## Important Implementation Details
 
 ### State Stack Handling
@@ -358,7 +370,7 @@ Never manually modify content stream bytes without parsing first.
 4. **Clipping Paths**: `W`, `W*` operators not tracked
 5. **Form XObjects**: Nested content streams not fully parsed
 
-See REDACTION_ENGINE.md for detailed enhancement priorities.
+See GitHub issues labeled `component: redaction-engine` for enhancement tracking.
 
 ## File Locations Quick Reference
 
@@ -423,3 +435,119 @@ This redaction implementation:
 - ❌ Does NOT remove embedded files/attachments
 
 For maximum security, also remove metadata and flatten the PDF after redaction.
+
+## Task Tracking and GitHub Issues
+
+**IMPORTANT**: This project uses GitHub Issues for ALL task tracking, feature requests, bugs, and enhancements.
+
+### Rules for Task Management
+
+1. **DO NOT add TODO comments** in code
+   - ❌ Bad: `// TODO: Add error handling`
+   - ✅ Good: Create GitHub issue, reference in code: `// See issue #25`
+
+2. **DO NOT create scattered enhancement lists** in documentation
+   - ❌ Bad: Adding "Future Enhancements" sections to docs
+   - ✅ Good: Create GitHub issues with proper labels
+
+3. **DO reference GitHub issues** when relevant
+   - In code comments: `// Handles deleted files - See issue #25`
+   - In documentation: `Window position/size persistence is tracked in issue #23`
+   - In commit messages: `Fixes #17` or `Addresses #19`
+
+4. **ALWAYS create issues proactively** when you identify:
+   - Bugs or problems
+   - Enhancement opportunities
+   - Technical debt
+   - Documentation gaps
+   - Test coverage needs
+
+### GitHub Issue Labels
+
+The project uses standardized labels (see `scripts/setup-github-labels.sh`):
+
+**Type Labels** (GitHub defaults):
+- `bug` - Something isn't working
+- `enhancement` - New feature or request
+- `documentation` - Improvements to docs
+- `security` - Security concerns
+- `question` - Further information needed
+
+**Component Labels** (architecture-specific):
+- `component: redaction-engine` - Content stream parsing, glyph removal
+- `component: pdf-rendering` - PDFium, image rendering, caching
+- `component: ui-framework` - Avalonia, XAML, bindings, ReactiveUI
+- `component: text-extraction` - Text extraction, OCR, search
+- `component: file-management` - Open/save, recent files, document state
+- `component: clipboard` - Copy/paste, clipboard history
+- `component: verification` - Signature/redaction verification
+- `component: coordinates` - PDF/screen coordinate systems
+
+**Priority Labels**:
+- `priority: critical` - Blocks usage, data loss, security
+- `priority: high` - Important but not blocking
+- `priority: medium` - Nice to have
+- `priority: low` - Future consideration
+
+**Effort Labels**:
+- `effort: small` - < 1 hour
+- `effort: medium` - 1-4 hours
+- `effort: large` - > 4 hours
+
+**Other Labels**:
+- `status: blocked` - Waiting on something else
+- `good first issue` - Easy for new contributors
+- `help wanted` - Community input needed
+- `platform: linux/windows/macos` - Platform-specific issues
+
+### Creating Issues via CLI
+
+```bash
+# Create a new issue
+gh issue create \
+  --title "Add dark mode support" \
+  --body "Description of the feature..." \
+  --label "enhancement,component: ui-framework,priority: medium"
+
+# View all issues
+gh issue list
+
+# View issues by label
+gh issue list --label "priority: high"
+
+# Close an issue
+gh issue close 42 --comment "Fixed in PR #43"
+```
+
+### Issue References in Code
+
+When code relates to a known issue, add a comment:
+
+```csharp
+// File existence check for Recent Files
+// See issue #25 for enhancement: show user-facing error dialog
+if (!System.IO.File.Exists(filePath))
+{
+    _logger.LogWarning("Recent file not found: {FilePath}", filePath);
+    return;
+}
+```
+
+### Current High-Priority Issues
+
+Check GitHub for the latest, but as of this writing:
+- **#17**: Test Recent Files menu functionality
+- **#18**: Test pending redactions UI display
+- **#19**: Implement "Apply All Redactions" button (critical for v1.3.0)
+- **#28**: Add integration test for mark-then-apply workflow
+- **#30**: Verify PDF conformance for mark-then-apply workflow
+
+View all: `gh issue list --label "priority: high,priority: critical"`
+
+### Bulk Issue Management
+
+Scripts are available for managing issues:
+- `scripts/setup-github-labels.sh` - Create all standardized labels
+- `scripts/import-github-issues.sh` - Bulk import issues from backlog
+
+See `GITHUB_ISSUES.md` for the full issue backlog with detailed descriptions.

@@ -817,7 +817,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     /// Apply redaction immediately (legacy immediate-apply workflow)
-    /// TODO: This will be used by "Apply All" button in mark-then-apply workflow
+    /// See issue #19: Implement "Apply All Redactions" button for mark-then-apply workflow
     /// </summary>
     private async Task ApplyRedactionAsync()
     {
@@ -1571,7 +1571,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!System.IO.File.Exists(filePath))
         {
             _logger.LogWarning("Recent file not found: {FilePath}", filePath);
-            // TODO: Could show a message box and remove from recent files
+            // See issue #25: Show message dialog and remove from recent files list
             return;
         }
 
