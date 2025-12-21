@@ -119,7 +119,8 @@ public class PdfRenderService
             var options = new RenderOptions(Dpi: dpi);
 
             _logger.LogDebug("Converting PDF page to SKBitmap from stream");
-            using var skBitmap = Conversion.ToImage(pdfStream, page: pageIndex, options: options);
+            // NOTE: Do NOT use 'using' here - the caller is responsible for disposing the returned bitmap
+            var skBitmap = Conversion.ToImage(pdfStream, page: pageIndex, options: options);
 
             if (skBitmap == null)
             {

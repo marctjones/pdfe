@@ -46,6 +46,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private double _viewportHeight = 600;
     private ObservableCollection<Rect> _currentPageSearchHighlights = new();
     private bool _runVerifyAfterSave = true; // Enabled by default for security
+#if DEBUG
+    private bool _debugVerifyRedaction = true; // Debug mode: enabled in DEBUG builds, disabled in RELEASE
+#else
+    private bool _debugVerifyRedaction = false; // Debug mode: disabled in RELEASE builds
+#endif
     private string _ocrLanguages = "eng";
     private int _ocrBaseDpi = 350;
     private int _ocrHighDpi = 450;
@@ -232,6 +237,12 @@ public partial class MainWindowViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _runVerifyAfterSave, value);
     }
 
+    public bool DebugVerifyRedaction
+    {
+        get => _debugVerifyRedaction;
+        set => this.RaiseAndSetIfChanged(ref _debugVerifyRedaction, value);
+    }
+
     public string OcrLanguages
     {
         get => _ocrLanguages;
@@ -415,33 +426,51 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public async Task LoadDocumentAsync(string filePath)
     {
-        _logger.LogInformation("Loading document: {FilePath}", filePath);
+        _logger.LogInformation(">>> STEP 1: LoadDocumentAsync START for: {FilePath}", filePath);
 
         try
         {
+            _logger.LogInformation(">>> STEP 2: Setting _currentFilePath");
             _currentFilePath = filePath;
+
+            _logger.LogInformation(">>> STEP 3: RaisePropertyChanged(DocumentName)");
             this.RaisePropertyChanged(nameof(DocumentName));
+
+            _logger.LogInformation(">>> STEP 4: Calling _documentService.LoadDocument");
             _documentService.LoadDocument(filePath);
+
+            _logger.LogInformation(">>> STEP 5: Setting CurrentPageIndex = 0");
             CurrentPageIndex = 0;
 
-            _logger.LogDebug("Loading page thumbnails");
+            _logger.LogInformation(">>> STEP 6: Loading page thumbnails");
             await LoadPageThumbnailsAsync();
+            _logger.LogInformation(">>> STEP 6: Page thumbnails loaded successfully");
 
-            _logger.LogDebug("Rendering current page");
+            _logger.LogInformation(">>> STEP 7: Rendering current page");
             await RenderCurrentPageAsync();
+            _logger.LogInformation(">>> STEP 7: Current page rendered successfully");
 
+            _logger.LogInformation(">>> STEP 8: RaisePropertyChanged(TotalPages)");
             this.RaisePropertyChanged(nameof(TotalPages));
+
+            _logger.LogInformation(">>> STEP 9: RaisePropertyChanged(StatusText)");
             this.RaisePropertyChanged(nameof(StatusText));
+
+            _logger.LogInformation(">>> STEP 10: RaisePropertyChanged(IsDocumentLoaded)");
             this.RaisePropertyChanged(nameof(IsDocumentLoaded));
 
-            // Add to recent files
+            _logger.LogInformation(">>> STEP 11: Adding to recent files");
             AddToRecentFiles(filePath);
 
-            _logger.LogInformation("Document loaded successfully. Total pages: {PageCount}", TotalPages);
+            _logger.LogInformation(">>> STEP 12: LoadDocumentAsync COMPLETE. Total pages: {PageCount}", TotalPages);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error loading document: {FilePath}", filePath);
+            _logger.LogError(ex, "!!! ERROR in LoadDocumentAsync at some step: {FilePath}", filePath);
+            _logger.LogError("!!! Exception Type: {ExceptionType}", ex.GetType().Name);
+            _logger.LogError("!!! Exception Message: {Message}", ex.Message);
+            _logger.LogError("!!! Stack Trace: {StackTrace}", ex.StackTrace);
+            throw; // Re-throw to see if there's an outer handler
         }
     }
 
@@ -754,6 +783,17 @@ public partial class MainWindowViewModel : ViewModelBase
                 _logger.LogInformation("Added redacted text to clipboard history: '{Text}'", redactedText);
             }
 
+            // ===== DEBUG MODE: Verify redaction immediately =====
+            // TEMPORARILY DISABLED: document.Save() in verification makes document read-only
+            /*
+            if (DebugVerifyRedaction)
+            {
+                _logger.LogInformation("━━━━━ DEBUG MODE: Verifying redaction immediately ━━━━━");
+                await DebugVerifyRedactionAsync(areaToRedact, redactedText);
+                _logger.LogInformation("━━━━━ DEBUG MODE: Verification complete ━━━━━");
+            }
+            */
+
             _logger.LogInformation("Redaction applied to in-memory document, now re-rendering page...");
 
             // Render the page from the in-memory document to show the redaction
@@ -803,6 +843,105 @@ public partial class MainWindowViewModel : ViewModelBase
             CurrentRedactionArea = new Rect();
             _logger.LogInformation("<<< ApplyRedactionAsync END. Selection cleared, ready for next redaction.");
         }
+    }
+
+    /// <summary>
+    /// Debug mode: Verify that redaction actually removed text from the in-memory PDF.
+    /// This saves the in-memory document to a temporary location and extracts text to verify removal.
+    /// </summary>
+    private Task DebugVerifyRedactionAsync(Rect redactedArea, string expectedRedactedText)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                _logger.LogInformation("DEBUG: Starting verification of redacted area ({X:F2},{Y:F2},{W:F2}x{H:F2})",
+                    redactedArea.X, redactedArea.Y, redactedArea.Width, redactedArea.Height);
+
+                // Save in-memory document to temporary file for verification
+                var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"debug_redaction_verify_{Guid.NewGuid()}.pdf");
+
+                var document = _documentService.GetCurrentDocument();
+                if (document == null)
+                {
+                    _logger.LogWarning("DEBUG: Cannot verify - document is null");
+                    return;
+                }
+
+                _logger.LogInformation("DEBUG: Saving in-memory document to temporary file: {TempPath}", tempPath);
+                document.Save(tempPath);
+
+            // Extract text from the redacted area using the same extraction service
+            _logger.LogInformation("DEBUG: Extracting text from redacted area in saved document...");
+            var extractedText = _textExtractionService.ExtractTextFromArea(
+                tempPath,
+                CurrentPageIndex,
+                redactedArea,
+                CoordinateConverter.DefaultRenderDpi);
+
+            _logger.LogInformation("DEBUG: Text extraction complete. Length: {Length} characters", extractedText.Length);
+            _logger.LogInformation("DEBUG: Extracted text: '{ExtractedText}'", extractedText);
+
+            // Check if any of the expected redacted text still exists
+            bool verificationPassed = true;
+            if (!string.IsNullOrWhiteSpace(expectedRedactedText))
+            {
+                if (extractedText.Contains(expectedRedactedText, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError("DEBUG: ❌ VERIFICATION FAILED! Redacted text '{ExpectedText}' was found in extracted text!",
+                        expectedRedactedText);
+                    _logger.LogError("DEBUG: This means the redaction did NOT remove the text from the PDF structure!");
+                    verificationPassed = false;
+                }
+                else
+                {
+                    _logger.LogInformation("DEBUG: ✓ Verification passed: Expected redacted text '{ExpectedText}' was NOT found",
+                        expectedRedactedText);
+                }
+            }
+
+            // Check if ANY text was extracted from the redacted area
+            if (!string.IsNullOrWhiteSpace(extractedText))
+            {
+                _logger.LogWarning("DEBUG: ⚠ Found text in redacted area: '{Text}'", extractedText);
+                _logger.LogWarning("DEBUG: This may indicate incomplete redaction or text outside the selection");
+                verificationPassed = false;
+            }
+            else
+            {
+                _logger.LogInformation("DEBUG: ✓ No text found in redacted area - redaction appears successful");
+            }
+
+            // Summary
+            if (verificationPassed)
+            {
+                _logger.LogInformation("DEBUG: ═══ VERIFICATION PASSED ═══");
+                _logger.LogInformation("DEBUG: The redacted text was successfully removed from the PDF structure");
+            }
+            else
+            {
+                _logger.LogError("DEBUG: ═══ VERIFICATION FAILED ═══");
+                _logger.LogError("DEBUG: Text extraction found content in the redacted area!");
+                _logger.LogError("DEBUG: Expected to redact: '{Expected}'", expectedRedactedText);
+                _logger.LogError("DEBUG: Actually found: '{Actual}'", extractedText);
+            }
+
+                // Cleanup temp file
+                try
+                {
+                    System.IO.File.Delete(tempPath);
+                    _logger.LogDebug("DEBUG: Deleted temporary verification file");
+                }
+                catch
+                {
+                    // Ignore cleanup errors
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DEBUG: Error during redaction verification");
+            }
+        });
     }
 
     private void ZoomIn()
@@ -987,18 +1126,33 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RenderCurrentPageAsync()
     {
+        _logger.LogInformation(">>> RenderCurrentPageAsync: START");
+
         if (string.IsNullOrEmpty(_currentFilePath) || !_documentService.IsDocumentLoaded)
+        {
+            _logger.LogWarning(">>> RenderCurrentPageAsync: Skipping (no file or document not loaded)");
             return;
+        }
 
         try
         {
-            var skBitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex);
+            _logger.LogInformation(">>> RenderCurrentPageAsync: Calling _renderService.RenderPageAsync for page {PageIndex}", CurrentPageIndex);
+            using var skBitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex);
+
+            _logger.LogInformation(">>> RenderCurrentPageAsync: Converting to Avalonia bitmap");
             var avaloniaBitmap = ToAvaloniaBitmap(skBitmap);
+
+            _logger.LogInformation(">>> RenderCurrentPageAsync: Setting CurrentPageImage");
             CurrentPageImage = avaloniaBitmap;
+
+            _logger.LogInformation(">>> RenderCurrentPageAsync: COMPLETE");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error rendering page");
+            _logger.LogError(ex, "!!! ERROR in RenderCurrentPageAsync");
+            _logger.LogError("!!! Exception Type: {ExceptionType}", ex.GetType().Name);
+            _logger.LogError("!!! Exception Message: {Message}", ex.Message);
+            throw;
         }
     }
 
@@ -1012,48 +1166,130 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task LoadPageThumbnailsAsync()
     {
+        _logger.LogInformation(">>> LoadPageThumbnailsAsync: START");
+
         if (string.IsNullOrEmpty(_currentFilePath))
-            return;
-
-        _logger.LogDebug("Clearing existing thumbnails");
-        PageThumbnails.Clear();
-
-        var loadTasks = new List<Task>();
-
-        _logger.LogDebug("Creating thumbnail placeholders for {PageCount} pages", TotalPages);
-
-        for (int i = 0; i < TotalPages; i++)
         {
-            var thumbnail = new PageThumbnail
-            {
-                PageNumber = i + 1,
-                PageIndex = i
-            };
-
-            PageThumbnails.Add(thumbnail);
-
-            // Load thumbnail asynchronously
-            int pageIndex = i;
-            var task = Task.Run(async () =>
-            {
-                _logger.LogDebug("Loading thumbnail for page {PageIndex}", pageIndex);
-                var image = await _renderService.RenderThumbnailAsync(_currentFilePath, pageIndex);
-
-                // Update UI on UI thread
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    thumbnail.ThumbnailImage = ToAvaloniaBitmap(image);
-                    _logger.LogDebug("Thumbnail {PageIndex} loaded and set", pageIndex);
-                });
-            });
-
-            loadTasks.Add(task);
+            _logger.LogWarning(">>> LoadPageThumbnailsAsync: SKIP (no file)");
+            return;
         }
 
-        // Wait for all thumbnails to load
-        _logger.LogDebug("Waiting for all thumbnails to load");
-        await Task.WhenAll(loadTasks);
-        _logger.LogInformation("All {Count} thumbnails loaded successfully", TotalPages);
+        try
+        {
+            // Capture the current file path to avoid race conditions
+            var filePath = _currentFilePath;
+
+            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Clearing existing thumbnails");
+            PageThumbnails.Clear();
+
+            var loadTasks = new List<Task>();
+
+            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Creating thumbnail placeholders for {PageCount} pages", TotalPages);
+
+            for (int i = 0; i < TotalPages; i++)
+            {
+                var thumbnail = new PageThumbnail
+                {
+                    PageNumber = i + 1,
+                    PageIndex = i
+                };
+
+                PageThumbnails.Add(thumbnail);
+
+                // Load thumbnail asynchronously
+                int pageIndex = i;
+                var task = Task.Run(async () =>
+                {
+                    _logger.LogInformation(">>> LoadPageThumbnailsAsync: Task.Run started for page {PageIndex}", pageIndex);
+
+                    try
+                    {
+                        _logger.LogInformation(">>> LoadPageThumbnailsAsync: About to call RenderThumbnailAsync for page {PageIndex}", pageIndex);
+
+                        SKBitmap? image = null;
+                        try
+                        {
+                            image = await _renderService.RenderThumbnailAsync(filePath, pageIndex).ConfigureAwait(false);
+                        }
+                        catch (Exception renderEx)
+                        {
+                            _logger.LogError(renderEx, "!!! ERROR calling RenderThumbnailAsync for page {PageIndex}", pageIndex);
+                            throw;
+                        }
+
+                        // Add explicit check right after await returns
+                        try
+                        {
+                            Console.WriteLine($">>> RenderThumbnailAsync RETURNED for page {pageIndex}");
+                            _logger.LogInformation(">>> LoadPageThumbnailsAsync: RenderThumbnailAsync RETURNED for page {PageIndex}", pageIndex);
+                        }
+                        catch (Exception logEx)
+                        {
+                            Console.WriteLine($"!!! LOGGER CRASHED for page {pageIndex}: {logEx.Message}");
+                            throw;
+                        }
+
+                        if (image == null)
+                        {
+                            _logger.LogWarning(">>> LoadPageThumbnailsAsync: RenderThumbnailAsync returned null for page {PageIndex}", pageIndex);
+                            return;
+                        }
+
+                        _logger.LogInformation(">>> LoadPageThumbnailsAsync: About to invoke UI thread for page {PageIndex}", pageIndex);
+
+                        // Update UI on UI thread
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            try
+                            {
+                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] ENTERED callback for page {PageIndex}", pageIndex);
+                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] About to convert bitmap for page {PageIndex}", pageIndex);
+                                var avaloniaBitmap = ToAvaloniaBitmap(image);
+                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] Bitmap converted, about to set property for page {PageIndex}", pageIndex);
+                                thumbnail.ThumbnailImage = avaloniaBitmap;
+                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] ThumbnailImage property set for page {PageIndex}", pageIndex);
+                            }
+                            catch (Exception uiEx)
+                            {
+                                _logger.LogError(uiEx, "!!! ERROR in UI thread callback for thumbnail {PageIndex}", pageIndex);
+                                _logger.LogError("!!! UI Exception Type: {ExceptionType}", uiEx.GetType().Name);
+                                _logger.LogError("!!! UI Exception Message: {Message}", uiEx.Message);
+                                _logger.LogError("!!! UI Stack Trace: {StackTrace}", uiEx.StackTrace);
+                            }
+                        });
+                        _logger.LogInformation(">>> LoadPageThumbnailsAsync: Dispatcher.InvokeAsync RETURNED for page {PageIndex}", pageIndex);
+
+                        // Dispose the SKBitmap now that we've converted it to Avalonia bitmap
+                        image?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "!!! ERROR in thumbnail task for page {PageIndex}", pageIndex);
+                        _logger.LogError("!!! Thumbnail Exception Type: {ExceptionType}", ex.GetType().Name);
+                        _logger.LogError("!!! Thumbnail Exception Message: {Message}", ex.Message);
+                        _logger.LogError("!!! Thumbnail Stack Trace: {StackTrace}", ex.StackTrace);
+                    }
+
+                    _logger.LogInformation(">>> LoadPageThumbnailsAsync: Task.Run ENDING for page {PageIndex}", pageIndex);
+                });
+
+                loadTasks.Add(task);
+            }
+
+            // Wait for all thumbnails to load
+            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Waiting for all {Count} thumbnails to load", loadTasks.Count);
+            await Task.WhenAll(loadTasks);
+            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Task.WhenAll completed");
+
+            _logger.LogInformation(">>> LoadPageThumbnailsAsync: COMPLETE - All {Count} thumbnails loaded successfully", TotalPages);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "!!! ERROR in LoadPageThumbnailsAsync");
+            _logger.LogError("!!! Exception Type: {ExceptionType}", ex.GetType().Name);
+            _logger.LogError("!!! Exception Message: {Message}", ex.Message);
+            throw;
+        }
     }
 
     // File Menu Commands

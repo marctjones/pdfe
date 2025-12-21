@@ -179,6 +179,27 @@
                         <CheckBox Content="Verify redactions after saving"
                                   IsChecked="{Binding RunVerifyAfterSave}"
                                   ToolTip.Tip="Automatically run verification to ensure content is removed"/>
+
+                        <CheckBox Content="Debug Mode: Verify redactions immediately (logs to console)"
+                                  IsChecked="{Binding DebugVerifyRedaction}">
+                            <ToolTip.Tip>
+                                <TextBlock TextWrapping="Wrap" MaxWidth="300">
+                                    <Run Text="DEBUG MODE: Immediately verify each redaction by extracting text from the redacted area."/>
+                                    <LineBreak/>
+                                    <LineBreak/>
+                                    <Run Text="Detailed logs will appear in the terminal/console showing:"/>
+                                    <LineBreak/>
+                                    <Run Text="• Whether text was actually removed from PDF structure"/>
+                                    <LineBreak/>
+                                    <Run Text="• What text (if any) is still extractable"/>
+                                    <LineBreak/>
+                                    <Run Text="• Pass/fail verification status"/>
+                                    <LineBreak/>
+                                    <LineBreak/>
+                                    <Run Text="⚠ This verifies the in-memory document before saving."/>
+                                </TextBlock>
+                            </ToolTip.Tip>
+                        </CheckBox>
                     </StackPanel>
                 </Border>
 

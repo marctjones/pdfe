@@ -50,8 +50,11 @@ public class ContentStreamConsolidationTests
             var content = Encoding.ASCII.GetString(GetFirstContentStreamBytes(page));
             var expectedY = page.Height.Point - 10 - 20; // XGraphics uses top-left, PDF stream uses bottom-left
 
-            content.Should().Contain($"10 {expectedY:0} 40 20 re", "first redaction rectangle should be in the primary stream");
-            content.Should().Contain($"70 {expectedY:0} 40 20 re", "second redaction rectangle should be in the primary stream");
+            // Check for rectangle operators - accept both integer and decimal formats
+            content.Should().MatchRegex(@"10(\.00)?\s+" + expectedY.ToString("0") + @"(\.00)?\s+40(\.00)?\s+20(\.00)?\s+re",
+                "first redaction rectangle should be in the primary stream");
+            content.Should().MatchRegex(@"70(\.00)?\s+" + expectedY.ToString("0") + @"(\.00)?\s+40(\.00)?\s+20(\.00)?\s+re",
+                "second redaction rectangle should be in the primary stream");
         }
         finally
         {

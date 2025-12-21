@@ -106,10 +106,16 @@ public class RedactionService
     /// ================
     /// Input: Image pixels (renderDpi, top-left origin) from mouse selection
     ///    ↓ CoordinateConverter.ImageSelectionToPdfPointsTopLeft()
-    /// Output: PDF points (72 DPI, top-left origin) for text comparison
+    /// Redaction Area: PDF points (72 DPI, top-left origin) - Avalonia convention
     ///
-    /// Both text bounding boxes (from TextBoundsCalculator) and selection area
-    /// use PDF points with top-left origin, enabling direct intersection testing.
+    /// Text Bounding Boxes: PDF points (72 DPI, top-left origin) - Avalonia convention
+    ///    ↓ Created by TextBoundsCalculator.CalculateBounds()
+    ///    ↓ Using CoordinateConverter.TextBoundsToPdfPointsTopLeft()
+    ///
+    /// Both text bounding boxes and selection area use the SAME coordinate system:
+    /// - PDF points (72 DPI)
+    /// - Top-left origin (Avalonia convention)
+    /// - This enables direct intersection testing via Rect.IntersectsWith()
     /// </summary>
     /// <param name="page">The PDF page to redact</param>
     /// <param name="area">Selection area in rendered image pixels (renderDpi DPI, top-left origin)</param>
@@ -151,68 +157,112 @@ public class RedactionService
 
         var sw = Stopwatch.StartNew();
 
+        // CRITICAL SECURITY REQUIREMENT:
+        // Content removal MUST succeed for redaction to be valid.
+        // We will NEVER do visual-only redaction as it creates a false sense of security.
+
         try
         {
-            // Step 1: Remove content within the area (true redaction)
+            // Step 1: Remove content within the area (TRUE REDACTION - REQUIRED)
             _logger.LogDebug("Step 1: Removing content within redaction area");
             RemoveContentInArea(page, scaledArea);
 
-            // Step 2: Draw black rectangle over the area (visual redaction)
-            _logger.LogDebug("Step 2: Drawing black rectangle for visual redaction");
-            DrawBlackRectangle(page, scaledArea);
-            ConsolidateContentStreams(page);
-
             sw.Stop();
-            _logger.LogInformation("Redaction completed successfully in {ElapsedMs}ms (content removed and visual redaction applied)", sw.ElapsedMilliseconds);
+            _logger.LogInformation("Content removed successfully in {ElapsedMs}ms. Redaction is secure.", sw.ElapsedMilliseconds);
+
+            // Step 2: Draw black rectangle over the area (OPTIONAL - visual confirmation only)
+            // This is done by directly appending PDF operators to avoid XGraphics issues
+            _logger.LogDebug("Step 2: Drawing black rectangle for visual confirmation");
+            try
+            {
+                DrawBlackRectangleDirectly(page, scaledArea);
+                _logger.LogDebug("Visual black rectangle drawn successfully");
+            }
+            catch (Exception visualEx)
+            {
+                // Visual drawing failed, but content was already removed, so redaction is still secure
+                _logger.LogWarning(visualEx, "Could not draw visual black rectangle, but content was successfully removed. Redaction is secure.");
+            }
         }
         catch (Exception ex)
         {
             sw.Stop();
-            _logger.LogError(ex, "Error during redaction after {ElapsedMs}ms. Attempting fallback to visual-only redaction",
+            _logger.LogError(ex, "CRITICAL: Content removal failed after {ElapsedMs}ms. Redaction aborted to prevent insecure visual-only redaction.",
                 sw.ElapsedMilliseconds);
 
-            // Fallback: At least draw the black rectangle
-            try
-            {
-                DrawBlackRectangle(page, scaledArea);
-                ConsolidateContentStreams(page);
-                _logger.LogWarning("Fallback successful: Visual redaction applied (content may not be removed)");
-            }
-            catch (Exception fallbackEx)
-            {
-                _logger.LogError(fallbackEx, "Fallback redaction also failed");
-                throw new Exception($"Failed to redact area: {ex.Message}", ex);
-            }
+            // NEVER fall back to visual-only redaction - this would be a security vulnerability
+            // Throw the exception to notify the user that redaction failed
+            throw new Exception($"Redaction failed: Could not remove content from PDF structure. {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// Draw a black rectangle over the redacted area.
-    /// This provides visual redaction to confirm content removal.
+    /// Draw a black rectangle by directly appending PDF operators to the content stream.
+    /// This method works even after content stream has been modified (unlike XGraphics).
     ///
     /// COORDINATE HANDLING:
     /// ===================
     /// Input: PDF points with top-left origin (Avalonia convention)
-    /// XGraphics: Uses BOTTOM-LEFT origin (same as PDF native coordinates)
-    /// Result: Y-coordinate is flipped via CoordinateConverter.ForXGraphics(area, pageHeight)
+    /// PDF operators: Use BOTTOM-LEFT origin (PDF native coordinates)
+    /// Result: Y-coordinate is flipped to PDF bottom-left origin
     /// </summary>
     /// <param name="page">The PDF page to draw on</param>
     /// <param name="area">Area in PDF points (72 DPI, top-left origin)</param>
-    private void DrawBlackRectangle(PdfPage page, Rect area)
+    private void DrawBlackRectangleDirectly(PdfPage page, Rect area)
     {
-        using var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append);
-
-        // Use centralized coordinate converter for XGraphics
-        // XGraphics uses BOTTOM-LEFT origin (verified by testing), so we must flip Y
         var pageHeight = page.Height.Point;
-        var (x, y, width, height) = CoordinateConverter.ForXGraphics(area, pageHeight);
 
-        var brush = new XSolidBrush(XColor.FromArgb(255, 0, 0, 0));
-        gfx.DrawRectangle(brush, x, y, width, height);
+        // Convert from Avalonia coordinates (top-left) to PDF coordinates (bottom-left)
+        var pdfX = area.X;
+        var pdfY = pageHeight - area.Y - area.Height;  // Flip Y axis
+        var pdfWidth = area.Width;
+        var pdfHeight = area.Height;
+
+        // Build PDF operators to draw a filled black rectangle
+        // PDF operator sequence:
+        // q                          Save graphics state
+        // 0 0 0 rg                   Set fill color to black (RGB)
+        // x y width height re        Draw rectangle path
+        // f                          Fill the path
+        // Q                          Restore graphics state
+        var operators = $"q\n0 0 0 rg\n{pdfX:F2} {pdfY:F2} {pdfWidth:F2} {pdfHeight:F2} re\nf\nQ\n";
+        var operatorBytes = System.Text.Encoding.ASCII.GetBytes(operators);
+
+        // Append to existing content stream or create new one
+        if (page.Contents.Elements.Count > 0)
+        {
+            // Append to first content stream
+            var content = page.Contents.Elements.GetDictionary(0);
+            if (content != null)
+            {
+                if (content.Stream != null)
+                {
+                    // Existing stream - append to it
+                    var stream = content.Stream;
+                    var existingBytes = stream.Value ?? Array.Empty<byte>();
+                    var newBytes = new byte[existingBytes.Length + operatorBytes.Length];
+                    Array.Copy(existingBytes, newBytes, existingBytes.Length);
+                    Array.Copy(operatorBytes, 0, newBytes, existingBytes.Length, operatorBytes.Length);
+                    stream.Value = newBytes;
+                }
+                else
+                {
+                    // Dictionary exists but no stream - create stream
+                    content.CreateStream(operatorBytes);
+                }
+            }
+        }
+        else
+        {
+            // No existing content, create new stream with black rectangle
+            var newContent = new PdfDictionary(page.Owner);
+            newContent.CreateStream(operatorBytes);
+            page.Contents.Elements.Add(newContent);
+        }
 
         _logger.LogDebug(
-            "Drew black rectangle at XGraphics({X:F2},{Y:F2},{W:F2}x{H:F2}) [converted from Avalonia({AX:F2},{AY:F2})]",
-            x, y, width, height, area.X, area.Y);
+            "Drew black rectangle at PDF coords({X:F2},{Y:F2},{W:F2}x{H:F2}) [converted from Avalonia({AX:F2},{AY:F2})]",
+            pdfX, pdfY, pdfWidth, pdfHeight, area.X, area.Y);
     }
 
     /// <summary>
@@ -259,7 +309,7 @@ public class RedactionService
             }
 
             // Step 2: Filter out operations that intersect with the redaction area
-            _logger.LogInformation("Filtering operations against redaction area: ({X:F2},{Y:F2},{W:F2}x{H:F2})",
+            _logger.LogInformation("Filtering operations against redaction area: ({X:F2},{Y:F2},{W:F2}x{H:F2}) [Avalonia top-left, PDF points]",
                 area.X, area.Y, area.Width, area.Height);
 
             var filteredOperations = new List<PdfOperation>();
@@ -270,6 +320,17 @@ public class RedactionService
             {
                 // Check if this operation intersects with the redaction area
                 bool shouldRemove = operation.IntersectsWith(area);
+
+                // DEBUG: Log intersection tests for text operations
+                if (operation is TextOperation textOpDebug && !string.IsNullOrWhiteSpace(textOpDebug.Text))
+                {
+                    _logger.LogInformation(
+                        "INTERSECTION TEST: '{Text}' BBox=({X:F2},{Y:F2},{W:F2}x{H:F2}) vs Area=({AX:F2},{AY:F2},{AW:F2}x{AH:F2}) => {Result}",
+                        textOpDebug.Text.Length > 20 ? textOpDebug.Text.Substring(0, 20) + "..." : textOpDebug.Text,
+                        textOpDebug.BoundingBox.X, textOpDebug.BoundingBox.Y, textOpDebug.BoundingBox.Width, textOpDebug.BoundingBox.Height,
+                        area.X, area.Y, area.Width, area.Height,
+                        shouldRemove ? "REMOVE" : "KEEP");
+                }
 
                 if (shouldRemove)
                 {
