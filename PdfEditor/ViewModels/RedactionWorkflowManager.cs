@@ -20,12 +20,12 @@ public class RedactionWorkflowManager : ReactiveObject
     /// <summary>
     /// Redactions that have been marked but not yet applied
     /// </summary>
-    public ReadOnlyObservableCollection<PendingRedaction> PendingRedactions { get; }
+    public ObservableCollection<PendingRedaction> PendingRedactions => _pending;
 
     /// <summary>
     /// Redactions that have been applied and saved
     /// </summary>
-    public ReadOnlyObservableCollection<PendingRedaction> AppliedRedactions { get; }
+    public ObservableCollection<PendingRedaction> AppliedRedactions => _applied;
 
     /// <summary>
     /// Number of pending redactions
@@ -39,8 +39,6 @@ public class RedactionWorkflowManager : ReactiveObject
 
     public RedactionWorkflowManager()
     {
-        PendingRedactions = new ReadOnlyObservableCollection<PendingRedaction>(_pending);
-        AppliedRedactions = new ReadOnlyObservableCollection<PendingRedaction>(_applied);
     }
 
     /// <summary>
