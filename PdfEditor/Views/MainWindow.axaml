@@ -34,8 +34,15 @@
                 </MenuItem>
                 <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S"/>
                 <Separator/>
-                <MenuItem Header="_Recent Files" Name="RecentFilesMenu">
+                <MenuItem Header="_Recent Files" Name="RecentFilesMenu" ItemsSource="{Binding RecentFiles}">
                     <MenuItem Header="No recent files" IsEnabled="False" IsVisible="{Binding !HasRecentFiles}"/>
+                    <MenuItem.Styles>
+                        <Style Selector="MenuItem">
+                            <Setter Property="Header" Value="{Binding}"/>
+                            <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).LoadRecentFileCommand}"/>
+                            <Setter Property="CommandParameter" Value="{Binding}"/>
+                        </Style>
+                    </MenuItem.Styles>
                 </MenuItem>
                 <Separator/>
                 <MenuItem Header="_Close Document" Command="{Binding CloseDocumentCommand}" InputGesture="Ctrl+W"/>
@@ -141,7 +148,7 @@
             <!-- HELP MENU -->
             <MenuItem Header="_Help">
                 <MenuItem Header="_Keyboard Shortcuts" Command="{Binding ShowShortcutsCommand}" InputGesture="F1"/>
-                <MenuItem Header="_Documentation"/>
+                <MenuItem Header="_Documentation" Command="{Binding ShowDocumentationCommand}"/>
                 <Separator/>
                 <MenuItem Header="_About PDF Editor" Command="{Binding AboutCommand}"/>
             </MenuItem>
