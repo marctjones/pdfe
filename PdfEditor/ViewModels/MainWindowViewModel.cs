@@ -135,6 +135,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SaveAsCommand = ReactiveCommand.CreateFromTask(SaveAsAsync);
         CloseDocumentCommand = ReactiveCommand.Create(CloseDocument);
         ExitCommand = ReactiveCommand.Create(Exit);
+        LoadRecentFileCommand = ReactiveCommand.CreateFromTask<string>(LoadRecentFileAsync);
 
         // Tools menu commands
         ExportPagesCommand = ReactiveCommand.CreateFromTask(ExportPagesAsync);
@@ -143,6 +144,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // Help menu commands
         AboutCommand = ReactiveCommand.Create(ShowAbout);
         ShowShortcutsCommand = ReactiveCommand.Create(ShowKeyboardShortcuts);
+        ShowDocumentationCommand = ReactiveCommand.Create(ShowDocumentation);
         RunVerifyNowCommand = ReactiveCommand.CreateFromTask(async () =>
         {
             if (!string.IsNullOrEmpty(_currentFilePath))
@@ -380,6 +382,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> SaveAsCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseDocumentCommand { get; }
     public ReactiveCommand<Unit, Unit> ExitCommand { get; }
+    public ReactiveCommand<string, Unit> LoadRecentFileCommand { get; }
 
     // Tools Menu Commands
     public ReactiveCommand<Unit, Unit> ExportPagesCommand { get; }
@@ -392,6 +395,7 @@ public partial class MainWindowViewModel : ViewModelBase
     // Help Menu Commands
     public ReactiveCommand<Unit, Unit> AboutCommand { get; }
     public ReactiveCommand<Unit, Unit> ShowShortcutsCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowDocumentationCommand { get; }
 
     // Document status property
     public bool IsDocumentLoaded => _documentService.IsDocumentLoaded;
@@ -1529,6 +1533,26 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private async Task LoadRecentFileAsync(string filePath)
+    {
+        _logger.LogInformation("Loading recent file: {FilePath}", filePath);
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _logger.LogWarning("Recent file path is empty");
+            return;
+        }
+
+        if (!System.IO.File.Exists(filePath))
+        {
+            _logger.LogWarning("Recent file not found: {FilePath}", filePath);
+            // TODO: Could show a message box and remove from recent files
+            return;
+        }
+
+        await LoadDocumentAsync(filePath);
+    }
+
     // Tools Menu Commands
 
     private async Task ExportPagesAsync()
@@ -1634,24 +1658,115 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Help Menu Commands
 
-    private void ShowAbout()
+    private async void ShowAbout()
     {
         _logger.LogInformation("About dialog requested");
-        // This would show an about dialog
+
+        var window = GetMainWindow();
+        if (window != null)
+        {
+            var messageBox = new FluentAvalonia.UI.Controls.ContentDialog
+            {
+                Title = "About PDF Editor",
+                Content = "PDF Editor v1.3.0-dev\n\n" +
+                          "A cross-platform PDF editor with TRUE content-level redaction.\n\n" +
+                          "Features:\n" +
+                          "• View and navigate PDFs\n" +
+                          "• Mark-then-apply redaction workflow\n" +
+                          "• Text extraction and search\n" +
+                          "• Page management (add/remove/rotate)\n" +
+                          "• OCR support\n\n" +
+                          "License: MIT\n" +
+                          "Built with: .NET 8 + Avalonia UI",
+                CloseButtonText = "Close",
+                DefaultButton = FluentAvalonia.UI.Controls.ContentDialogButton.Close
+            };
+
+            await messageBox.ShowAsync();
+        }
     }
 
-    private void ShowKeyboardShortcuts()
+    private async void ShowKeyboardShortcuts()
     {
         _logger.LogInformation("Keyboard shortcuts dialog requested");
-        // This would show keyboard shortcuts help
+
+        var window = GetMainWindow();
+        if (window != null)
+        {
+            var messageBox = new FluentAvalonia.UI.Controls.ContentDialog
+            {
+                Title = "Keyboard Shortcuts",
+                Content = "File:\n" +
+                          "  Ctrl+O - Open PDF\n" +
+                          "  Ctrl+S - Save\n" +
+                          "  Ctrl+Shift+S - Save As\n" +
+                          "  Ctrl+W - Close Document\n\n" +
+                          "Edit:\n" +
+                          "  Ctrl+F - Find\n" +
+                          "  F3 - Find Next\n" +
+                          "  Shift+F3 - Find Previous\n" +
+                          "  T - Toggle Text Selection Mode\n" +
+                          "  R - Toggle Redaction Mode\n\n" +
+                          "View:\n" +
+                          "  Ctrl++ - Zoom In\n" +
+                          "  Ctrl+- - Zoom Out\n" +
+                          "  Ctrl+0 - Actual Size\n\n" +
+                          "Navigation:\n" +
+                          "  PgUp/PgDn - Previous/Next Page",
+                CloseButtonText = "Close",
+                DefaultButton = FluentAvalonia.UI.Controls.ContentDialogButton.Close
+            };
+
+            await messageBox.ShowAsync();
+        }
     }
 
-    private IStorageProvider? GetStorageProvider()
+    private void ShowDocumentation()
+    {
+        _logger.LogInformation("Documentation requested");
+
+        try
+        {
+            var readmePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "README.md");
+
+            if (System.IO.File.Exists(readmePath))
+            {
+                // Open README.md with default application
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = readmePath,
+                    UseShellExecute = true
+                };
+                System.Diagnostics.Process.Start(psi);
+            }
+            else
+            {
+                // Fallback to GitHub repository
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://github.com/marctjones/pdfe",
+                    UseShellExecute = true
+                };
+                System.Diagnostics.Process.Start(psi);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open documentation");
+        }
+    }
+
+    private Avalonia.Controls.Window? GetMainWindow()
     {
         var lifetime = Avalonia.Application.Current?.ApplicationLifetime
             as IClassicDesktopStyleApplicationLifetime;
 
-        return lifetime?.MainWindow?.StorageProvider;
+        return lifetime?.MainWindow;
+    }
+
+    private IStorageProvider? GetStorageProvider()
+    {
+        return GetMainWindow()?.StorageProvider;
     }
 
     // Recent Files Management
@@ -1739,12 +1854,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _logger.LogWarning(ex, "Error saving recent files");
         }
-    }
-
-    public async Task LoadRecentFileAsync(string filePath)
-    {
-        _logger.LogInformation("Loading recent file: {FilePath}", filePath);
-        await LoadDocumentAsync(filePath);
     }
 
     // OCR Commands
@@ -1990,15 +2099,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _logger.LogWarning("Could not show message dialog: Main window not found. Message was: {Message}", message);
         }
-    }
-
-    private Window? GetMainWindow()
-    {
-        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-        {
-            return desktop.MainWindow;
-        }
-        return null;
     }
 
     /// <summary>
