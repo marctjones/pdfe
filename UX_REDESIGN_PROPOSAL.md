@@ -9,10 +9,12 @@
 ## Executive Summary
 
 This document proposes a comprehensive UX redesign for PdfEditor, focusing on:
-1. **Clarity** - Making the redaction workflow intuitive from first use
-2. **Efficiency** - Enabling quick mark-then-apply batch redaction workflows
-3. **Cross-platform consistency** - A platform-agnostic design that feels native everywhere
-4. **Progressive disclosure** - Simple on first use, powerful when needed
+1. **Simplicity First** - One obvious button beats five choices; hide complexity until needed
+2. **Clarity** - Making the redaction workflow intuitive from first use with zero learning curve
+3. **Efficiency** - Enabling quick mark-then-apply batch redaction workflows
+4. **Safety** - Protecting original files from accidental overwrites through smart defaults
+5. **Cross-platform consistency** - A platform-agnostic design that feels native everywhere
+6. **Progressive disclosure** - Simple for 90% of users, powerful options for the 10% who need them
 
 ### Design Principles Applied
 
@@ -529,19 +531,32 @@ METHOD 3: Click to resize
 
 ### Menu Structure (Revised)
 
+**Design Philosophy: Simple First, Complexity Hidden**
+
+The menu structure follows progressive disclosure principles:
+- Most common actions are obvious and require no decisions
+- Advanced options are available but hidden until needed
+- Context-aware behavior prevents accidental data loss
+
+See [`FILE_OPERATIONS_UX.md`](FILE_OPERATIONS_UX.md) for complete file operations design.
+
 ```
 File
-  Open...                    Ctrl+O
-  Open Recent               >
+  Open...                              Ctrl+O
+  Open Recent                         >
   ---
-  Save                       Ctrl+S
-  Save As...                 Ctrl+Shift+S
+  Save                                 Ctrl+S        [Context-aware behavior]
+  Save Redacted Version                             [When original + redactions]
+  ---
+  Advanced Save...                                  [Power users only]
+    Save Copy of Original
+    Save Custom Version...
   ---
   Export Pages as Images...
-  Print...                   Ctrl+P
+  Print...                             Ctrl+P
   ---
-  Close Document             Ctrl+W
-  Exit                       Alt+F4
+  Close Document                       Ctrl+W
+  Exit                                 Alt+F4
 
 Edit
   Undo                       Ctrl+Z
@@ -604,6 +619,87 @@ Help
   ---
   About PDF Editor
 ```
+
+### File Operations: Context-Aware Save Behavior
+
+**Critical Design Requirement:** Users typically want to preserve the original PDF and save modified versions as new files. The application must prevent accidental overwrites.
+
+#### Save Button Behavior (Context-Aware)
+
+The "Save" button (Ctrl+S) changes behavior based on document state:
+
+| Current File State | Has Changes | Button Label | Behavior |
+|-------------------|-------------|--------------|----------|
+| Original file | No | "Save" | Grayed out (nothing to save) |
+| Original file | Redactions only | "Save Redacted Version" | Shows simple "Save As" dialog |
+| Original file | Multiple changes | "Save Changes" | Shows dialog with choices |
+| Modified file (`*_REDACTED.pdf`) | No | "Save" | Grayed out |
+| Modified file (`*_REDACTED.pdf`) | Yes | "Save" | Updates file directly |
+
+#### Simple Save Dialog (90% of Cases)
+
+When user has redactions on original file and clicks Save:
+
+```
+┌────────────────────────────────────────┐
+│  Save Redacted Version            [×]  │
+├────────────────────────────────────────┤
+│                                        │
+│  Save as:                              │
+│  [contract_REDACTED.pdf     ] [Browse] │
+│                                        │
+│  3 areas will be redacted              │
+│  Original file will be preserved ✓     │
+│                                        │
+│  [Cancel]                     [Save]   │
+└────────────────────────────────────────┘
+```
+
+**No checkboxes. No complexity. Just works.**
+
+#### Filename Suggestions
+
+The application auto-suggests descriptive filenames:
+
+- Original: `contract.pdf`
+- With redactions: `contract_REDACTED.pdf`
+- With page subset: `contract_pages_1-5.pdf`
+- With both: `contract_pages_1-5_REDACTED.pdf`
+- Duplicates: `contract_REDACTED_2.pdf` (auto-increment)
+
+#### Original File Protection
+
+**The application NEVER allows overwriting the original file through normal save operations.**
+
+Safeguards:
+- Regular "Save" (Ctrl+S) is disabled when editing original
+- Only "Save Redacted Version" or "Save As..." is available
+- User must explicitly use "Advanced Save → Custom Version" to overwrite
+- All dialogs show: "Original file will be preserved ✓"
+
+#### Progressive Disclosure for Power Users
+
+Users needing fine control can access "Advanced Save..." menu:
+
+```
+Advanced Save...
+├─ Save Copy of Original (exact backup)
+├─ Save Custom Version...
+│   └─ [Dialog with checkboxes for what to include]
+└─ Export to PDF/A...
+```
+
+This provides full control over:
+- What changes to include (redactions, page removals, rotations)
+- Custom filename
+- Whether to include all pages or subset
+
+**See [`FILE_OPERATIONS_UX.md`](FILE_OPERATIONS_UX.md) for complete specification including:**
+- Dialog mockups for all scenarios
+- Filename suggestion algorithm
+- State tracking implementation
+- Error prevention strategies
+- Testing criteria (< 2 min to first successful redaction, zero user questions)
 
 ### Keyboard Shortcuts (Complete)
 
@@ -994,23 +1090,56 @@ Disabled state:
 
 ## Implementation Priority
 
-### Phase 1: Core Workflow Fix (High Priority)
-1. Add "Pending Redactions" section to right panel
-2. Implement batch apply with "Apply All" button
-3. Add visual distinction between pending/applied redactions
-4. Improve mode indication (toolbar toggle states, cursor changes)
+### Phase 1: Core Workflow & Safety (High Priority)
+
+**Goal:** Fix critical UX issues and prevent data loss
+
+1. **File Operations Safety**
+   - Implement context-aware Save button behavior
+   - Add "Save Redacted Version" automatic filename suggestion
+   - Prevent original file overwrite (disable regular Save on original)
+   - Add file state tracking (Original vs Modified)
+   - Simple save dialog with no checkboxes (90% case)
+
+2. **Mark-Then-Apply Workflow**
+   - Add "Pending Redactions" section to right panel
+   - Implement batch apply with "Apply All Redactions" button
+   - Add visual distinction between pending (red dashed) and applied (solid black) redactions
+   - Auto-save after apply to prevent "redacted but still extractable" confusion
+
+3. **Mode Indication**
+   - Improve toolbar toggle states
+   - Add cursor changes (crosshair in redact mode)
+   - Status bar shows current state clearly
+
+**Success Criteria:**
+- User can redact and save in < 2 minutes
+- Zero accidental original file overwrites
+- Zero user questions about "which save option"
+- Text extraction issue resolved (save happens immediately after apply)
 
 ### Phase 2: Navigation & Layout (Medium Priority)
-5. Make sidebars collapsible
-6. Add sidebar toggle buttons to toolbar
-7. Implement search bar as overlay
-8. Add dark theme support
 
-### Phase 3: Polish & Onboarding (Lower Priority)
-9. Add first-use tips (dismissible)
-10. Implement Review All confirmation dialog
-11. Add keyboard shortcut overlay (F1)
-12. Performance optimization for large documents
+**Goal:** Improve document navigation and workspace customization
+
+4. Make sidebars collapsible
+5. Add sidebar toggle buttons to toolbar
+6. Implement search bar as overlay
+7. Add dark theme support
+8. Improve zoom controls and page navigation
+
+### Phase 3: Advanced Features & Polish (Lower Priority)
+
+**Goal:** Add power user features and onboarding
+
+9. Advanced Save menu for power users
+10. Custom version save with checkboxes
+11. Add first-use tips (dismissible)
+12. Implement Review All confirmation dialog
+13. Add keyboard shortcut overlay (F1)
+14. OCR integration improvements
+15. Clipboard history enhancements (state indicators: 📋 copied, 🔴 redacted, ✓ saved)
+16. Performance optimization for large documents
 
 ---
 
