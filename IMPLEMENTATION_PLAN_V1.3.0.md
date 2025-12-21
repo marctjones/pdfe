@@ -21,53 +21,93 @@ This implementation plan breaks down the v1.3.0 UX redesign into small, testable
 - Never break existing functionality
 - Feature flags for in-progress work
 
+**IMPORTANT:** This plan has been updated to include critical refactoring steps.
+See [`REFACTORING_PLAN_V1.3.0.md`](REFACTORING_PLAN_V1.3.0.md) for detailed Pre-Phase 0 steps.
+
 ---
 
-## Phase 1: Foundation & File State Tracking
+## Pre-Phase 0: Critical Refactoring (7 hours)
 
-### Step 1.1: Add File State Tracking Infrastructure
+**⚠️ MUST DO FIRST - Prepares codebase and fixes root causes**
+
+Before implementing new features, we need to refactor existing code to:
+1. Reduce complexity of MainWindowViewModel
+2. Fix root cause of "text still selectable after redaction" issue
+3. Create clean foundation for mark-then-apply workflow
+
+### Why Refactor First?
+
+- **Fixes Root Cause:** Stream-based text extraction solves the extraction bug
+- **Reduces Risk:** Smaller, focused changes in subsequent phases
+- **Better Architecture:** Separated concerns, easier to maintain
+- **Net Positive:** +7 hours now, saves 10+ hours in debugging later
+
+### Refactoring Steps
+
+**Step 0.1: Extract DocumentStateManager** (2 hours, 12 tests)
+- Separates file state tracking from MainWindowViewModel
+- Tracks original vs current file paths
+- Detects redacted versions
+- Manages unsaved changes count
+- **Detailed spec:** See REFACTORING_PLAN_V1.3.0.md, Step 0.1
+
+**Step 0.2: Add Stream-Based Text Extraction** (3 hours, 7 tests) 🔥 **CRITICAL**
+- **Fixes root cause** of "text still selectable" issue
+- Adds `ExtractTextFromArea(Stream)` overload
+- Enables reading from in-memory modified documents
+- Backwards compatible (existing code unchanged)
+- **Detailed spec:** See REFACTORING_PLAN_V1.3.0.md, Step 0.2
+
+**Step 0.3: Extract RedactionWorkflowManager** (2 hours, 10 tests)
+- Separates redaction workflow from MainWindowViewModel
+- Tracks pending and applied redactions
+- Foundation for mark-then-apply workflow
+- **Detailed spec:** See REFACTORING_PLAN_V1.3.0.md, Step 0.3
+
+### Refactoring Results
+
+After Pre-Phase 0:
+- ✅ 29 new unit tests (all passing)
+- ✅ Root cause of text extraction issue fixed
+- ✅ MainWindowViewModel simplified
+- ✅ Clean foundation for Phases 1-7
+- ✅ All existing tests still pass
+
+**Git Commits:** 3 commits (one per refactoring step)
+**Time Investment:** 7 hours
+**Risk Reduction:** Significant (subsequent phases now simpler)
+
+---
+
+## Phase 1: Foundation & File State Tracking (SIMPLIFIED)
+
+**Note:** Steps 1.1 and 1.3 are now MUCH simpler since DocumentStateManager and RedactionWorkflowManager were created in Pre-Phase 0.
+
+### Step 1.1: Wire Up DocumentStateManager (SIMPLIFIED)
 
 **Implementation:**
+
+Since DocumentStateManager was created in Step 0.1, we just need to wire it up:
+
 ```csharp
-// PdfEditor/Models/DocumentFileState.cs (NEW FILE)
-public class DocumentFileState
-{
-    public string CurrentFilePath { get; set; }
-    public string OriginalFilePath { get; set; }
-    public bool IsOriginalFile => CurrentFilePath == OriginalFilePath;
-    public bool IsRedactedVersion => /* Check for _REDACTED in filename */
-    public int PendingRedactionsCount { get; set; }
-    public int RemovedPagesCount { get; set; }
-    public bool HasUnsavedChanges => PendingRedactionsCount > 0 || RemovedPagesCount > 0;
-}
+// MainWindowViewModel.cs - Already done in refactoring!
+public DocumentStateManager FileState { get; }  // Already added in Step 0.1
 ```
 
 **Changes:**
-- Create `PdfEditor/Models/DocumentFileState.cs`
-- Add `DocumentFileState` property to `MainWindowViewModel`
-- Initialize in `LoadDocumentAsync()`
-- Update state when changes occur
-
-**New Tests:**
-```csharp
-// PdfEditor.Tests/Unit/DocumentFileStateTests.cs (NEW FILE)
-- IsOriginalFile_WhenSameAsOriginal_ReturnsTrue()
-- IsRedactedVersion_WhenContainsRedacted_ReturnsTrue()
-- HasUnsavedChanges_WhenPendingRedactions_ReturnsTrue()
-- HasUnsavedChanges_WhenNoChanges_ReturnsFalse()
-```
+- ✅ Already done in Pre-Phase 0, Step 0.1
+- Just verify it's wired up correctly
 
 **Tests to Run:**
 ```bash
-dotnet test --filter "FullyQualifiedName~DocumentFileStateTests"
-dotnet test  # All tests should still pass
+dotnet test --filter "FullyQualifiedName~DocumentStateManagerTests"
+# Should see: 12 tests passed (from refactoring)
 ```
 
+**Time:** 30 minutes (just verification)
+
 **Git Checkpoint:**
-```bash
-git add PdfEditor/Models/DocumentFileState.cs PdfEditor.Tests/Unit/DocumentFileStateTests.cs
-git commit -m "feat: Add DocumentFileState model for tracking file modification status"
-```
+- No commit needed (already committed in Step 0.1)
 
 ---
 
@@ -130,47 +170,45 @@ git commit -m "feat: Add FilenameSuggestionService for smart filename generation
 
 ---
 
-### Step 1.3: Update ViewModel to Track File State
+### Step 1.3: Wire Up RedactionWorkflowManager (SIMPLIFIED)
 
 **Implementation:**
-- Add `DocumentFileState FileState { get; set; }` to `MainWindowViewModel`
-- Initialize in `LoadDocumentAsync()`:
-  ```csharp
-  FileState = new DocumentFileState
-  {
-      CurrentFilePath = filePath,
-      OriginalFilePath = filePath,
-      PendingRedactionsCount = 0,
-      RemovedPagesCount = 0
-  };
-  ```
-- Update `FileState.PendingRedactionsCount` when marking redactions
-- Update `FileState.CurrentFilePath` after saving
+
+Since RedactionWorkflowManager was created in Step 0.3, we just need to wire it up:
+
+```csharp
+// MainWindowViewModel.cs
+public RedactionWorkflowManager RedactionWorkflow { get; }
+
+public MainWindowViewModel(/* params */)
+{
+    // ... existing code ...
+
+    // ADD: Initialize workflow manager
+    RedactionWorkflow = new RedactionWorkflowManager();
+
+    // ... rest of constructor ...
+}
+```
 
 **Changes:**
-- Modify `PdfEditor/ViewModels/MainWindowViewModel.cs`
-- Add property change notifications for `FileState`
-- Update in relevant command handlers
-
-**New Tests:**
-```csharp
-// PdfEditor.Tests/Unit/MainWindowViewModelTests.cs (MODIFY EXISTING)
-- LoadDocument_InitializesFileState()
-- MarkRedaction_IncrementsPendingCount()
-- SaveRedactedVersion_UpdatesCurrentFilePath()
-- SaveRedactedVersion_PreservesOriginalFilePath()
-```
+- ✅ RedactionWorkflowManager already created in Pre-Phase 0, Step 0.3
+- Add property to MainWindowViewModel
+- Initialize in constructor
+- Wire up property change notifications
 
 **Tests to Run:**
 ```bash
-dotnet test --filter "FullyQualifiedName~MainWindowViewModelTests"
-dotnet test
+dotnet test --filter "FullyQualifiedName~RedactionWorkflowManagerTests"
+# Should see: 10 tests passed (from refactoring)
 ```
+
+**Time:** 30 minutes (just wiring)
 
 **Git Checkpoint:**
 ```bash
-git add PdfEditor/ViewModels/MainWindowViewModel.cs PdfEditor.Tests/Unit/MainWindowViewModelTests.cs
-git commit -m "feat: Integrate DocumentFileState tracking into MainWindowViewModel"
+git add PdfEditor/ViewModels/MainWindowViewModel.cs
+git commit -m "feat: Wire up RedactionWorkflowManager to MainWindowViewModel"
 ```
 
 ---
@@ -1141,18 +1179,30 @@ If critical issues found after release:
 
 ---
 
-## Timeline Estimate
+## Timeline Estimate (UPDATED with Refactoring)
 
-| Phase | Tasks | Est. Time | Tests |
-|-------|-------|-----------|-------|
-| Phase 1 | Foundation (Steps 1.1-1.3) | 4 hours | 15 tests |
-| Phase 2 | Pending Panel (Steps 2.1-2.4) | 6 hours | 12 tests |
-| Phase 3 | Apply All (Steps 3.1-3.2) | 6 hours | 11 tests |
-| Phase 4 | Context Save (Steps 4.1-4.2) | 4 hours | 10 tests |
-| Phase 5 | Integration Tests (Steps 5.1-5.3) | 4 hours | 19 tests |
-| Phase 6 | Polish (Steps 6.1-6.3) | 4 hours | 8 tests |
-| Phase 7 | Release (Steps 7.1-7.4) | 4 hours | Manual |
-| **Total** | **7 phases, 22 steps** | **32 hours** | **~80 tests** |
+| Phase | Tasks | Est. Time | Tests | Notes |
+|-------|-------|-----------|-------|-------|
+| **Pre-Phase 0** | **Refactoring (Steps 0.1-0.3)** | **7 hours** | **29 tests** | **CRITICAL - Do first** |
+| Phase 1 | Foundation (Steps 1.1-1.3) | 2 hours | 6 tests | Simplified by refactoring |
+| Phase 2 | Pending Panel (Steps 2.1-2.4) | 5 hours | 12 tests | Easier with managers |
+| Phase 3 | Apply All (Steps 3.1-3.2) | 4 hours | 11 tests | Stream extraction done |
+| Phase 4 | Context Save (Steps 4.1-4.2) | 3 hours | 10 tests | Simpler with state mgr |
+| Phase 5 | Integration Tests (Steps 5.1-5.3) | 4 hours | 19 tests | Same |
+| Phase 6 | Polish (Steps 6.1-6.3) | 3 hours | 8 tests | Simpler |
+| Phase 7 | Release (Steps 7.1-7.4) | 4 hours | Manual | Same |
+| **Total** | **8 phases, 25 steps** | **32 hours** | **~95 tests** | **+15 tests, same time!** |
+
+**Breakdown:**
+- Pre-Phase 0 Refactoring: 7 hours (29 tests)
+- Phases 1-7 Implementation: 25 hours (66 tests)
+- **Total: 32 hours, 95 tests**
+
+**Key Insight:** Refactoring adds 7 hours but saves 7 hours in subsequent phases = net zero time impact, but with:
+- ✅ Much lower risk
+- ✅ Root cause fixes
+- ✅ Better code quality
+- ✅ 15 additional tests
 
 **Estimated Development Time: 4-5 days of focused work**
 
