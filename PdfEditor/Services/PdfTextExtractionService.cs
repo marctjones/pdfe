@@ -26,16 +26,19 @@ public class PdfTextExtractionService
     }
 
     /// <summary>
-    /// Extract all text from a page
+    /// Extract all text from a page (stream-based - primary method)
     /// </summary>
-    public string ExtractTextFromPage(string pdfPath, int pageIndex)
+    /// <param name="pdfStream">PDF document stream (can be file stream or memory stream)</param>
+    /// <param name="pageIndex">Zero-based page index</param>
+    /// <param name="sourceName">Optional name for logging (e.g., filename)</param>
+    public string ExtractTextFromPage(Stream pdfStream, int pageIndex, string sourceName = "PDF")
     {
         _logger.LogInformation("Extracting text from page {PageIndex} of {FileName}",
-            pageIndex + 1, Path.GetFileName(pdfPath));
+            pageIndex + 1, sourceName);
 
         try
         {
-            using var document = PdfDocument.Open(pdfPath);
+            using var document = PdfDocument.Open(pdfStream);
 
             if (pageIndex < 0 || pageIndex >= document.NumberOfPages)
             {
@@ -60,18 +63,31 @@ public class PdfTextExtractionService
     }
 
     /// <summary>
-    /// Extract text from a specific area of the page
+    /// Extract all text from a page (file-based wrapper for backward compatibility)
     /// </summary>
+    public string ExtractTextFromPage(string pdfPath, int pageIndex)
+    {
+        using var stream = File.OpenRead(pdfPath);
+        return ExtractTextFromPage(stream, pageIndex, Path.GetFileName(pdfPath));
+    }
+
+    /// <summary>
+    /// Extract text from a specific area of the page (stream-based - primary method)
+    /// </summary>
+    /// <param name="pdfStream">PDF document stream (can be file stream or memory stream)</param>
+    /// <param name="pageIndex">Zero-based page index</param>
+    /// <param name="area">Selection area in screen coordinates</param>
     /// <param name="renderDpi">The DPI at which the page was rendered (default 150). Used to scale screen coordinates to PDF points (72 DPI)</param>
-    public string ExtractTextFromArea(string pdfPath, int pageIndex, Rect area, int renderDpi = 150)
+    /// <param name="sourceName">Optional name for logging (e.g., filename)</param>
+    public string ExtractTextFromArea(Stream pdfStream, int pageIndex, Rect area, int renderDpi = 150, string sourceName = "PDF")
     {
         _logger.LogInformation(
-            "Extracting text from screen area ({X:F2},{Y:F2},{W:F2}x{H:F2}) on page {PageIndex} (rendered at {Dpi} DPI)",
-            area.X, area.Y, area.Width, area.Height, pageIndex + 1, renderDpi);
+            "Extracting text from screen area ({X:F2},{Y:F2},{W:F2}x{H:F2}) on page {PageIndex} of {FileName} (rendered at {Dpi} DPI)",
+            area.X, area.Y, area.Width, area.Height, pageIndex + 1, sourceName, renderDpi);
 
         try
         {
-            using var document = PdfDocument.Open(pdfPath);
+            using var document = PdfDocument.Open(pdfStream);
 
             if (pageIndex < 0 || pageIndex >= document.NumberOfPages)
             {
@@ -214,6 +230,19 @@ public class PdfTextExtractionService
     {
         return !(a.Right < b.Left || a.Left > b.Right ||
                  a.Top < b.Bottom || a.Bottom > b.Top);
+    }
+
+    /// <summary>
+    /// Extract text from a specific area of the page (file-based wrapper for backward compatibility)
+    /// </summary>
+    /// <param name="pdfPath">Path to PDF file</param>
+    /// <param name="pageIndex">Zero-based page index</param>
+    /// <param name="area">Selection area in screen coordinates</param>
+    /// <param name="renderDpi">The DPI at which the page was rendered (default 150)</param>
+    public string ExtractTextFromArea(string pdfPath, int pageIndex, Rect area, int renderDpi = 150)
+    {
+        using var stream = File.OpenRead(pdfPath);
+        return ExtractTextFromArea(stream, pageIndex, area, renderDpi, Path.GetFileName(pdfPath));
     }
 
     /// <summary>
