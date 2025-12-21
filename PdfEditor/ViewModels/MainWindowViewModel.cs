@@ -407,7 +407,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> SaveAsCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseDocumentCommand { get; }
     public ReactiveCommand<Unit, Unit> ExitCommand { get; }
-    public ReactiveCommand<string, Unit> LoadRecentFileCommand { get; }
+    public ReactiveCommand<string, Unit> LoadRecentFileCommand { get; } = null!;
 
     // Tools Menu Commands
     public ReactiveCommand<Unit, Unit> ExportPagesCommand { get; }
