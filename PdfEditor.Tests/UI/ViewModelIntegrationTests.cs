@@ -64,6 +64,7 @@ public class ViewModelIntegrationTests : IDisposable
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         return new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -75,7 +76,8 @@ public class ViewModelIntegrationTests : IDisposable
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
     }
 
     private string CreateTestPdf(string content = "Test Document Content")
@@ -494,6 +496,7 @@ public class ViewModelIntegrationTests : IDisposable
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -505,7 +508,8 @@ public class ViewModelIntegrationTests : IDisposable
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
 
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {
@@ -594,6 +598,7 @@ public class ViewModelIntegrationTests : IDisposable
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -605,7 +610,8 @@ public class ViewModelIntegrationTests : IDisposable
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
 
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {
@@ -677,6 +683,7 @@ public class ViewModelIntegrationTests : IDisposable
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -688,7 +695,8 @@ public class ViewModelIntegrationTests : IDisposable
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
 
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {
@@ -767,6 +775,7 @@ public class ViewModelIntegrationTests : IDisposable
         var ocrService1 = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService1);
         var signatureService1 = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier1 = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService1 = new FilenameSuggestionService();
 
         var vm1 = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -778,7 +787,8 @@ public class ViewModelIntegrationTests : IDisposable
             searchService1,
             ocrService1,
             signatureService1,
-            verifier1);
+            verifier1,
+            filenameSuggestionService1);
 
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {
@@ -831,6 +841,7 @@ public class ViewModelIntegrationTests : IDisposable
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -842,7 +853,8 @@ public class ViewModelIntegrationTests : IDisposable
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
 
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {

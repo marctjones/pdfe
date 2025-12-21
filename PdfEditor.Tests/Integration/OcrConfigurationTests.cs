@@ -198,6 +198,7 @@ public class OcrConfigurationTests
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         return new MainWindowViewModel(
             new Mock<ILogger<MainWindowViewModel>>().Object,
@@ -209,6 +210,7 @@ public class OcrConfigurationTests
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
     }
 }
