@@ -58,6 +58,7 @@ public class RedactionWorkflowManager : ReactiveObject
 
         _pending.Add(pending);
         this.RaisePropertyChanged(nameof(PendingCount));
+        this.RaisePropertyChanged(nameof(PendingRedactions)); // Force UI update
     }
 
     /// <summary>

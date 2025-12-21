@@ -762,6 +762,7 @@ public partial class MainWindowViewModel : ViewModelBase
         FileState.PendingRedactionsCount = RedactionWorkflow.PendingCount;
 
         _logger.LogInformation("Redaction marked. Total pending: {Count}", RedactionWorkflow.PendingCount);
+        _logger.LogInformation("DEBUG: RedactionWorkflow.PendingRedactions.Count = {Count}", RedactionWorkflow.PendingRedactions.Count);
 
         // Clear the current selection
         CurrentRedactionArea = default;
