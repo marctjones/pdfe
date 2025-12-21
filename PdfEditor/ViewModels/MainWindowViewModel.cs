@@ -321,6 +321,25 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public bool HasRecentFiles => RecentFiles.Count > 0;
 
+    public ObservableCollection<Avalonia.Controls.MenuItem> RecentFileMenuItems
+    {
+        get
+        {
+            var items = new ObservableCollection<Avalonia.Controls.MenuItem>();
+            foreach (var filePath in RecentFiles)
+            {
+                var menuItem = new Avalonia.Controls.MenuItem
+                {
+                    Header = filePath,
+                    Command = LoadRecentFileCommand,
+                    CommandParameter = filePath
+                };
+                items.Add(menuItem);
+            }
+            return items;
+        }
+    }
+
     // Viewport dimensions (set by View for accurate zoom calculations)
     public double ViewportWidth
     {
@@ -1794,6 +1813,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 }
 
                 this.RaisePropertyChanged(nameof(HasRecentFiles));
+                this.RaisePropertyChanged(nameof(RecentFileMenuItems));
                 _logger.LogInformation("Loaded {Count} recent files", RecentFiles.Count);
             }
         }
@@ -1825,6 +1845,7 @@ public partial class MainWindowViewModel : ViewModelBase
             }
 
             this.RaisePropertyChanged(nameof(HasRecentFiles));
+            this.RaisePropertyChanged(nameof(RecentFileMenuItems));
 
             // Save to file
             SaveRecentFiles();
