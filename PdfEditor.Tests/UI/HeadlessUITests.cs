@@ -53,6 +53,7 @@ public class HeadlessUITests
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         return new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -64,7 +65,8 @@ public class HeadlessUITests
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
     }
 
     #region ViewModel Property Tests with UI Context

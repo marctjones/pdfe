@@ -74,6 +74,7 @@ public class MouseEventSimulationTests : IDisposable
         var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
         var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
         var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
 
         var vm = new MainWindowViewModel(
             _vmLoggerMock.Object,
@@ -85,7 +86,8 @@ public class MouseEventSimulationTests : IDisposable
             searchService,
             ocrService,
             signatureService,
-            verifier);
+            verifier,
+            filenameSuggestionService);
 
         return (vm, documentService);
     }
