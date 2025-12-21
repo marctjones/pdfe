@@ -393,8 +393,6 @@ public partial class MainWindow : Window
         if (sender is not MenuItem menuItem || DataContext is not MainWindowViewModel viewModel)
             return;
 
-        Console.WriteLine($">>> RecentFilesMenu_SubmenuOpened: RecentFiles.Count = {viewModel.RecentFiles.Count}");
-
         // Clear existing items
         menuItem.Items.Clear();
 
@@ -406,7 +404,6 @@ public partial class MainWindow : Window
                 IsEnabled = false
             };
             menuItem.Items.Add(noFilesItem);
-            Console.WriteLine(">>> Added 'No recent files' placeholder");
             return;
         }
 
@@ -420,7 +417,6 @@ public partial class MainWindow : Window
                 CommandParameter = filePath
             };
             menuItem.Items.Add(item);
-            Console.WriteLine($">>> Added menu item: {filePath}");
         }
     }
 }
