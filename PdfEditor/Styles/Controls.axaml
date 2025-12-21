@@ -1,7 +1,73 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Button Styles -->
+    <!-- Modern Button Styles -->
+    <Style Selector="Button.modern-button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15"/>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15"/>
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Button.modern-button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+    </Style>
+
+    <Style Selector="Button.modern-button:pressed">
+        <Setter Property="Background" Value="{DynamicResource PressedBrush}"/>
+    </Style>
+
+    <!-- Toggle Button Active State -->
+    <Style Selector="Button.modern-button.toggle.active">
+        <Setter Property="Background" Value="#E3F2FD"/>
+        <Setter Property="BorderBrush" Value="#0078D4"/>
+        <Setter Property="Foreground" Value="#0078D4"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style Selector="Button.modern-button.toggle.active:pointerover">
+        <Setter Property="Background" Value="#BBDEFB"/>
+        <Setter Property="BorderBrush" Value="#0078D4"/>
+    </Style>
+
+    <!-- Primary Button (Apply Redaction) -->
+    <Style Selector="Button.modern-button.primary">
+        <Setter Property="Background" Value="#D32F2F"/>
+        <Setter Property="BorderBrush" Value="#D32F2F"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style Selector="Button.modern-button.primary:pointerover">
+        <Setter Property="Background" Value="#F44336"/>
+        <Setter Property="BorderBrush" Value="#F44336"/>
+    </Style>
+
+    <Style Selector="Button.modern-button.primary:pressed">
+        <Setter Property="Background" Value="#C62828"/>
+        <Setter Property="BorderBrush" Value="#C62828"/>
+    </Style>
+
+    <Style Selector="Button.modern-button.primary:disabled">
+        <Setter Property="Background" Value="#BDBDBD"/>
+        <Setter Property="BorderBrush" Value="#BDBDBD"/>
+        <Setter Property="Foreground" Value="#757575"/>
+        <Setter Property="Opacity" Value="0.6"/>
+    </Style>
+
+    <!-- Legacy Toolbar Button Styles -->
     <Style Selector="Button.toolbar-button">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>

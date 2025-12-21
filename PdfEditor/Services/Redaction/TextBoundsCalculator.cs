@@ -85,17 +85,20 @@ public class TextBoundsCalculator
         // Calculate text width
         var textWidth = CalculateTextWidth(text, textState, fontMetrics);
 
-        // Text height is approximately the font size
-        var textHeight = textState.FontSize;
+        // In PDF text space, (0,0) is the baseline position
+        // Text extends above baseline (ascent) and below baseline (descent)
+        // Scale font metrics by fontSize / 1000 (PDF font units are per 1000)
+        var ascent = fontMetrics.Ascent * textState.FontSize / 1000.0;
+        var descent = fontMetrics.Descent * textState.FontSize / 1000.0;  // Descent is typically negative
 
         // Transform all four corners of the text rectangle in text space
-        // This properly handles rotation and scaling in the text matrix
+        // In text space: Y=0 is baseline, positive Y is above, negative Y is below
         var corners = new[]
         {
-            (0.0, 0.0),                    // Bottom-left
-            (textWidth, 0.0),              // Bottom-right
-            (0.0, textHeight),             // Top-left
-            (textWidth, textHeight)        // Top-right
+            (0.0, descent),                // Bottom-left (below baseline)
+            (textWidth, descent),          // Bottom-right (below baseline)
+            (0.0, ascent),                 // Top-left (above baseline)
+            (textWidth, ascent)            // Top-right (above baseline)
         };
 
         // Transform each corner through text matrix then graphics matrix
@@ -114,22 +117,27 @@ public class TextBoundsCalculator
         var maxY = transformedCorners.Max(c => c.y);  // Top of text in PDF coords
 
         // Convert from PDF coordinates (bottom-left origin) to Avalonia coordinates (top-left origin)
-        // Using centralized CoordinateConverter for consistency
-        // PDF maxY (top of text) becomes Avalonia Y (top edge of bounding box)
-        var avaloniaY = CoordinateConverter.PdfYToAvaloniaY(maxY, pageHeight);
+        // We have already transformed corners, so minY/maxY represent the actual bounding box
+        // We can't use TextBoundsToPdfPointsTopLeft here because that assumes untransformed baseline
+        // Instead, do direct Y-flip: PDF top (maxY) → Avalonia top
+        var width = maxX - minX;
+        var height = maxY - minY;
+        var avaloniaY = pageHeight - maxY;  // maxY is the top in PDF coords
+
+        var rect = new Rect(minX, avaloniaY, width, height);
 
         _logger.LogDebug(
-            "Y coordinate conversion via CoordinateConverter: pageHeight={PageHeight:F2}, " +
-            "pdfMinY={MinY:F2}, pdfMaxY={MaxY:F2} → avaloniaY={AvaloniaY:F2}",
-            pageHeight, minY, maxY, avaloniaY);
-
-        var rect = new Rect(minX, avaloniaY, maxX - minX, maxY - minY);
+            "Y coordinate conversion (direct Y-flip): " +
+            "pageHeight={PageHeight:F2}, ascent={Ascent:F2}, descent={Descent:F2}, " +
+            "pdfMinY={MinY:F2}, pdfMaxY={MaxY:F2} → " +
+            "avaloniaY={AvaloniaY:F2}, avaloniaRect=({X:F2},{Y:F2},{W:F2}x{H:F2})",
+            pageHeight, ascent, descent, minY, maxY, avaloniaY, rect.X, rect.Y, rect.Width, rect.Height);
 
         _logger.LogTrace(
             "Bounds calculated: ({X:F2},{Y:F2},{W:F2}x{H:F2}), " +
-            "TextMatrix=(E={TmE:F2},F={TmF:F2}), Width={Width:F2}, Height={Height:F2}",
+            "TextMatrix=(E={TmE:F2},F={TmF:F2}), Width={Width:F2}, Ascent={Ascent:F2}, Descent={Descent:F2}",
             rect.X, rect.Y, rect.Width, rect.Height,
-            textState.TextMatrix.E, textState.TextMatrix.F, textWidth, textHeight);
+            textState.TextMatrix.E, textState.TextMatrix.F, textWidth, ascent, descent);
 
         return rect;
     }

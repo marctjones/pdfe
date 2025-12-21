@@ -200,6 +200,13 @@
                             Padding="12,6"
                             ToolTip.Tip="Redaction Mode (R)"/>
 
+                    <Button Content="✓ Apply" Command="{Binding ApplyRedactionCommand}"
+                            Classes="modern-button primary"
+                            Padding="12,6"
+                            IsEnabled="{Binding IsRedactionMode}"
+                            IsVisible="{Binding IsRedactionMode}"
+                            ToolTip.Tip="Apply Redaction (Enter)"/>
+
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
 

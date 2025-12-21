@@ -228,6 +228,15 @@ public class ContentStreamParser
         textOp.BoundingBox = _boundsCalculator.CalculateBounds(
             textOp.Text, tState, gState, pageHeight);
 
+        // DEBUG: Log every text operation's bounding box for coordinate verification
+        if (!string.IsNullOrWhiteSpace(textOp.Text))
+        {
+            _logger.LogInformation(
+                "TEXT OP: '{Text}' @ BBox=({X:F2},{Y:F2},{W:F2}x{H:F2}) [Avalonia top-left, PDF points]",
+                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
+                textOp.BoundingBox.X, textOp.BoundingBox.Y, textOp.BoundingBox.Width, textOp.BoundingBox.Height);
+        }
+
         // Get position - convert from PDF (bottom-left origin) to Avalonia (top-left origin)
         var (px, py) = tState.TextMatrix.Transform(0, 0);
         var (tx, ty) = gState.TransformationMatrix.Transform(px, py);

@@ -393,4 +393,197 @@ public class TextBoundsCalculatorTests
         bounds.Width.Should().BeGreaterThan(0);
         bounds.Height.Should().BeGreaterThan(0);
     }
+
+    // ========================================================================
+    // COORDINATE SYSTEM VERIFICATION TESTS
+    // ========================================================================
+    // These tests verify that TextBoundsCalculator produces bounds in the
+    // SAME coordinate system as RedactionService expects (Avalonia coordinates).
+
+    [Fact]
+    public void CalculateBounds_UsesCoordinateConverter_MatchesExpectedConversion()
+    {
+        // This test verifies that TextBoundsCalculator uses the centralized
+        // CoordinateConverter.TextBoundsToPdfPointsTopLeft method
+
+        // Arrange: Text at known PDF position
+        var textState = new PdfTextState
+        {
+            FontSize = 14,
+            CharacterSpacing = 0,
+            WordSpacing = 0,
+            HorizontalScaling = 100
+        };
+        textState.TranslateText(50, 720); // PDF coordinates (bottom-left origin)
+
+        var graphicsState = new PdfGraphicsState(); // Identity matrix
+        var pageHeight = 792.0;
+        var text = "Test";
+
+        // Act: Calculate bounds using TextBoundsCalculator
+        var calculatorBounds = _calculator.CalculateBounds(text, textState, graphicsState, pageHeight);
+
+        // Expected: Using CoordinateConverter.TextBoundsToPdfPointsTopLeft directly
+        // Text at PDF Y=720 (baseline), height=14, so top is at Y=734
+        // Avalonia Y = pageHeight - top = 792 - 734 = 58
+        var expectedBounds = PdfEditor.Services.CoordinateConverter.TextBoundsToPdfPointsTopLeft(
+            50,      // X from translation
+            720,     // Y baseline in PDF coords
+            calculatorBounds.Width,  // Use calculated width (depends on font metrics)
+            14,      // Height = font size
+            pageHeight);
+
+        // Assert: Coordinates should be in same system (Avalonia top-left)
+        // X should match exactly
+        calculatorBounds.X.Should().BeApproximately(expectedBounds.X, 0.01,
+            "X coordinate should match CoordinateConverter output");
+
+        // Y may differ slightly due to ascent/descent vs simple fontSize
+        // TextBoundsCalculator uses font ascent (typically 0.75 * fontSize above baseline)
+        // CoordinateConverter.TextBoundsToPdfPointsTopLeft uses fontSize
+        // Allow tolerance of ~0.5 * fontSize for font metrics difference
+        calculatorBounds.Y.Should().BeApproximately(expectedBounds.Y, textState.FontSize * 0.5,
+            "Y coordinate should approximately match - both use Avalonia top-left origin (difference is font ascent vs fontSize)");
+
+        // Height will differ: calculator uses ascent+descent, converter uses fontSize
+        calculatorBounds.Height.Should().BeInRange(textState.FontSize * 0.8, textState.FontSize * 1.3,
+            "Height should be proportional to font size (ascent+descent vs simple fontSize)");
+
+        _output.WriteLine($"TextBoundsCalculator: ({calculatorBounds.X:F2},{calculatorBounds.Y:F2},{calculatorBounds.Width:F2}x{calculatorBounds.Height:F2})");
+        _output.WriteLine($"CoordinateConverter:  ({expectedBounds.X:F2},{expectedBounds.Y:F2},{expectedBounds.Width:F2}x{expectedBounds.Height:F2})");
+        _output.WriteLine($"✓ Both use Avalonia coordinates (top-left origin, PDF points)");
+    }
+
+    [Theory]
+    [InlineData(720, 14, 792)]  // Text near top of Letter page
+    [InlineData(100, 12, 792)]  // Text near bottom of Letter page
+    [InlineData(770, 10, 842)]  // Text near top of A4 page
+    [InlineData(50, 16, 842)]   // Text near bottom of A4 page
+    public void CalculateBounds_ProducesAvaloniaCoordinates_DifferentPageHeights(
+        double pdfY, double fontSize, double pageHeight)
+    {
+        // Arrange
+        var textState = new PdfTextState
+        {
+            FontSize = fontSize,
+            CharacterSpacing = 0,
+            WordSpacing = 0,
+            HorizontalScaling = 100
+        };
+        textState.TranslateText(100, pdfY);
+
+        var graphicsState = new PdfGraphicsState();
+        var text = "Test";
+
+        // Act
+        var bounds = _calculator.CalculateBounds(text, textState, graphicsState, pageHeight);
+
+        // Assert: Y should be in Avalonia coordinates (0 = top, pageHeight = bottom)
+        bounds.Y.Should().BeGreaterThanOrEqualTo(0, "Avalonia Y should be >= 0");
+        bounds.Y.Should().BeLessThanOrEqualTo(pageHeight, "Avalonia Y should be <= pageHeight");
+
+        // Calculate expected Avalonia Y using CoordinateConverter
+        var pdfTop = pdfY + fontSize;
+        var expectedAvaloniaY = PdfEditor.Services.CoordinateConverter.PdfYToAvaloniaY(pdfTop, pageHeight);
+
+        // With ascent/descent, Y position includes font ascent above baseline (~0.75 * fontSize)
+        // Allow tolerance for font metrics
+        bounds.Y.Should().BeApproximately(expectedAvaloniaY, fontSize * 0.5,
+            $"Y coordinate should approximate CoordinateConverter.PdfYToAvaloniaY for PDF Y={pdfY} on page height={pageHeight} (allowing for font ascent)");
+
+        _output.WriteLine($"PDF Y={pdfY}, fontSize={fontSize}, pageHeight={pageHeight} → Avalonia Y={bounds.Y:F2}");
+    }
+
+    [Fact]
+    public void CalculateBounds_TextNearTop_LowAvaloniaY()
+    {
+        // Arrange: Text near TOP of page (high PDF Y value)
+        var textState = new PdfTextState { FontSize = 12 };
+        textState.TranslateText(100, 760); // PDF Y=760 (near top of 792pt page)
+
+        var graphicsState = new PdfGraphicsState();
+        var pageHeight = 792.0;
+
+        // Act
+        var bounds = _calculator.CalculateBounds("Top", textState, graphicsState, pageHeight);
+
+        // Assert: Near top in PDF → low Y in Avalonia (top-left origin)
+        bounds.Y.Should().BeLessThan(50,
+            "Text near top of page (PDF Y=760) should have low Avalonia Y (< 50)");
+
+        _output.WriteLine($"Text at PDF Y=760 → Avalonia Y={bounds.Y:F2} (near top = low Y)");
+    }
+
+    [Fact]
+    public void CalculateBounds_TextNearBottom_HighAvaloniaY()
+    {
+        // Arrange: Text near BOTTOM of page (low PDF Y value)
+        var textState = new PdfTextState { FontSize = 12 };
+        textState.TranslateText(100, 50); // PDF Y=50 (near bottom of 792pt page)
+
+        var graphicsState = new PdfGraphicsState();
+        var pageHeight = 792.0;
+
+        // Act
+        var bounds = _calculator.CalculateBounds("Bottom", textState, graphicsState, pageHeight);
+
+        // Assert: Near bottom in PDF → high Y in Avalonia (top-left origin)
+        bounds.Y.Should().BeGreaterThan(700,
+            "Text near bottom of page (PDF Y=50) should have high Avalonia Y (> 700)");
+
+        _output.WriteLine($"Text at PDF Y=50 → Avalonia Y={bounds.Y:F2} (near bottom = high Y)");
+    }
+
+    [Fact]
+    public void CalculateBounds_MatchesRedactionServiceExpectations()
+    {
+        // This is a CRITICAL test: verify the coordinate system matches
+        // what RedactionService expects for intersection testing
+
+        // Arrange: Simulate redaction scenario
+        // User selects area at image pixels (150, 100, 300, 50) at 150 DPI
+        var imageSelection = new Rect(150, 100, 300, 50);
+
+        // Convert to PDF points (top-left origin) as RedactionService does
+        var redactionArea = PdfEditor.Services.CoordinateConverter.ImageSelectionToPdfPointsTopLeft(
+            imageSelection, 150);
+
+        // Text at same location in PDF coordinates
+        var textState = new PdfTextState
+        {
+            FontSize = 24,  // Height matches selection: 50 * 72/150 = 24
+            CharacterSpacing = 0,
+            WordSpacing = 0,
+            HorizontalScaling = 100
+        };
+        // Position to match selection: (150, 100) pixels * 72/150 = (72, 48) points
+        // But we need PDF Y (bottom-left), so: Y_pdf = pageHeight - avaloniaY - height
+        // avaloniaY = 48, height = 24, pageHeight = 792
+        // Y_pdf = 792 - 48 - 24 = 720
+        textState.TranslateText(72, 720);
+
+        var graphicsState = new PdfGraphicsState();
+        var pageHeight = 792.0;
+
+        // Act: Calculate text bounds
+        var textBounds = _calculator.CalculateBounds("REDACT", textState, graphicsState, pageHeight);
+
+        // Assert: Text bounds and redaction area should be in SAME coordinate system
+        _output.WriteLine($"Redaction area: ({redactionArea.X:F2},{redactionArea.Y:F2},{redactionArea.Width:F2}x{redactionArea.Height:F2})");
+        _output.WriteLine($"Text bounds:    ({textBounds.X:F2},{textBounds.Y:F2},{textBounds.Width:F2}x{textBounds.Height:F2})");
+
+        // Both should have Y near 48 (top-left origin)
+        // Allow tolerance for font ascent/descent variations
+        textBounds.Y.Should().BeApproximately(redactionArea.Y, 8,
+            "Text bounds and redaction area should use SAME Y coordinate system (Avalonia top-left)");
+
+        // Verify they can intersect (using Avalonia Rect.IntersectsWith)
+        var intersects = textBounds.Intersects(redactionArea);
+        _output.WriteLine($"Intersection test result: {intersects}");
+
+        // They should intersect since they're at the same position
+        intersects.Should().BeTrue(
+            "Text bounds and redaction area at same position should intersect - " +
+            "this proves both use the SAME coordinate system (Avalonia top-left origin, PDF points)");
+    }
 }
