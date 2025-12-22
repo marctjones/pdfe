@@ -185,10 +185,6 @@ public class RedactionService
             {
                 _logger.LogInformation("Content removed successfully in {ElapsedMs}ms. Redaction is secure.", sw.ElapsedMilliseconds);
             }
-            else if (result.Mode == RedactionMode.VisualOnly)
-            {
-                _logger.LogWarning("Visual-only redaction in {ElapsedMs}ms. No content found to remove.", sw.ElapsedMilliseconds);
-            }
             else
             {
                 _logger.LogError("Redaction failed in {ElapsedMs}ms. Content removal threw exception.", sw.ElapsedMilliseconds);
@@ -475,14 +471,20 @@ public class RedactionService
             }
             else
             {
-                // No content found - will be visual-only redaction
-                result.Mode = RedactionMode.VisualOnly;
-                result.ContentRemoved = false;
+                // SECURITY CRITICAL: No content found to remove
+                // NEVER allow visual-only redaction as it creates a false sense of security
+                Console.WriteLine($"[REDACTION-ERROR] FAILED - No content found in redaction area");
+                Console.WriteLine($"[REDACTION-ERROR] Possible causes: 1) Blank area selected, 2) Coordinate mismatch, 3) Unsupported content type");
+                Console.WriteLine($"[REDACTION-ERROR] Visual-only redaction is DISABLED for security - redaction aborted");
 
-                // MANDATORY WARNING - Visual-only is not secure for sensitive data
-                Console.WriteLine($"[REDACTION-WARNING] VISUAL ONLY - No content found in redaction area (may be blank area or unsupported content type)");
-                _logger.LogWarning("Visual-only redaction - no content operations found in redaction area. " +
-                    "This may indicate: 1) Blank area, 2) Unsupported content type, 3) Coordinate mismatch");
+                _logger.LogError("Redaction aborted - no content operations found in redaction area. " +
+                    "Visual-only redaction is disabled for security. " +
+                    "Possible causes: 1) Blank area, 2) Unsupported content type, 3) Coordinate mismatch");
+
+                throw new InvalidOperationException(
+                    "Redaction failed: No content found in the selected area to remove. " +
+                    "Visual-only redaction is disabled for security reasons. " +
+                    "Please ensure you have selected an area containing text, images, or graphics.");
             }
 
             // Step 5: Handle images separately
@@ -505,12 +507,13 @@ public class RedactionService
             // MANDATORY CRITICAL ERROR - Always visible
             Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Redaction FAILED - Content removal threw exception!");
             Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Exception: {ex.Message}");
-            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Will fall back to visual-only (UNSAFE for sensitive data)");
+            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Redaction aborted - visual-only fallback is DISABLED for security");
 
             _logger.LogError(ex, "CRITICAL SECURITY FAILURE: Content removal threw exception. " +
-                "Falling back to visual-only redaction which is UNSAFE for sensitive data.");
+                "Redaction aborted - visual-only fallback is disabled for security.");
 
-            return result;
+            // Re-throw the exception to prevent any black box from being drawn
+            throw;
         }
     }
 
