@@ -19,8 +19,10 @@ public class CharacterLevelTextFilterTests : IDisposable
     private readonly string _tempDir;
     private readonly CharacterLevelTextFilter _filter;
     private readonly CharacterMatcher _matcher;
+    private readonly TextOperationEmitter _emitter;
     private readonly Mock<ILogger<CharacterLevelTextFilter>> _filterLoggerMock;
     private readonly Mock<ILogger<CharacterMatcher>> _matcherLoggerMock;
+    private readonly Mock<ILogger<TextOperationEmitter>> _emitterLoggerMock;
 
     public CharacterLevelTextFilterTests()
     {
@@ -30,8 +32,11 @@ public class CharacterLevelTextFilterTests : IDisposable
         _matcherLoggerMock = new Mock<ILogger<CharacterMatcher>>();
         _matcher = new CharacterMatcher(_matcherLoggerMock.Object);
 
+        _emitterLoggerMock = new Mock<ILogger<TextOperationEmitter>>();
+        _emitter = new TextOperationEmitter(_emitterLoggerMock.Object);
+
         _filterLoggerMock = new Mock<ILogger<CharacterLevelTextFilter>>();
-        _filter = new CharacterLevelTextFilter(_matcher, _filterLoggerMock.Object);
+        _filter = new CharacterLevelTextFilter(_matcher, _emitter, _filterLoggerMock.Object);
     }
 
     public void Dispose()
