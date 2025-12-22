@@ -374,40 +374,15 @@ public class RedactionService
 
             foreach (var operation in operations)
             {
-                // For text operations, use LETTER-BASED intersection checking instead of bounding box
-                // This is more accurate because PdfPig provides precise glyph positions
+                // For text operations with available letters, use CHARACTER-LEVEL filtering
                 if (operation is TextOperation textOp && letters != null && !string.IsNullOrWhiteSpace(textOp.Text))
                 {
-                    // Try to match this operation's characters to PdfPig letters
-                    var letterMap = _characterMatcher.MatchLettersToOperation(textOp, letters, pageHeight);
+                    // Use CharacterLevelTextFilter to split the operation at character boundaries
+                    var filterResult = _characterFilter.FilterTextOperation(textOp, letters, area, pageHeight);
 
-                    if (letterMap != null && letterMap.Count > 0)
+                    if (filterResult.FallbackToOperationLevel)
                     {
-                        // Check if ANY letter in this operation is inside the redaction area
-                        bool anyLetterInArea = letterMap.Values.Any(letter =>
-                            _characterMatcher.IsLetterInRedactionArea(letter, area, pageHeight));
-
-                        if (anyLetterInArea)
-                        {
-                            // Remove entire operation if any letter is in redaction area
-                            removedCount++;
-                            _redactedTerms.Add(textOp.Text);
-                            _logger.LogInformation("REMOVE (letter-based): '{Text}' - at least one letter in redaction area",
-                                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
-
-                            if (!removedByType.ContainsKey("TextOperation"))
-                                removedByType["TextOperation"] = 0;
-                            removedByType["TextOperation"]++;
-                        }
-                        else
-                        {
-                            // No letters in area - keep operation
-                            filteredOperations.Add(textOp);
-                        }
-                    }
-                    else
-                    {
-                        // Character matching failed - fall back to bounding box check
+                        // Character matching failed - fall back to operation-level check
                         if (!textOp.IntersectsWith(area))
                         {
                             filteredOperations.Add(textOp);
@@ -418,6 +393,25 @@ public class RedactionService
                             _redactedTerms.Add(textOp.Text);
                             _logger.LogInformation("REMOVE (fallback bounding box): '{Text}'",
                                 textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+
+                            if (!removedByType.ContainsKey("TextOperation"))
+                                removedByType["TextOperation"] = 0;
+                            removedByType["TextOperation"]++;
+                        }
+                    }
+                    else
+                    {
+                        // Character-level filtering succeeded
+                        if (filterResult.Operations.Count > 0)
+                        {
+                            filteredOperations.AddRange(filterResult.Operations);
+                        }
+                        if (!string.IsNullOrEmpty(filterResult.RemovedText))
+                        {
+                            removedCount++;
+                            _redactedTerms.Add(filterResult.RemovedText);
+                            _logger.LogInformation("REMOVE (character-level): '{Text}'",
+                                filterResult.RemovedText.Length > 20 ? filterResult.RemovedText.Substring(0, 20) + "..." : filterResult.RemovedText);
 
                             if (!removedByType.ContainsKey("TextOperation"))
                                 removedByType["TextOperation"] = 0;
