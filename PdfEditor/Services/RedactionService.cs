@@ -65,6 +65,9 @@ public class RedactionService
     private readonly ContentStreamParser _parser;
     private readonly ContentStreamBuilder _builder;
     private readonly MetadataSanitizer _metadataSanitizer;
+    private readonly CharacterMatcher _characterMatcher;
+    private readonly TextOperationEmitter _textEmitter;
+    private readonly CharacterLevelTextFilter _characterFilter;
     private readonly ILoggerFactory _loggerFactory;
 
     /// <summary>
@@ -83,7 +86,13 @@ public class RedactionService
         _builder = new ContentStreamBuilder(_loggerFactory.CreateLogger<ContentStreamBuilder>());
         _metadataSanitizer = new MetadataSanitizer(_loggerFactory.CreateLogger<MetadataSanitizer>());
 
-        _logger.LogDebug("RedactionService instance created with logger-enabled components");
+        // Create character-level redaction components
+        _characterMatcher = new CharacterMatcher(_loggerFactory.CreateLogger<CharacterMatcher>());
+        _textEmitter = new TextOperationEmitter(_loggerFactory.CreateLogger<TextOperationEmitter>());
+        _characterFilter = new CharacterLevelTextFilter(_characterMatcher, _textEmitter,
+            _loggerFactory.CreateLogger<CharacterLevelTextFilter>());
+
+        _logger.LogDebug("RedactionService instance created with logger-enabled components including character-level filtering");
     }
 
     /// <summary>
@@ -369,53 +378,72 @@ public class RedactionService
 
             foreach (var operation in operations)
             {
-                // Check if this operation intersects with the redaction area
-                // For text operations, use CHARACTER-LEVEL filtering if available
-                bool shouldRemove;
-
+                // For text operations with available letters, use CHARACTER-LEVEL filtering
                 if (operation is TextOperation textOp && letters != null && !string.IsNullOrWhiteSpace(textOp.Text))
                 {
-                    // CHARACTER-LEVEL FILTERING: Check if any character's center is in the redaction area
-                    shouldRemove = DoesTextOperationContainRedactedCharacters(textOp, area, letters, pageHeight);
+                    // Use CharacterLevelTextFilter to split the operation at character boundaries
+                    var filterResult = _characterFilter.FilterTextOperation(textOp, letters, area, pageHeight);
+
+                    if (filterResult.FallbackToOperationLevel)
+                    {
+                        // Character matching failed - fall back to operation-level check
+                        _logger.LogDebug("Character matching failed for '{Text}', using operation-level fallback",
+                            textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+
+                        if (!textOp.IntersectsWith(area))
+                        {
+                            filteredOperations.Add(textOp);
+                        }
+                        else
+                        {
+                            removedCount++;
+                            _redactedTerms.Add(textOp.Text);
+                            _logger.LogInformation("REMOVE (fallback): '{Text}'", textOp.Text);
+                        }
+                    }
+                    else
+                    {
+                        // Character-level filtering succeeded
+                        if (filterResult.Operations.Count > 0)
+                        {
+                            // Add the filtered partial operations
+                            filteredOperations.AddRange(filterResult.Operations);
+
+                            _logger.LogInformation(
+                                "CHARACTER-LEVEL FILTER: '{Text}' → {Kept} partial operations, removed: '{Removed}'",
+                                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
+                                filterResult.Operations.Count,
+                                string.IsNullOrEmpty(filterResult.RemovedText) ? "(none)" : filterResult.RemovedText);
+                        }
+
+                        if (!string.IsNullOrEmpty(filterResult.RemovedText))
+                        {
+                            removedCount++;
+                            _redactedTerms.Add(filterResult.RemovedText);
+                        }
+                    }
                 }
                 else
                 {
                     // For non-text operations (paths, images, etc.), use bounding box intersection
-                    shouldRemove = operation.IntersectsWith(area);
-                }
+                    bool shouldRemove = operation.IntersectsWith(area);
 
-                // DEBUG: Log intersection tests for text operations
-                if (operation is TextOperation textOpDebug && !string.IsNullOrWhiteSpace(textOpDebug.Text))
-                {
-                    _logger.LogInformation(
-                        "INTERSECTION TEST: '{Text}' BBox=({X:F2},{Y:F2},{W:F2}x{H:F2}) vs Area=({AX:F2},{AY:F2},{AW:F2}x{AH:F2}) => {Result}",
-                        textOpDebug.Text.Length > 20 ? textOpDebug.Text.Substring(0, 20) + "..." : textOpDebug.Text,
-                        textOpDebug.BoundingBox.X, textOpDebug.BoundingBox.Y, textOpDebug.BoundingBox.Width, textOpDebug.BoundingBox.Height,
-                        area.X, area.Y, area.Width, area.Height,
-                        shouldRemove ? "REMOVE" : "KEEP");
-                }
-
-                if (shouldRemove)
-                {
-                    removedCount++;
-                    var typeName = operation.GetType().Name;
-
-                    // Track removed operations by type
-                    if (!removedByType.ContainsKey(typeName))
-                        removedByType[typeName] = 0;
-                    removedByType[typeName]++;
-
-                    if (operation is TextOperation textOpToRemove && !string.IsNullOrWhiteSpace(textOpToRemove.Text))
+                    if (shouldRemove)
                     {
-                        _redactedTerms.Add(textOpToRemove.Text);
+                        removedCount++;
+                        var typeName = operation.GetType().Name;
+
+                        if (!removedByType.ContainsKey(typeName))
+                            removedByType[typeName] = 0;
+                        removedByType[typeName]++;
+
+                        _logger.LogDebug("REMOVE ({Type}): bounding box intersection", typeName);
                     }
-
-                    // Skip this operation - it will be redacted
-                    continue;
+                    else
+                    {
+                        filteredOperations.Add(operation);
+                    }
                 }
-
-                // Keep this operation
-                filteredOperations.Add(operation);
             }
 
             // Step 3: Rebuild the content stream with filtered operations
