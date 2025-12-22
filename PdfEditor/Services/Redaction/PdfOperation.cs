@@ -255,3 +255,40 @@ public class InlineImageOperation : PdfOperation
         StreamLength = length;
     }
 }
+
+/// <summary>
+/// Represents a partial text operation with raw PDF bytes.
+/// Used for character-level redaction where a text operation is split into
+/// multiple smaller operations. Similar to InlineImageOperation, this bypasses
+/// PdfSharp's COperator limitations by holding raw PDF syntax.
+/// </summary>
+public class PartialTextOperation : PdfOperation
+{
+    /// <summary>
+    /// Raw PDF bytes for this text operation (e.g., "(Hello) Tj" or "10 20 Td (Text) Tj")
+    /// </summary>
+    public byte[] RawBytes { get; set; }
+
+    /// <summary>
+    /// The text this operation displays (for debugging/logging)
+    /// </summary>
+    public string DisplayText { get; set; }
+
+    /// <summary>
+    /// Original operator type (Tj, TJ, ', ") - for reference only
+    /// </summary>
+    public string OperatorType { get; set; }
+
+    public PartialTextOperation() : base(new PdfSharp.Pdf.Content.Objects.CComment())
+    {
+        RawBytes = Array.Empty<byte>();
+        DisplayText = string.Empty;
+        OperatorType = "Tj";
+    }
+
+    /// <summary>
+    /// Partial text operations are constructed to NOT intersect with redaction areas,
+    /// so this always returns false to avoid double-filtering.
+    /// </summary>
+    public override bool IntersectsWith(Rect area) => false;
+}
