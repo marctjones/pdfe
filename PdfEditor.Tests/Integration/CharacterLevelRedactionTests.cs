@@ -152,8 +152,13 @@ public class CharacterLevelRedactionTests : IDisposable
 
         var chars = GetCharacterPositions(pdfPath);
 
-        // Find "BETA" - should be around chars 6-9 (A L P H A space B E T A)
-        var betaChars = chars.Where(c => "BETA".Contains(c.text)).Skip(5).Take(4).ToList();
+        // Find "BETA" by position - skip ALPHA (5 chars) and space, take next 4 chars
+        // ALPHA has 5 chars, space may or may not be reported, BETA has 4 chars
+        var allText = string.Join("", chars.Select(c => c.text));
+        var betaStartIndex = allText.IndexOf("BETA");
+        betaStartIndex.Should().BeGreaterThanOrEqualTo(0, "BETA should be found in the text");
+
+        var betaChars = chars.Skip(betaStartIndex).Take(4).ToList();
         betaChars.Should().HaveCount(4, "BETA has 4 letters");
 
         var betaLeft = betaChars.Min(c => c.left);
@@ -288,8 +293,12 @@ public class CharacterLevelRedactionTests : IDisposable
 
         var chars = GetCharacterPositions(pdfPath);
 
-        // Select "TWO THREE" (skip "ONE " which is 4 chars including space)
-        var selectedChars = chars.Skip(4).ToList();
+        // Select "TWO THREE" - find where TWO starts
+        var allText = string.Join("", chars.Select(c => c.text));
+        var twoStartIndex = allText.IndexOf("TWO");
+        twoStartIndex.Should().BeGreaterThanOrEqualTo(0, "TWO should be found");
+
+        var selectedChars = chars.Skip(twoStartIndex).ToList();
 
         var selLeft = selectedChars.Min(c => c.left);
         var selRight = selectedChars.Max(c => c.right);
@@ -382,15 +391,23 @@ public class CharacterLevelRedactionTests : IDisposable
         using var doc = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
         var pageHeight = doc.GetPage(1).Height;
 
-        // Redact "AAA" (chars 0-2)
-        var aaaChars = chars.Take(3).ToList();
+        // Find positions of "AAA" and "CCC" by text content
+        var allText = string.Join("", chars.Select(c => c.text));
+        var aaaStartIndex = allText.IndexOf("AAA");
+        var cccStartIndex = allText.IndexOf("CCC");
+
+        aaaStartIndex.Should().Be(0, "AAA should be at start");
+        cccStartIndex.Should().BeGreaterThan(0, "CCC should be found after AAA and BBB");
+
+        // Redact "AAA" (first 3 chars)
+        var aaaChars = chars.Skip(aaaStartIndex).Take(3).ToList();
         var aaaArea = PdfCoordsToRedactionArea(
             aaaChars.Min(c => c.left), aaaChars.Min(c => c.bottom),
             aaaChars.Max(c => c.right), aaaChars.Max(c => c.top),
             pageHeight);
 
-        // Redact "CCC" (chars 8-10: AAA_BBB_[CCC]_DDD)
-        var cccChars = chars.Skip(8).Take(3).ToList();
+        // Redact "CCC"
+        var cccChars = chars.Skip(cccStartIndex).Take(3).ToList();
         var cccArea = PdfCoordsToRedactionArea(
             cccChars.Min(c => c.left), cccChars.Min(c => c.bottom),
             cccChars.Max(c => c.right), cccChars.Max(c => c.top),

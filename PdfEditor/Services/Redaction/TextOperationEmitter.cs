@@ -41,12 +41,14 @@ public class TextOperationEmitter
 
         var sb = new StringBuilder();
 
-        // If we have position information, emit Td (text positioning) operator
+        // If we have position information, emit Tm (set text matrix) operator
+        // Tm provides absolute positioning, avoiding coordinate accumulation issues
         if (run.StartPosition.X > 0 || run.StartPosition.Y > 0)
         {
-            // Convert from PDF coordinates (bottom-left) to text matrix coordinates
-            // Td operator: x y Td (moves current point by x, y)
-            sb.Append($"{run.StartPosition.X:F2} {run.StartPosition.Y:F2} Td ");
+            // Tm operator: a b c d e f Tm (sets text matrix)
+            // For simple positioning without rotation/scaling: 1 0 0 1 x y Tm
+            // where x, y is the absolute position in PDF coordinates
+            sb.Append($"1 0 0 1 {run.StartPosition.X:F2} {run.StartPosition.Y:F2} Tm ");
         }
 
         // Emit text operator: (text) Tj
