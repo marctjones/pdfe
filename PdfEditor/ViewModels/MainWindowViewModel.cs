@@ -887,7 +887,9 @@ public partial class MainWindowViewModel : ViewModelBase
                 // pending.PageNumber is 1-based (for display), convert to 0-based for array access
                 var pageIndex = pending.PageNumber - 1;
                 var page = document.Pages[pageIndex];
-                _redactionService.RedactArea(page, pending.Area);
+
+                // pending.Area is in 150 DPI image pixels (screen coordinates)
+                _redactionService.RedactArea(page, pending.Area, renderDpi: 150);
             }
 
             // Save the redacted document
