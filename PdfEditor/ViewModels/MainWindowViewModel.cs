@@ -852,7 +852,7 @@ public partial class MainWindowViewModel : ViewModelBase
             // Generate suggested filename
             var suggestedPath = _filenameSuggestionService.SuggestRedactedFilename(_currentFilePath);
 
-            // Show Save Redacted Version dialog
+            // Show file picker to choose save location
             var mainWindow = GetMainWindow();
             if (mainWindow == null)
             {
@@ -860,18 +860,14 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
-            var dialog = new Views.SaveRedactedVersionDialog
+            var saveFile = await ShowSaveRedactedFileDialog(mainWindow, suggestedPath);
+            if (saveFile == null)
             {
-                DataContext = new SaveRedactedVersionDialogViewModel(suggestedPath, RedactionWorkflow.PendingCount)
-            };
-
-            var saveFilePath = await dialog.ShowDialog<string?>(mainWindow);
-
-            if (string.IsNullOrEmpty(saveFilePath))
-            {
-                _logger.LogInformation("User cancelled save dialog");
+                _logger.LogInformation("User cancelled save file picker");
                 return;
             }
+
+            var saveFilePath = saveFile.Path.LocalPath;
 
             _logger.LogInformation("Applying {Count} redactions to create: {Path}", RedactionWorkflow.PendingCount, saveFilePath);
 
@@ -1891,6 +1887,42 @@ public partial class MainWindowViewModel : ViewModelBase
     private IStorageProvider? GetStorageProvider()
     {
         return GetMainWindow()?.StorageProvider;
+    }
+
+    private async Task<IStorageFile?> ShowSaveRedactedFileDialog(Avalonia.Controls.Window mainWindow, string suggestedPath)
+    {
+        var storageProvider = mainWindow.StorageProvider;
+
+        var options = new FilePickerSaveOptions
+        {
+            Title = $"Save Redacted PDF ({RedactionWorkflow.PendingCount} areas will be redacted)",
+            DefaultExtension = "pdf",
+            SuggestedFileName = System.IO.Path.GetFileName(suggestedPath),
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("PDF Document")
+                {
+                    Patterns = new[] { "*.pdf" },
+                    MimeTypes = new[] { "application/pdf" }
+                }
+            }
+        };
+
+        // Try to set the suggested directory
+        try
+        {
+            var dir = System.IO.Path.GetDirectoryName(suggestedPath);
+            if (!string.IsNullOrEmpty(dir) && System.IO.Directory.Exists(dir))
+            {
+                options.SuggestedStartLocation = await storageProvider.TryGetFolderFromPathAsync(dir);
+            }
+        }
+        catch
+        {
+            // Ignore errors, will use default location
+        }
+
+        return await storageProvider.SaveFilePickerAsync(options);
     }
 
     // Recent Files Management
