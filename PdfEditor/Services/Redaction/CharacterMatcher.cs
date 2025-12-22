@@ -85,8 +85,10 @@ public class CharacterMatcher
 
         if (candidateLetters.Count == 0)
         {
-            _logger.LogDebug("No letters found in spatial vicinity of operation '{Text}'",
-                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+            _logger.LogWarning("CharacterMatcher: No letters found in spatial vicinity. Operation '{Text}' @ BBox=({X:F1},{Y:F1},{W:F1}x{H:F1}), PDF Y range=({Bottom:F1} to {Top:F1})",
+                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
+                opBbox.X, opBbox.Y, opBbox.Width, opBbox.Height,
+                opBottom, opTop);
             return null;
         }
 
@@ -94,12 +96,20 @@ public class CharacterMatcher
         var candidatesText = string.Join("", candidateLetters.Select(l => l.Value));
         var opTextNormalized = textOp.Text.Replace("\r", "").Replace("\n", "");
 
+        _logger.LogDebug("CharacterMatcher: Searching for '{OpText}' in {CandCount} candidate letters. Candidates text: '{CandText}'",
+            opTextNormalized.Length > 30 ? opTextNormalized.Substring(0, 30) + "..." : opTextNormalized,
+            candidateLetters.Count,
+            candidatesText.Length > 50 ? candidatesText.Substring(0, 50) + "..." : candidatesText);
+
         var startIndex = candidatesText.IndexOf(opTextNormalized, StringComparison.OrdinalIgnoreCase);
 
         if (startIndex < 0)
         {
-            _logger.LogDebug("Operation text '{Text}' not found in candidate letters (spatial region had {Count} letters)",
-                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
+            _logger.LogWarning("CharacterMatcher: Operation text NOT FOUND in candidates. Operation='{OpText}' ({OpLen} chars), Candidates='{CandText}' ({CandLen} chars from {LetterCount} letters)",
+                opTextNormalized.Length > 30 ? opTextNormalized.Substring(0, 30) + "..." : opTextNormalized,
+                opTextNormalized.Length,
+                candidatesText.Length > 50 ? candidatesText.Substring(0, 50) + "..." : candidatesText,
+                candidatesText.Length,
                 candidateLetters.Count);
             return null;
         }
