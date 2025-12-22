@@ -374,26 +374,55 @@ public class RedactionService
 
             foreach (var operation in operations)
             {
-                // TEMPORARY: Disable character-level filtering due to coordinate system issues
-                // TODO: Fix coordinate conversion in CharacterMatcher.IsLetterInRedactionArea
-                // For now, use operation-level (bounding box) filtering for all operations
-                if (operation is TextOperation textOp && !string.IsNullOrWhiteSpace(textOp.Text))
+                // For text operations, use LETTER-BASED intersection checking instead of bounding box
+                // This is more accurate because PdfPig provides precise glyph positions
+                if (operation is TextOperation textOp && letters != null && !string.IsNullOrWhiteSpace(textOp.Text))
                 {
-                    // Operation-level check: remove entire operation if it intersects
-                    if (!textOp.IntersectsWith(area))
+                    // Try to match this operation's characters to PdfPig letters
+                    var letterMap = _characterMatcher.MatchLettersToOperation(textOp, letters, pageHeight);
+
+                    if (letterMap != null && letterMap.Count > 0)
                     {
-                        filteredOperations.Add(textOp);
+                        // Check if ANY letter in this operation is inside the redaction area
+                        bool anyLetterInArea = letterMap.Values.Any(letter =>
+                            _characterMatcher.IsLetterInRedactionArea(letter, area, pageHeight));
+
+                        if (anyLetterInArea)
+                        {
+                            // Remove entire operation if any letter is in redaction area
+                            removedCount++;
+                            _redactedTerms.Add(textOp.Text);
+                            _logger.LogInformation("REMOVE (letter-based): '{Text}' - at least one letter in redaction area",
+                                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+
+                            if (!removedByType.ContainsKey("TextOperation"))
+                                removedByType["TextOperation"] = 0;
+                            removedByType["TextOperation"]++;
+                        }
+                        else
+                        {
+                            // No letters in area - keep operation
+                            filteredOperations.Add(textOp);
+                        }
                     }
                     else
                     {
-                        removedCount++;
-                        _redactedTerms.Add(textOp.Text);
-                        _logger.LogInformation("REMOVE (operation-level): '{Text}'",
-                            textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+                        // Character matching failed - fall back to bounding box check
+                        if (!textOp.IntersectsWith(area))
+                        {
+                            filteredOperations.Add(textOp);
+                        }
+                        else
+                        {
+                            removedCount++;
+                            _redactedTerms.Add(textOp.Text);
+                            _logger.LogInformation("REMOVE (fallback bounding box): '{Text}'",
+                                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
 
-                        if (!removedByType.ContainsKey("TextOperation"))
-                            removedByType["TextOperation"] = 0;
-                        removedByType["TextOperation"]++;
+                            if (!removedByType.ContainsKey("TextOperation"))
+                                removedByType["TextOperation"] = 0;
+                            removedByType["TextOperation"]++;
+                        }
                     }
                 }
                 else
