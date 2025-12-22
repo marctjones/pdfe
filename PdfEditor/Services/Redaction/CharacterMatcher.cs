@@ -41,34 +41,71 @@ public class CharacterMatcher
 
         var result = new Dictionary<int, Letter>();
 
-        // Convert operation bbox to PDF coordinates for matching
+        // CRITICAL: TextBoundsCalculator produces INACCURATE bounding boxes (can be 1000s of points wide!)
+        // Strategy: Use a VERY GENEROUS spatial filter + text content matching
+        //
+        // Key insight: TextBoundsCalculator can be wildly wrong in WIDTH but is usually
+        // reasonable in X-start position and Y position. So:
+        // 1. Filter letters by Y position (vertical alignment) with generous tolerance
+        // 2. Filter letters starting near the operation's X position
+        // 3. Don't use bbox width/right edge at all - it's unreliable
+        // 4. Within this spatial region, match by text content sequence
+        //
+        // This gives us spatial localization (to distinguish multiple lines) while using
+        // actual PdfPig letter positions (ACCURATE) for the matching itself.
+
         var opBbox = textOp.BoundingBox;
+
+        // Convert operation bbox to PDF coordinates
         var opLeft = opBbox.X;
-        var opRight = opBbox.X + opBbox.Width;
-        var opTop = pageHeight - opBbox.Y;  // Convert to PDF Y (bottom-left origin)
-        var opBottom = pageHeight - (opBbox.Y + opBbox.Height);
+        var opAvaloniaY = opBbox.Y;
+        var opTop = pageHeight - opAvaloniaY;  // PDF Y coordinate
+        var opBottom = pageHeight - (opAvaloniaY + opBbox.Height);
 
-        // Allow tolerance for font metrics approximation
-        var tolerance = 5.0;
+        // GENEROUS tolerances - we're just trying to get the right line/region
+        var yTolerance = 20.0;  // 20 points = ~0.3 inches vertical
+        var xTolerance = 50.0;  // 50 points = ~0.7 inches to the left of start position
 
-        // Filter letters that are within the operation's bounding box
-        var matchingLetters = letters.Where(letter =>
+        // Filter letters that are in the vertical vicinity and start reasonably close
+        var candidateLetters = letters.Where(letter =>
         {
-            var letterCenterX = (letter.GlyphRectangle.Left + letter.GlyphRectangle.Right) / 2.0;
             var letterCenterY = (letter.GlyphRectangle.Bottom + letter.GlyphRectangle.Top) / 2.0;
+            var letterLeft = letter.GlyphRectangle.Left;
 
-            return letterCenterX >= opLeft - tolerance &&
-                   letterCenterX <= opRight + tolerance &&
-                   letterCenterY >= opBottom - tolerance &&
-                   letterCenterY <= opTop + tolerance;
+            // Must be on roughly the same line (Y within tolerance)
+            bool yMatch = letterCenterY >= opBottom - yTolerance &&
+                          letterCenterY <= opTop + yTolerance;
+
+            // Must start reasonably close to operation's start position
+            // (we don't check right edge because bbox width is unreliable)
+            bool xMatch = letterLeft >= opLeft - xTolerance;
+
+            return yMatch && xMatch;
         }).OrderBy(l => l.GlyphRectangle.Left).ToList();
 
-        if (matchingLetters.Count == 0)
+        if (candidateLetters.Count == 0)
         {
-            _logger.LogDebug("No letters matched for operation '{Text}'",
+            _logger.LogDebug("No letters found in spatial vicinity of operation '{Text}'",
                 textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
             return null;
         }
+
+        // Now search for operation text within these candidates
+        var candidatesText = string.Join("", candidateLetters.Select(l => l.Value));
+        var opTextNormalized = textOp.Text.Replace("\r", "").Replace("\n", "");
+
+        var startIndex = candidatesText.IndexOf(opTextNormalized, StringComparison.OrdinalIgnoreCase);
+
+        if (startIndex < 0)
+        {
+            _logger.LogDebug("Operation text '{Text}' not found in candidate letters (spatial region had {Count} letters)",
+                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
+                candidateLetters.Count);
+            return null;
+        }
+
+        // Extract the matching letters for this operation
+        var matchingLetters = candidateLetters.Skip(startIndex).Take(opTextNormalized.Length).ToList();
 
         // Match letters to character indices
         // Strategy: Match by position order (left-to-right) and character value
