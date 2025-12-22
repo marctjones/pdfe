@@ -531,32 +531,48 @@
                         </ItemsControl>
                     </ScrollViewer>
 
-                    <!-- Apply All Button (visible in redaction mode when there are pending redactions) -->
+                    <!-- Action Buttons (visible in redaction mode) -->
                     <Border Grid.Row="2"
                             IsVisible="{Binding IsRedactionMode}"
                             Padding="12"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,1,0,0">
-                        <Button Content="Apply All Redactions"
-                                Command="{Binding ApplyAllRedactionsCommand}"
-                                HorizontalAlignment="Stretch"
-                                Classes="primary"
-                                Padding="12,8"
-                                FontWeight="SemiBold">
-                            <Button.Styles>
-                                <Style Selector="Button.primary">
-                                    <Setter Property="Background" Value="#E53935"/>
-                                    <Setter Property="Foreground" Value="White"/>
-                                </Style>
-                                <Style Selector="Button.primary:pointerover">
-                                    <Setter Property="Background" Value="#D32F2F"/>
-                                </Style>
-                                <Style Selector="Button.primary:disabled">
-                                    <Setter Property="Background" Value="#666"/>
-                                    <Setter Property="Foreground" Value="#999"/>
-                                </Style>
-                            </Button.Styles>
-                        </Button>
+                        <Grid ColumnDefinitions="*,8,*">
+                            <!-- Clear All Button -->
+                            <Button Grid.Column="0"
+                                    Content="Clear All"
+                                    Command="{Binding ClearAllRedactionsCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Padding="12,8"
+                                    FontWeight="SemiBold"
+                                    Background="{DynamicResource SecondaryBackgroundBrush}"
+                                    Foreground="{DynamicResource TextPrimaryBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"/>
+
+                            <!-- Apply All Button -->
+                            <Button Grid.Column="2"
+                                    Content="Apply All"
+                                    Command="{Binding ApplyAllRedactionsCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Classes="primary"
+                                    Padding="12,8"
+                                    FontWeight="SemiBold">
+                                <Button.Styles>
+                                    <Style Selector="Button.primary">
+                                        <Setter Property="Background" Value="#E53935"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </Style>
+                                    <Style Selector="Button.primary:pointerover">
+                                        <Setter Property="Background" Value="#D32F2F"/>
+                                    </Style>
+                                    <Style Selector="Button.primary:disabled">
+                                        <Setter Property="Background" Value="#666"/>
+                                        <Setter Property="Foreground" Value="#999"/>
+                                    </Style>
+                                </Button.Styles>
+                            </Button>
+                        </Grid>
                     </Border>
 
                     <!-- Clipboard History List (visible when NOT in redaction mode) -->
