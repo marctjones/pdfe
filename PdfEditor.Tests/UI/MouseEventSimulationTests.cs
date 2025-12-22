@@ -64,7 +64,7 @@ public class MouseEventSimulationTests : IDisposable
         }
     }
 
-    private (MainWindowViewModel ViewModel, PdfDocumentService DocumentService) CreateViewModelWithServices()
+    private (MainWindowViewModel ViewModel, PdfDocumentService DocumentService, RedactionService RedactionService) CreateViewModelWithServices()
     {
         var documentService = new PdfDocumentService(_docLoggerMock.Object);
         var renderService = new PdfRenderService(_renderLoggerMock.Object);
@@ -89,7 +89,7 @@ public class MouseEventSimulationTests : IDisposable
             verifier,
             filenameSuggestionService);
 
-        return (vm, documentService);
+        return (vm, documentService, redactionService);
     }
 
     private MainWindowViewModel CreateViewModel()
@@ -211,7 +211,7 @@ public class MouseEventSimulationTests : IDisposable
     public async Task SimulatedMouseSelection_ApplyRedaction_RemovesText()
     {
         // Arrange - use shared service so we can save the redacted document
-        var (vm, documentService) = CreateViewModelWithServices();
+        var (vm, documentService, redactionService) = CreateViewModelWithServices();
         var originalPdf = Path.Combine(Path.GetTempPath(), $"mouse_sim_redact_{Guid.NewGuid()}.pdf");
         var redactedPdf = Path.Combine(Path.GetTempPath(), $"mouse_sim_redact_{Guid.NewGuid()}_done.pdf");
         _tempFiles.Add(originalPdf);
@@ -264,11 +264,13 @@ public class MouseEventSimulationTests : IDisposable
 
         _output.WriteLine($"Redaction area: {vm.CurrentRedactionArea}");
 
-        // Apply redaction
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            await vm.ApplyRedactionCommand.Execute().FirstAsync();
-        });
+        // Apply redaction directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redaction directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
+        redactionService.RedactArea(page, vm.CurrentRedactionArea, renderDpi: 150);
 
         // Save the redacted document using the SAME document service the ViewModel used
         documentService.SaveDocument(redactedPdf);
@@ -339,7 +341,7 @@ public class MouseEventSimulationTests : IDisposable
     public async Task SequentialMouseSelections_MultipleRedactions_AllWorkCorrectly()
     {
         // Arrange - use shared service so we can save the redacted document
-        var (vm, documentService) = CreateViewModelWithServices();
+        var (vm, documentService, redactionService) = CreateViewModelWithServices();
         var originalPdf = Path.Combine(Path.GetTempPath(), $"mouse_seq_test_{Guid.NewGuid()}.pdf");
         var redactedPdf = Path.Combine(Path.GetTempPath(), $"mouse_seq_test_{Guid.NewGuid()}_done.pdf");
         _tempFiles.Add(originalPdf);
@@ -354,6 +356,13 @@ public class MouseEventSimulationTests : IDisposable
 
         var dpiScale = 150.0 / 72.0;
         var redactionTargets = new[] { "CONFIDENTIAL", "SECRET" };
+
+        // Apply redactions directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redactions directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
 
         foreach (var target in redactionTargets)
         {
@@ -379,10 +388,7 @@ public class MouseEventSimulationTests : IDisposable
                 vm.CurrentRedactionArea = selectionArea;
             });
 
-            await Dispatcher.UIThread.InvokeAsync(async () =>
-            {
-                await vm.ApplyRedactionCommand.Execute().FirstAsync();
-            });
+            redactionService.RedactArea(page, selectionArea, renderDpi: 150);
         }
 
         // Save the redacted document using the SAME document service the ViewModel used
@@ -529,7 +535,7 @@ public class MouseEventSimulationTests : IDisposable
         Skip.IfNot(PdfTestHelpers.IsRenderingAvailable(), PdfTestHelpers.GetRenderingUnavailableMessage());
 
         // Arrange - use shared service so we can save the redacted document
-        var (vm, documentService) = CreateViewModelWithServices();
+        var (vm, documentService, redactionService) = CreateViewModelWithServices();
         var originalPdf = Path.Combine(Path.GetTempPath(), $"mouse_visual_test_{Guid.NewGuid()}.pdf");
         var redactedPdf = Path.Combine(Path.GetTempPath(), $"mouse_visual_test_{Guid.NewGuid()}_done.pdf");
         _tempFiles.Add(originalPdf);
@@ -554,10 +560,13 @@ public class MouseEventSimulationTests : IDisposable
             vm.CurrentRedactionArea = new Rect(selectionX, selectionY, selectionWidth, selectionHeight);
         });
 
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            await vm.ApplyRedactionCommand.Execute().FirstAsync();
-        });
+        // Apply redaction directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redaction directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
+        redactionService.RedactArea(page, vm.CurrentRedactionArea, renderDpi: 150);
 
         // Save the redacted document using the SAME document service the ViewModel used
         documentService.SaveDocument(redactedPdf);

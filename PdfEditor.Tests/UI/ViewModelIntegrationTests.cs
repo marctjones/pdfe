@@ -544,12 +544,14 @@ public class ViewModelIntegrationTests : IDisposable
         vm.CurrentRedactionArea.Width.Should().BeGreaterThan(0, "redaction area width must be positive");
         vm.CurrentRedactionArea.Height.Should().BeGreaterThan(0, "redaction area height must be positive");
 
-        // STEP 5: Apply redaction via command (simulates clicking "Apply Redaction" button)
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            // Execute the command and properly await completion using FirstAsync()
-            await vm.ApplyRedactionCommand.Execute().FirstAsync();
-        });
+        // STEP 5: Apply redaction directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redaction directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+
+        var page = document!.Pages[0];
+        redactionService.RedactArea(page, redactionArea, renderDpi: 150);
 
         // STEP 6: Save document to new path
         documentService.SaveDocument(redactedPdf);
@@ -640,11 +642,13 @@ public class ViewModelIntegrationTests : IDisposable
             vm.CurrentRedactionArea = redactionArea;
         });
 
-        // Apply redaction
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            await vm.ApplyRedactionCommand.Execute().FirstAsync();
-        });
+        // Apply redaction directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redaction directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
+        redactionService.RedactArea(page, redactionArea, renderDpi: 150);
 
         // Save
         documentService.SaveDocument(redactedPdf);
@@ -713,6 +717,13 @@ public class ViewModelIntegrationTests : IDisposable
         var itemsToRedact = new[] { "CONFIDENTIAL", "SECRET" };
         var dpiScale = 150.0 / 72.0;  // Scale PDF points to screen coordinates at 150 DPI
 
+        // Apply redactions directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redactions directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
+
         foreach (var item in itemsToRedact)
         {
             var pos = contentMap[item];
@@ -728,10 +739,7 @@ public class ViewModelIntegrationTests : IDisposable
                 vm.CurrentRedactionArea = redactionArea;
             });
 
-            await Dispatcher.UIThread.InvokeAsync(async () =>
-            {
-                await vm.ApplyRedactionCommand.Execute().FirstAsync();
-            });
+            redactionService.RedactArea(page, redactionArea, renderDpi: 150);
 
             // Simulate user re-enabling redaction mode after each redaction (as the UI does)
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -797,8 +805,15 @@ public class ViewModelIntegrationTests : IDisposable
             // Scale PDF coords (100, 100) to screen coords at 150 DPI
             var dpiScale = 150.0 / 72.0;
             vm1.CurrentRedactionArea = new Rect(80 * dpiScale, 80 * dpiScale, 300 * dpiScale, 60 * dpiScale);
-            await vm1.ApplyRedactionCommand.Execute().FirstAsync();
         });
+
+        // Apply redaction directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redaction directly instead.
+        var document = documentService1.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
+        redactionService1.RedactArea(page, vm1.CurrentRedactionArea, renderDpi: 150);
 
         documentService1.SaveDocument(redactedPdf);
 
@@ -877,10 +892,13 @@ public class ViewModelIntegrationTests : IDisposable
             vm.CurrentRedactionArea = redactionArea;
         });
 
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            await vm.ApplyRedactionCommand.Execute().FirstAsync();
-        });
+        // Apply redaction directly via RedactionService
+        // Note: The ViewModel now uses a mark-then-apply workflow with file dialogs,
+        // which doesn't work in headless tests. We apply the redaction directly instead.
+        var document = documentService.GetCurrentDocument();
+        document.Should().NotBeNull("document should be loaded");
+        var page = document!.Pages[0];
+        redactionService.RedactArea(page, redactionArea, renderDpi: 150);
 
         // Save
         documentService.SaveDocument(redactedPdf);
