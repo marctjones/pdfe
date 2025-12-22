@@ -108,6 +108,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ToggleRedactionModeCommand = ReactiveCommand.Create(ToggleRedactionMode);
         ApplyRedactionCommand = ReactiveCommand.CreateFromTask(ApplyRedactionAsync);
         RemovePendingRedactionCommand = ReactiveCommand.Create<Guid>(RemovePendingRedaction);
+        ClearAllRedactionsCommand = ReactiveCommand.Create(ClearAllRedactions);
         ApplyAllRedactionsCommand = ReactiveCommand.CreateFromTask(ApplyAllRedactionsAsync);
 
         // Subscribe to ThrownExceptions to prevent command from getting stuck
@@ -380,6 +381,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> ToggleRedactionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> ApplyRedactionCommand { get; }
     public ReactiveCommand<Guid, Unit> RemovePendingRedactionCommand { get; }
+    public ReactiveCommand<Unit, Unit> ClearAllRedactionsCommand { get; }
     public ReactiveCommand<Unit, Unit> ApplyAllRedactionsCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleTextSelectionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyTextCommand { get; }
@@ -809,6 +811,19 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _logger.LogWarning("Could not find pending redaction with ID: {Id}", id);
         }
+    }
+
+    /// <summary>
+    /// Clear all pending redactions
+    /// </summary>
+    private void ClearAllRedactions()
+    {
+        _logger.LogInformation("Clearing all pending redactions. Count: {Count}", RedactionWorkflow.PendingCount);
+
+        RedactionWorkflow.ClearPending();
+        FileState.PendingRedactionsCount = 0;
+
+        _logger.LogInformation("All pending redactions cleared");
     }
 
     /// <summary>
