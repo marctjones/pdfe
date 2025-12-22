@@ -336,6 +336,12 @@ public partial class MainWindow : Window
         if (_isSelecting && DataContext is MainWindowViewModel viewModel)
         {
             Console.WriteLine($"[Selection] Completed: ({viewModel.CurrentRedactionArea.X:F1},{viewModel.CurrentRedactionArea.Y:F1},{viewModel.CurrentRedactionArea.Width:F1}x{viewModel.CurrentRedactionArea.Height:F1}) [image pixels]");
+
+            // Automatically mark/apply the redaction when selection is released
+            if (viewModel.CurrentRedactionArea.Width > 5 && viewModel.CurrentRedactionArea.Height > 5)
+            {
+                viewModel.ApplyRedactionCommand.Execute().Subscribe();
+            }
         }
         _isSelecting = false;
     }
