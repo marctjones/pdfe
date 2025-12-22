@@ -324,8 +324,32 @@ public class RedactionService
             _logger.LogInformation("Parsed content stream in {ElapsedMs}ms. Found {OperationCount} operations",
                 sw.ElapsedMilliseconds, operations.Count);
 
-            // Step 1b: Parse inline images (BI...ID...EI sequences)
+            // Step 1b: Get character-level letter information for precise text filtering
+            List<UglyToad.PdfPig.Content.Letter>? letters = null;
             var pageHeight = page.Height.Point;
+            try
+            {
+                using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(page.Owner.FullPath);
+                // Find page number by iterating through pages
+                var pageNumber = 1;
+                for (int i = 0; i < page.Owner.Pages.Count; i++)
+                {
+                    if (page.Owner.Pages[i] == page)
+                    {
+                        pageNumber = i + 1;  // PdfPig uses 1-based page numbers
+                        break;
+                    }
+                }
+                var pdfPigPage = pdfPigDoc.GetPage(pageNumber);
+                letters = pdfPigPage.Letters.ToList();
+                _logger.LogInformation("Loaded {LetterCount} character-level letters for precise redaction filtering", letters.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load PdfPig letters for character-level filtering, falling back to operation-level");
+            }
+
+            // Step 1c: Parse inline images (BI...ID...EI sequences)
             var currentGraphicsState = new PdfGraphicsState();
             var inlineImages = _parser.ParseInlineImages(page, pageHeight, currentGraphicsState);
 
@@ -346,7 +370,19 @@ public class RedactionService
             foreach (var operation in operations)
             {
                 // Check if this operation intersects with the redaction area
-                bool shouldRemove = operation.IntersectsWith(area);
+                // For text operations, use CHARACTER-LEVEL filtering if available
+                bool shouldRemove;
+
+                if (operation is TextOperation textOp && letters != null && !string.IsNullOrWhiteSpace(textOp.Text))
+                {
+                    // CHARACTER-LEVEL FILTERING: Check if any character's center is in the redaction area
+                    shouldRemove = DoesTextOperationContainRedactedCharacters(textOp, area, letters, pageHeight);
+                }
+                else
+                {
+                    // For non-text operations (paths, images, etc.), use bounding box intersection
+                    shouldRemove = operation.IntersectsWith(area);
+                }
 
                 // DEBUG: Log intersection tests for text operations
                 if (operation is TextOperation textOpDebug && !string.IsNullOrWhiteSpace(textOpDebug.Text))
@@ -369,9 +405,9 @@ public class RedactionService
                         removedByType[typeName] = 0;
                     removedByType[typeName]++;
 
-                    if (operation is TextOperation textOp && !string.IsNullOrWhiteSpace(textOp.Text))
+                    if (operation is TextOperation textOpToRemove && !string.IsNullOrWhiteSpace(textOpToRemove.Text))
                     {
-                        _redactedTerms.Add(textOp.Text);
+                        _redactedTerms.Add(textOpToRemove.Text);
                     }
 
                     // Skip this operation - it will be redacted
@@ -666,6 +702,77 @@ public class RedactionService
         }
 
         _logger.LogInformation("Redaction with options complete. Redacted {Count} text items", _redactedTerms.Count);
+    }
+
+    /// <summary>
+    /// Check if a text operation contains any characters whose center points fall within
+    /// the redaction area. This enables CHARACTER-LEVEL redaction precision, preventing
+    /// over-redaction where entire multi-word operations are removed when only one word
+    /// was selected.
+    /// </summary>
+    /// <param name="textOp">The text operation to check</param>
+    /// <param name="area">Redaction area in PDF points (top-left origin)</param>
+    /// <param name="letters">PdfPig letter collection for the page</param>
+    /// <param name="pageHeight">PDF page height for coordinate conversion</param>
+    /// <returns>True if any character's center is inside the redaction area</returns>
+    private bool DoesTextOperationContainRedactedCharacters(
+        TextOperation textOp,
+        Rect area,
+        List<UglyToad.PdfPig.Content.Letter> letters,
+        double pageHeight)
+    {
+        // Convert redaction area from top-left origin to PDF bottom-left origin
+        var pdfArea = new UglyToad.PdfPig.Core.PdfRectangle(
+            area.X,
+            pageHeight - area.Y - area.Height,  // Convert Y to bottom-left origin
+            area.X + area.Width,
+            pageHeight - area.Y                 // Convert Y to bottom-left origin
+        );
+
+        // Find letters that belong to this text operation by matching position
+        // We'll be lenient and check if letters are "near" the operation's bounding box
+        var opLeft = textOp.BoundingBox.X;
+        var opRight = textOp.BoundingBox.X + textOp.BoundingBox.Width;
+        var opTop = pageHeight - textOp.BoundingBox.Y;  // Convert to PDF coords
+        var opBottom = pageHeight - (textOp.BoundingBox.Y + textOp.BoundingBox.Height);  // Convert to PDF coords
+
+        var matchingLetters = letters.Where(letter =>
+        {
+            var letterCenterX = (letter.GlyphRectangle.Left + letter.GlyphRectangle.Right) / 2.0;
+            var letterCenterY = (letter.GlyphRectangle.Bottom + letter.GlyphRectangle.Top) / 2.0;
+
+            // Check if letter is roughly within the operation's bounding box
+            // Allow some tolerance for font metrics approximation
+            var tolerance = 5.0; // PDF points
+            return letterCenterX >= opLeft - tolerance &&
+                   letterCenterX <= opRight + tolerance &&
+                   letterCenterY >= opBottom - tolerance &&
+                   letterCenterY <= opTop + tolerance;
+        }).ToList();
+
+        if (matchingLetters.Count == 0)
+        {
+            // Fallback: If we can't match letters to this operation, use operation-level intersection
+            _logger.LogDebug("No matching letters found for text operation '{Text}', using operation-level intersection",
+                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+            return textOp.IntersectsWith(area);
+        }
+
+        // Check if any letter's center is inside the redaction area
+        foreach (var letter in matchingLetters)
+        {
+            var centerX = (letter.GlyphRectangle.Left + letter.GlyphRectangle.Right) / 2.0;
+            var centerY = (letter.GlyphRectangle.Bottom + letter.GlyphRectangle.Top) / 2.0;
+
+            // Check if center point is inside the PDF-coordinate redaction area
+            if (centerX >= pdfArea.Left && centerX <= pdfArea.Right &&
+                centerY >= pdfArea.Bottom && centerY <= pdfArea.Top)
+            {
+                return true;  // At least one character is inside the redaction area
+            }
+        }
+
+        return false;  // No characters have their centers in the redaction area
     }
 
     /// <summary>
