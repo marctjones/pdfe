@@ -408,6 +408,15 @@
                             </Canvas.RenderTransform>
                         </Canvas>
 
+                        <!-- Pending Redactions Overlay - Shows all marked redactions -->
+                        <Canvas x:Name="PendingRedactionsCanvas"
+                                IsHitTestVisible="False"
+                                IsVisible="{Binding IsRedactionMode}">
+                            <Canvas.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                            </Canvas.RenderTransform>
+                        </Canvas>
+
                         <!-- Redaction Selection Overlay (shown when in redaction mode)
                              COORDINATE SYSTEM: Canvas coordinates are in rendered image pixels (150 DPI).
                              The ScaleTransform ensures the selection rectangle visually aligns with the
