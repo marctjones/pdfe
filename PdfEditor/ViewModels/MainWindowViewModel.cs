@@ -108,6 +108,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ToggleRedactionModeCommand = ReactiveCommand.Create(ToggleRedactionMode);
         ApplyRedactionCommand = ReactiveCommand.CreateFromTask(ApplyRedactionAsync);
         RemovePendingRedactionCommand = ReactiveCommand.Create<Guid>(RemovePendingRedaction);
+        ApplyAllRedactionsCommand = ReactiveCommand.CreateFromTask(ApplyAllRedactionsAsync);
 
         // Subscribe to ThrownExceptions to prevent command from getting stuck
         ApplyRedactionCommand.ThrownExceptions.Subscribe(ex =>
@@ -379,6 +380,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> ToggleRedactionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> ApplyRedactionCommand { get; }
     public ReactiveCommand<Guid, Unit> RemovePendingRedactionCommand { get; }
+    public ReactiveCommand<Unit, Unit> ApplyAllRedactionsCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleTextSelectionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyTextCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomInCommand { get; }
@@ -806,6 +808,96 @@ public partial class MainWindowViewModel : ViewModelBase
         else
         {
             _logger.LogWarning("Could not find pending redaction with ID: {Id}", id);
+        }
+    }
+
+    /// <summary>
+    /// Apply all pending redactions to create a redacted version of the PDF
+    /// </summary>
+    private async Task ApplyAllRedactionsAsync()
+    {
+        _logger.LogInformation("ApplyAllRedactionsAsync START. Pending count: {Count}", RedactionWorkflow.PendingCount);
+
+        if (RedactionWorkflow.PendingCount == 0)
+        {
+            _logger.LogWarning("No pending redactions to apply");
+            await ShowMessageDialog("No Redactions", "There are no pending redactions to apply.");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogWarning("No document loaded");
+            await ShowMessageDialog("No Document", "Please open a PDF document first.");
+            return;
+        }
+
+        try
+        {
+            // Generate suggested filename
+            var suggestedPath = _filenameSuggestionService.SuggestRedactedFilename(_currentFilePath);
+
+            // Show Save Redacted Version dialog
+            var mainWindow = GetMainWindow();
+            if (mainWindow == null)
+            {
+                _logger.LogError("Could not get main window for dialog");
+                return;
+            }
+
+            var dialog = new Views.SaveRedactedVersionDialog
+            {
+                DataContext = new SaveRedactedVersionDialogViewModel(suggestedPath, RedactionWorkflow.PendingCount)
+            };
+
+            var saveFilePath = await dialog.ShowDialog<string?>(mainWindow);
+
+            if (string.IsNullOrEmpty(saveFilePath))
+            {
+                _logger.LogInformation("User cancelled save dialog");
+                return;
+            }
+
+            _logger.LogInformation("Applying {Count} redactions to create: {Path}", RedactionWorkflow.PendingCount, saveFilePath);
+
+            // Get current document
+            var document = _documentService.GetCurrentDocument();
+            if (document == null)
+            {
+                _logger.LogError("Document is null");
+                return;
+            }
+
+            // Apply each pending redaction
+            foreach (var pending in RedactionWorkflow.PendingRedactions.ToList())
+            {
+                _logger.LogInformation("Applying redaction on page {Page}", pending.PageNumber);
+
+                var page = document.Pages[pending.PageNumber];
+                _redactionService.RedactArea(page, pending.Area);
+            }
+
+            // Save the redacted document
+            _logger.LogInformation("Saving redacted PDF to: {Path}", saveFilePath);
+            document.Save(saveFilePath);
+
+            // Move redactions to applied list
+            RedactionWorkflow.MoveToApplied();
+            FileState.PendingRedactionsCount = 0;
+
+            _logger.LogInformation("Redacted PDF saved successfully");
+            await ShowMessageDialog("Success", $"Redacted PDF saved to:\n{saveFilePath}\n\nOriginal file preserved.");
+
+            // Exit redaction mode
+            if (IsRedactionMode)
+            {
+                ToggleRedactionMode();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error applying all redactions");
+            await ShowMessageDialog("Error", $"Failed to apply redactions: {ex.Message}");
         }
     }
 
