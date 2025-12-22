@@ -196,6 +196,29 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public int DisplayPageNumber => CurrentPageIndex + 1;
 
+    /// <summary>
+    /// Context-aware text for Save button.
+    /// Shows "Save Redacted Version" when working on original file with changes.
+    /// Shows "Save" when working on redacted version or when no changes.
+    /// </summary>
+    public string SaveButtonText => FileState.GetSaveButtonText();
+
+    /// <summary>
+    /// Status bar text showing pending redaction count and file type.
+    /// Updates dynamically as user marks/applies redactions.
+    /// </summary>
+    public string StatusBarText
+    {
+        get
+        {
+            if (RedactionWorkflow.PendingRedactions.Count > 0)
+                return $"{RedactionWorkflow.PendingRedactions.Count} areas marked";
+            if (FileState.IsOriginalFile)
+                return "Ready";
+            return FileState.FileType;
+        }
+    }
+
     public double ZoomLevel
     {
         get => _zoomLevel;
@@ -477,6 +500,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             _logger.LogInformation(">>> STEP 3: RaisePropertyChanged(DocumentName)");
             this.RaisePropertyChanged(nameof(DocumentName));
+            this.RaisePropertyChanged(nameof(StatusBarText));
 
             _logger.LogInformation(">>> STEP 4: Calling _documentService.LoadDocument");
             _documentService.LoadDocument(filePath);
@@ -526,6 +550,16 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        // CRITICAL: If working on original file with unsaved changes, FORCE "Save As" workflow
+        // This prevents accidental overwriting of original files
+        if (FileState.IsOriginalFile && FileState.HasUnsavedChanges)
+        {
+            _logger.LogInformation("Original file with changes detected - triggering Save As workflow");
+            await ApplyAllRedactionsAsync();
+            return;
+        }
+
+        // Safe to save directly - either redacted version or no changes
         try
         {
             _documentService.SaveDocument();
@@ -787,6 +821,8 @@ public partial class MainWindowViewModel : ViewModelBase
         // Add to pending redactions
         RedactionWorkflow.MarkArea(CurrentPageIndex + 1, CurrentRedactionArea, previewText);
         FileState.PendingRedactionsCount = RedactionWorkflow.PendingCount;
+        this.RaisePropertyChanged(nameof(SaveButtonText));
+        this.RaisePropertyChanged(nameof(StatusBarText));
 
         _logger.LogInformation("Redaction marked. Total pending: {Count}", RedactionWorkflow.PendingCount);
         _logger.LogInformation("DEBUG: RedactionWorkflow.PendingRedactions.Count = {Count}", RedactionWorkflow.PendingRedactions.Count);
@@ -805,6 +841,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (RedactionWorkflow.RemovePending(id))
         {
             FileState.PendingRedactionsCount = RedactionWorkflow.PendingCount;
+            this.RaisePropertyChanged(nameof(SaveButtonText));
             _logger.LogInformation("Pending redaction removed. Remaining: {Count}", RedactionWorkflow.PendingCount);
         }
         else
@@ -822,6 +859,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         RedactionWorkflow.ClearPending();
         FileState.PendingRedactionsCount = 0;
+        this.RaisePropertyChanged(nameof(SaveButtonText));
+        this.RaisePropertyChanged(nameof(StatusBarText));
 
         _logger.LogInformation("All pending redactions cleared");
     }
@@ -899,6 +938,8 @@ public partial class MainWindowViewModel : ViewModelBase
             // Move redactions to applied list
             RedactionWorkflow.MoveToApplied();
             FileState.PendingRedactionsCount = 0;
+            this.RaisePropertyChanged(nameof(SaveButtonText));
+            this.RaisePropertyChanged(nameof(StatusBarText));
 
             _logger.LogInformation("Redacted PDF saved successfully");
             await ShowMessageDialog("Success", $"Redacted PDF saved to:\n{saveFilePath}\n\nOriginal file preserved.");
@@ -1592,12 +1633,25 @@ public partial class MainWindowViewModel : ViewModelBase
 
                 if (result.Passed)
                 {
+                    // MANDATORY logging - cannot be silenced
+                    Console.WriteLine($"[REDACTION-VERIFICATION] ✓ PASSED - No text leaks detected");
                     _logger.LogInformation("Verification passed for {File}", filePath);
                     LastVerifyFailed = false;
                     LastVerifyStatus = "Verification passed";
                 }
                 else
                 {
+                    // MANDATORY logging - cannot be silenced
+                    Console.WriteLine($"[REDACTION-VERIFICATION] ✗ FAILED - {result.Leaks.Count} text leak(s) detected!");
+                    foreach (var leak in result.Leaks.Take(5))
+                    {
+                        Console.WriteLine($"[REDACTION-VERIFICATION]   Page {leak.PageIndex + 1}: '{leak.Text}' at ({leak.BoundingBox.X:F1},{leak.BoundingBox.Y:F1})");
+                    }
+                    if (result.Leaks.Count > 5)
+                    {
+                        Console.WriteLine($"[REDACTION-VERIFICATION]   ... and {result.Leaks.Count - 5} more leak(s)");
+                    }
+
                     _logger.LogWarning("Verification FAILED for {File}. Leaks: {Count}", filePath, result.Leaks.Count);
                     foreach (var leak in result.Leaks.Take(5))
                     {

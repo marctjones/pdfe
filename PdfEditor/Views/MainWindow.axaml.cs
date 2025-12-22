@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
@@ -17,6 +18,8 @@ public partial class MainWindow : Window
     private Point _textSelectionStartPoint;
     private bool _isSelectingText;
     private Canvas? _searchHighlightsCanvas;
+    private Canvas? _pendingRedactionsCanvas;
+    private Canvas? _appliedRedactionsCanvas;
 
     public MainWindow()
     {
@@ -35,6 +38,19 @@ public partial class MainWindow : Window
         {
             // Subscribe to search highlights collection changes
             viewModel.CurrentPageSearchHighlights.CollectionChanged += OnSearchHighlightsChanged;
+
+            // Subscribe to redaction collection changes
+            viewModel.RedactionWorkflow.PendingRedactions.CollectionChanged += OnRedactionsChanged;
+            viewModel.RedactionWorkflow.AppliedRedactions.CollectionChanged += OnRedactionsChanged;
+
+            // Subscribe to page changes to update redaction overlays
+            viewModel.PropertyChanged += (s, args) =>
+            {
+                if (args.PropertyName == nameof(viewModel.CurrentPageIndex))
+                {
+                    UpdateRedactionOverlays();
+                }
+            };
         }
     }
 
@@ -69,6 +85,63 @@ public partial class MainWindow : Window
             Canvas.SetLeft(highlight, rect.X);
             Canvas.SetTop(highlight, rect.Y);
             _searchHighlightsCanvas.Children.Add(highlight);
+        }
+    }
+
+    private void OnRedactionsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        UpdateRedactionOverlays();
+    }
+
+    private void UpdateRedactionOverlays()
+    {
+        _pendingRedactionsCanvas ??= this.FindControl<Canvas>("PendingRedactionsCanvas");
+        _appliedRedactionsCanvas ??= this.FindControl<Canvas>("AppliedRedactionsCanvas");
+
+        if (_pendingRedactionsCanvas == null || _appliedRedactionsCanvas == null)
+            return;
+
+        _pendingRedactionsCanvas.Children.Clear();
+        _appliedRedactionsCanvas.Children.Clear();
+
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        var currentPage = viewModel.CurrentPageIndex + 1; // DisplayPageNumber is 1-based
+
+        // Draw pending redactions (red dashed border)
+        foreach (var pending in viewModel.RedactionWorkflow.GetPendingForPage(currentPage))
+        {
+            var rect = new Rectangle
+            {
+                Fill = Brushes.Transparent,
+                Stroke = Brushes.Red,
+                StrokeThickness = 2,
+                StrokeDashArray = new AvaloniaList<double> { 5, 3 }, // Dashed pattern
+                Width = pending.Area.Width,
+                Height = pending.Area.Height
+            };
+
+            Canvas.SetLeft(rect, pending.Area.X);
+            Canvas.SetTop(rect, pending.Area.Y);
+            _pendingRedactionsCanvas.Children.Add(rect);
+        }
+
+        // Draw applied redactions (black solid rectangle)
+        foreach (var applied in viewModel.RedactionWorkflow.GetAppliedForPage(currentPage))
+        {
+            var rect = new Rectangle
+            {
+                Fill = Brushes.Black,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1,
+                Width = applied.Area.Width,
+                Height = applied.Area.Height
+            };
+
+            Canvas.SetLeft(rect, applied.Area.X);
+            Canvas.SetTop(rect, applied.Area.Y);
+            _appliedRedactionsCanvas.Children.Add(rect);
         }
     }
 

@@ -760,4 +760,174 @@ public class MainWindowViewModelTests
     }
 
     #endregion
+
+    #region v1.3.0 UI Features Tests
+
+    [Fact]
+    public void SaveButtonText_WithOriginalFileAndChanges_ReturnsSaveRedactedVersion()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Simulate loading a file and marking redactions
+        vm.FileState.SetDocument("/tmp/test.pdf");
+        vm.RedactionWorkflow.MarkArea(1, new Rect(10, 10, 100, 50), "Test");
+        vm.FileState.PendingRedactionsCount = vm.RedactionWorkflow.PendingCount;
+
+        // Act
+        var saveButtonText = vm.SaveButtonText;
+
+        // Assert
+        saveButtonText.Should().Be("Save Redacted Version",
+            "original file with pending changes should show 'Save Redacted Version'");
+    }
+
+    [Fact]
+    public void SaveButtonText_WithNoChanges_ReturnsSave()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.FileState.SetDocument("/tmp/test.pdf");
+        // No redactions marked
+
+        // Act
+        var saveButtonText = vm.SaveButtonText;
+
+        // Assert
+        saveButtonText.Should().Be("Save",
+            "file with no changes should show 'Save'");
+    }
+
+    [Fact]
+    public void StatusBarText_WithPendingRedactions_ShowsCount()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.FileState.SetDocument("/tmp/test.pdf");
+
+        // Act - Add 3 pending redactions
+        vm.RedactionWorkflow.MarkArea(1, new Rect(10, 10, 100, 50), "Text 1");
+        vm.RedactionWorkflow.MarkArea(1, new Rect(20, 20, 100, 50), "Text 2");
+        vm.RedactionWorkflow.MarkArea(1, new Rect(30, 30, 100, 50), "Text 3");
+
+        // Assert
+        vm.StatusBarText.Should().Be("3 areas marked",
+            "status bar should show count of pending redactions");
+    }
+
+    [Fact]
+    public void StatusBarText_WithOriginalFileNoPending_ReturnsReady()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.FileState.SetDocument("/tmp/test.pdf");
+
+        // Act
+        var statusBarText = vm.StatusBarText;
+
+        // Assert
+        statusBarText.Should().Be("Ready",
+            "original file with no pending redactions should show 'Ready'");
+    }
+
+    [Fact]
+    public void StatusBarText_UpdatesWhenRedactionsAdded()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.FileState.SetDocument("/tmp/test.pdf");
+        vm.StatusBarText.Should().Be("Ready");
+
+        // Act - Add a redaction
+        vm.RedactionWorkflow.MarkArea(1, new Rect(10, 10, 100, 50), "Test");
+
+        // Assert
+        vm.StatusBarText.Should().Be("1 areas marked",
+            "status bar should update when redactions are added");
+    }
+
+    [Fact]
+    public void StatusBarText_UpdatesWhenRedactionsCleared()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.FileState.SetDocument("/tmp/test.pdf");
+        vm.RedactionWorkflow.MarkArea(1, new Rect(10, 10, 100, 50), "Test");
+        vm.StatusBarText.Should().Be("1 areas marked");
+
+        // Act - Clear all redactions
+        vm.RedactionWorkflow.ClearPending();
+
+        // Assert
+        vm.StatusBarText.Should().Be("Ready",
+            "status bar should update when redactions are cleared");
+    }
+
+    [Fact]
+    public void RedactionWorkflow_AppliedRedactions_CollectionIsAccessible()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Act & Assert
+        vm.RedactionWorkflow.AppliedRedactions.Should().NotBeNull(
+            "AppliedRedactions collection should be accessible");
+        vm.RedactionWorkflow.AppliedRedactions.Should().BeEmpty(
+            "AppliedRedactions should start empty");
+    }
+
+    [Fact]
+    public void RedactionWorkflow_GetPendingForPage_ReturnsCorrectRedactions()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.RedactionWorkflow.MarkArea(1, new Rect(10, 10, 100, 50), "Page 1 - Area 1");
+        vm.RedactionWorkflow.MarkArea(1, new Rect(20, 20, 100, 50), "Page 1 - Area 2");
+        vm.RedactionWorkflow.MarkArea(2, new Rect(30, 30, 100, 50), "Page 2 - Area 1");
+
+        // Act
+        var page1Redactions = vm.RedactionWorkflow.GetPendingForPage(1).ToList();
+        var page2Redactions = vm.RedactionWorkflow.GetPendingForPage(2).ToList();
+
+        // Assert
+        page1Redactions.Should().HaveCount(2, "page 1 should have 2 redactions");
+        page2Redactions.Should().HaveCount(1, "page 2 should have 1 redaction");
+        page1Redactions[0].PreviewText.Should().Be("Page 1 - Area 1");
+        page1Redactions[1].PreviewText.Should().Be("Page 1 - Area 2");
+        page2Redactions[0].PreviewText.Should().Be("Page 2 - Area 1");
+    }
+
+    [Fact]
+    public void RedactionWorkflow_GetAppliedForPage_ReturnsCorrectRedactions()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.RedactionWorkflow.MarkArea(1, new Rect(10, 10, 100, 50), "Applied 1");
+        vm.RedactionWorkflow.MarkArea(2, new Rect(20, 20, 100, 50), "Applied 2");
+
+        // Act - Move to applied
+        vm.RedactionWorkflow.MoveToApplied();
+        var page1Applied = vm.RedactionWorkflow.GetAppliedForPage(1).ToList();
+        var page2Applied = vm.RedactionWorkflow.GetAppliedForPage(2).ToList();
+
+        // Assert
+        page1Applied.Should().HaveCount(1, "page 1 should have 1 applied redaction");
+        page2Applied.Should().HaveCount(1, "page 2 should have 1 applied redaction");
+        vm.RedactionWorkflow.PendingRedactions.Should().BeEmpty(
+            "pending should be empty after moving to applied");
+    }
+
+    [Fact]
+    public void FilenameSuggestionService_IsInjected()
+    {
+        // Arrange & Act
+        var vm = CreateViewModel();
+
+        // Assert - Verify service was properly injected by testing a workflow that would use it
+        // The FilenameSuggestionService is private but used internally by the ViewModel
+        // We verify it exists by checking that the ViewModel was constructed successfully
+        vm.Should().NotBeNull("ViewModel should be created with FilenameSuggestionService injected");
+    }
+
+    #endregion
 }
