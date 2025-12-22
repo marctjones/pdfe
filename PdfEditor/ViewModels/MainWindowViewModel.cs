@@ -884,7 +884,9 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 _logger.LogInformation("Applying redaction on page {Page}", pending.PageNumber);
 
-                var page = document.Pages[pending.PageNumber];
+                // pending.PageNumber is 1-based (for display), convert to 0-based for array access
+                var pageIndex = pending.PageNumber - 1;
+                var page = document.Pages[pageIndex];
                 _redactionService.RedactArea(page, pending.Area);
             }
 
