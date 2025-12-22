@@ -74,7 +74,7 @@ public class CharacterMatcherTests : IDisposable
     }
 
     [Fact]
-    public void MatchLettersToOperation_TextWithSpaces_SkipsSpaces()
+    public void MatchLettersToOperation_TextWithSpaces_MatchesSpacesToo()
     {
         // Arrange: Create PDF with "A B C"
         var pdfPath = Path.Combine(_tempDir, "spaces.pdf");
@@ -84,8 +84,8 @@ public class CharacterMatcherTests : IDisposable
         var page = doc.GetPage(1);
         var letters = page.Letters.ToList();
 
-        // Note: PdfPig may report spaces as letters depending on PDF encoding
-        // so we can't assert exact count
+        // PdfPig DOES report spaces as letters, so we expect 5 letters: A, space, B, space, C
+        letters.Should().HaveCount(5, "A B C should have 5 characters including spaces");
 
         var textOp = new TextOperation(new CComment())
         {
@@ -102,10 +102,13 @@ public class CharacterMatcherTests : IDisposable
 
         // Assert
         result.Should().NotBeNull();
-        // We should get at least 1 match, possibly up to 3 depending on char value matching
-        result.Should().HaveCountGreaterThanOrEqualTo(1, "at least some non-space characters should be matched");
-        result.Should().NotContainKey(1, "space at index 1 should not be matched");
-        result.Should().NotContainKey(3, "space at index 3 should not be matched");
+        // All 5 characters should be matched (including spaces)
+        result.Should().HaveCount(5, "all characters including spaces should be matched");
+        result.Should().ContainKey(0, "A at index 0 should be matched");
+        result.Should().ContainKey(1, "space at index 1 should be matched");
+        result.Should().ContainKey(2, "B at index 2 should be matched");
+        result.Should().ContainKey(3, "space at index 3 should be matched");
+        result.Should().ContainKey(4, "C at index 4 should be matched");
     }
 
     [Fact]

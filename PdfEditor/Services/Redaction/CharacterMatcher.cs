@@ -76,16 +76,20 @@ public class CharacterMatcher
         for (int charIndex = 0; charIndex < textOp.Text.Length && letterIndex < matchingLetters.Count; charIndex++)
         {
             var c = textOp.Text[charIndex];
-
-            // Skip whitespace - PdfPig typically doesn't report spaces as letters
-            if (char.IsWhiteSpace(c))
-                continue;
-
             var letter = matchingLetters[letterIndex];
 
             // Verify character match (case-insensitive due to encoding variations)
-            if (string.Equals(letter.Value, c.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                (letter.Value.Length == 1 && char.ToUpperInvariant(letter.Value[0]) == char.ToUpperInvariant(c)))
+            // Note: PdfPig DOES report spaces, so we match them too
+            var charMatch = string.Equals(letter.Value, c.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                           (letter.Value.Length == 1 && char.ToUpperInvariant(letter.Value[0]) == char.ToUpperInvariant(c));
+
+            // For whitespace, be more lenient - any whitespace matches any whitespace
+            if (char.IsWhiteSpace(c) && string.IsNullOrWhiteSpace(letter.Value))
+            {
+                charMatch = true;
+            }
+
+            if (charMatch)
             {
                 result[charIndex] = letter;
                 letterIndex++;
@@ -102,7 +106,7 @@ public class CharacterMatcher
         }
 
         _logger.LogDebug("Matched {Count}/{Total} characters for operation '{Text}'",
-            result.Count, textOp.Text.Replace(" ", "").Replace("\t", "").Length,
+            result.Count, textOp.Text.Length,
             textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
 
         return result.Count > 0 ? result : null;

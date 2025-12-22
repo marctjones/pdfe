@@ -53,7 +53,7 @@ public class TextOperationEmitterTests
         bytes.Should().NotBeEmpty();
 
         var pdfContent = Encoding.ASCII.GetString(bytes);
-        pdfContent.Should().Contain("100.00 700.00 Td", "should position text at (100, 700)");
+        pdfContent.Should().Contain("1 0 0 1 100.00 700.00 Tm", "should position text at (100, 700) using Tm matrix");
         pdfContent.Should().Contain("(HELLO) Tj", "should emit text operation");
     }
 
