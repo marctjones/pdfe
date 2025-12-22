@@ -374,49 +374,26 @@ public class RedactionService
 
             foreach (var operation in operations)
             {
-                // For text operations with available letters, use CHARACTER-LEVEL filtering
-                if (operation is TextOperation textOp && letters != null && !string.IsNullOrWhiteSpace(textOp.Text))
+                // TEMPORARY: Disable character-level filtering due to coordinate system issues
+                // TODO: Fix coordinate conversion in CharacterMatcher.IsLetterInRedactionArea
+                // For now, use operation-level (bounding box) filtering for all operations
+                if (operation is TextOperation textOp && !string.IsNullOrWhiteSpace(textOp.Text))
                 {
-                    // Use CharacterLevelTextFilter to split the operation at character boundaries
-                    var filterResult = _characterFilter.FilterTextOperation(textOp, letters, area, pageHeight);
-
-                    if (filterResult.FallbackToOperationLevel)
+                    // Operation-level check: remove entire operation if it intersects
+                    if (!textOp.IntersectsWith(area))
                     {
-                        // Character matching failed - fall back to operation-level check
-                        _logger.LogDebug("Character matching failed for '{Text}', using operation-level fallback",
-                            textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
-
-                        if (!textOp.IntersectsWith(area))
-                        {
-                            filteredOperations.Add(textOp);
-                        }
-                        else
-                        {
-                            removedCount++;
-                            _redactedTerms.Add(textOp.Text);
-                            _logger.LogInformation("REMOVE (fallback): '{Text}'", textOp.Text);
-                        }
+                        filteredOperations.Add(textOp);
                     }
                     else
                     {
-                        // Character-level filtering succeeded
-                        if (filterResult.Operations.Count > 0)
-                        {
-                            // Add the filtered partial operations
-                            filteredOperations.AddRange(filterResult.Operations);
+                        removedCount++;
+                        _redactedTerms.Add(textOp.Text);
+                        _logger.LogInformation("REMOVE (operation-level): '{Text}'",
+                            textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
 
-                            _logger.LogInformation(
-                                "CHARACTER-LEVEL FILTER: '{Text}' → {Kept} partial operations, removed: '{Removed}'",
-                                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
-                                filterResult.Operations.Count,
-                                string.IsNullOrEmpty(filterResult.RemovedText) ? "(none)" : filterResult.RemovedText);
-                        }
-
-                        if (!string.IsNullOrEmpty(filterResult.RemovedText))
-                        {
-                            removedCount++;
-                            _redactedTerms.Add(filterResult.RemovedText);
-                        }
+                        if (!removedByType.ContainsKey("TextOperation"))
+                            removedByType["TextOperation"] = 0;
+                        removedByType["TextOperation"]++;
                     }
                 }
                 else
