@@ -375,7 +375,15 @@
             </Border>
 
             <!-- PDF Viewer -->
-            <Border Grid.Column="1" Background="{DynamicResource TertiaryBackgroundBrush}">
+            <Border Grid.Column="1"
+                    Background="{DynamicResource TertiaryBackgroundBrush}"
+                    Classes.redactionMode="{Binding IsRedactionMode}">
+                <Border.Styles>
+                    <Style Selector="Border.redactionMode">
+                        <Setter Property="BorderBrush" Value="#E53935"/>
+                        <Setter Property="BorderThickness" Value="3"/>
+                    </Style>
+                </Border.Styles>
                 <ScrollViewer x:Name="PdfScrollViewer"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
@@ -407,6 +415,7 @@
                              automatically inverse-transformed, giving us image-space coordinates. -->
                         <Canvas IsVisible="{Binding IsRedactionMode}"
                                 Background="Transparent"
+                                Cursor="Cross"
                                 PointerPressed="Canvas_PointerPressed"
                                 PointerMoved="Canvas_PointerMoved"
                                 PointerReleased="Canvas_PointerReleased">
