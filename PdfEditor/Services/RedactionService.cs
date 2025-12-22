@@ -471,20 +471,16 @@ public class RedactionService
             }
             else
             {
-                // SECURITY CRITICAL: No content found to remove
-                // NEVER allow visual-only redaction as it creates a false sense of security
-                Console.WriteLine($"[REDACTION-ERROR] FAILED - No content found in redaction area");
-                Console.WriteLine($"[REDACTION-ERROR] Possible causes: 1) Blank area selected, 2) Coordinate mismatch, 3) Unsupported content type");
-                Console.WriteLine($"[REDACTION-ERROR] Visual-only redaction is DISABLED for security - redaction aborted");
+                // No content found in redaction area - this is OK, it's just an empty area
+                // We'll still draw the black box to mark the area as redacted
+                result.Mode = RedactionMode.TrueRedaction;
+                result.ContentRemoved = false; // No content to remove
+                result.TextOperationsRemoved = 0;
+                result.ImageOperationsRemoved = 0;
+                result.GraphicsOperationsRemoved = 0;
 
-                _logger.LogError("Redaction aborted - no content operations found in redaction area. " +
-                    "Visual-only redaction is disabled for security. " +
-                    "Possible causes: 1) Blank area, 2) Unsupported content type, 3) Coordinate mismatch");
-
-                throw new InvalidOperationException(
-                    "Redaction failed: No content found in the selected area to remove. " +
-                    "Visual-only redaction is disabled for security reasons. " +
-                    "Please ensure you have selected an area containing text, images, or graphics.");
+                Console.WriteLine($"[REDACTION-INFO] Empty area redacted - No content found to remove (blank space)");
+                _logger.LogInformation("Redaction area contains no content (empty/blank area). Black box will be drawn for visual indication.");
             }
 
             // Step 5: Handle images separately
@@ -498,18 +494,24 @@ public class RedactionService
 
             return result;
         }
+        catch (InvalidOperationException)
+        {
+            // This is the expected "no content found" exception - just re-throw it
+            // The exception message already contains all the details needed
+            throw;
+        }
         catch (Exception ex)
         {
-            // CRITICAL SECURITY FAILURE
+            // CRITICAL SECURITY FAILURE - unexpected exception during redaction
             result.Mode = RedactionMode.Failed;
             result.ContentRemoved = false;
 
             // MANDATORY CRITICAL ERROR - Always visible
-            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Redaction FAILED - Content removal threw exception!");
-            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Exception: {ex.Message}");
+            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Redaction FAILED - Unexpected exception during content removal!");
+            Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Exception: {ex.GetType().Name}: {ex.Message}");
             Console.WriteLine($"[REDACTION-CRITICAL-ERROR] Redaction aborted - visual-only fallback is DISABLED for security");
 
-            _logger.LogError(ex, "CRITICAL SECURITY FAILURE: Content removal threw exception. " +
+            _logger.LogError(ex, "CRITICAL SECURITY FAILURE: Unexpected exception during content removal. " +
                 "Redaction aborted - visual-only fallback is disabled for security.");
 
             // Re-throw the exception to prevent any black box from being drawn

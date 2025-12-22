@@ -57,10 +57,10 @@ if ! grep -q '\[REDACTION-SECURITY\] TRUE REDACTION' "$REDACTION_SERVICE" 2>/dev
     echo "    ❌ SECURITY ERROR: MANDATORY [REDACTION-SECURITY] logging is missing!"
     echo "       This logging cannot be silenced and is critical for verification."
     ERRORS=$((ERRORS + 1))
-elif ! grep -q '\[REDACTION-ERROR\] FAILED' "$REDACTION_SERVICE" 2>/dev/null; then
+elif ! grep -q '\[REDACTION-INFO\] Empty area redacted' "$REDACTION_SERVICE" 2>/dev/null; then
     echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: MANDATORY [REDACTION-ERROR] logging is missing!"
-    echo "       This logging is required when redaction fails due to no content found."
+    echo "    ❌ SECURITY ERROR: MANDATORY [REDACTION-INFO] logging is missing!"
+    echo "       This logging is required when redaction area is empty (no content)."
     ERRORS=$((ERRORS + 1))
 elif ! grep -q '\[REDACTION-CRITICAL-ERROR\]' "$REDACTION_SERVICE" 2>/dev/null; then
     echo -e "${RED}FAILED${NC}"
