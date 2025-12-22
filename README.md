@@ -261,11 +261,10 @@ dotnet publish -c Release -r osx-arm64 --self-contained true -p:PublishSingleFil
 
 ## Documentation
 
-- **[ARCHITECTURE_DIAGRAM.md](ARCHITECTURE_DIAGRAM.md)** - Visual architecture diagrams
-- **[REDACTION_ENGINE.md](REDACTION_ENGINE.md)** - Deep dive on redaction implementation
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Test infrastructure guide
-- **[REDACTION_AI_GUIDELINES.md](REDACTION_AI_GUIDELINES.md)** - Guidelines for AI assistants
-- **[CLAUDE.md](CLAUDE.md)** - Development guidelines
+- **[GitHub Wiki](https://github.com/marctjones/pdfe/wiki)** - Project architecture, redaction engine, testing guide
+- **[AGENT.md](AGENT.md)** - AI assistant guidelines and development documentation
+- **[REDACTION_AI_GUIDELINES.md](REDACTION_AI_GUIDELINES.md)** - Critical guidelines for AI-assisted development
+- **[LICENSES.md](LICENSES.md)** - Complete dependency licensing
 
 ## License
 
