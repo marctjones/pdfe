@@ -15,13 +15,16 @@ namespace PdfEditor.Services.Redaction;
 public class CharacterLevelTextFilter
 {
     private readonly CharacterMatcher _matcher;
+    private readonly TextOperationEmitter _emitter;
     private readonly ILogger<CharacterLevelTextFilter> _logger;
 
     public CharacterLevelTextFilter(
         CharacterMatcher matcher,
+        TextOperationEmitter emitter,
         ILogger<CharacterLevelTextFilter> logger)
     {
         _matcher = matcher;
+        _emitter = emitter;
         _logger = logger;
     }
 
@@ -71,21 +74,9 @@ public class CharacterLevelTextFilter
         // Step 4: Build removed text for clipboard history
         result.RemovedText = BuildRemovedText(runs);
 
-        // Step 5: Build operations for runs to keep
-        foreach (var run in runs.Where(r => r.Keep))
-        {
-            // For now, create PartialTextOperation placeholders
-            // Phase 4 will implement the actual PDF byte generation
-            var partialOp = new PartialTextOperation
-            {
-                BoundingBox = new Rect(run.StartPosition.X, run.StartPosition.Y, run.Width, textOp.BoundingBox.Height),
-                DisplayText = run.Text,
-                OperatorType = GetOperatorName(textOp.OriginalObject),
-                // RawBytes will be populated by TextOperationEmitter in Phase 4
-            };
-
-            result.Operations.Add(partialOp);
-        }
+        // Step 5: Use TextOperationEmitter to generate PDF bytes for runs to keep
+        var partialOps = _emitter.EmitOperations(runs, textOp, letterMap, pageHeight);
+        result.Operations.AddRange(partialOps);
 
         _logger.LogDebug("Filtered '{Text}' into {Kept} kept runs, {Removed} removed runs",
             textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text,
@@ -216,17 +207,4 @@ public class CharacterLevelTextFilter
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Get operator name from CObject for debugging.
-    /// </summary>
-    private string GetOperatorName(PdfSharp.Pdf.Content.Objects.CObject obj)
-    {
-        var opName = obj.GetType().Name;
-
-        // Map common operator types
-        if (opName.Contains("ShowText")) return "Tj";
-        if (opName.Contains("ShowTextArray")) return "TJ";
-
-        return "Tj";  // Default
-    }
 }

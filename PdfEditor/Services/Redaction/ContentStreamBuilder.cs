@@ -34,6 +34,7 @@ public class ContentStreamBuilder
 
         // Log operation type breakdown
         var textOps = operations.OfType<TextOperation>().Count();
+        var partialTextOps = operations.OfType<PartialTextOperation>().Count();
         var pathOps = operations.OfType<PathOperation>().Count();
         var imageOps = operations.OfType<ImageOperation>().Count();
         var inlineImgOps = operations.OfType<InlineImageOperation>().Count();
@@ -42,9 +43,9 @@ public class ContentStreamBuilder
         var genericOps = operations.OfType<GenericOperation>().Count();
 
         _logger.LogDebug(
-            "Operation breakdown: Text={Text}, Path={Path}, Image={Image}, InlineImage={InlineImage}, " +
+            "Operation breakdown: Text={Text}, PartialText={PartialText}, Path={Path}, Image={Image}, InlineImage={InlineImage}, " +
             "State={State}, TextState={TextState}, Generic={Generic}",
-            textOps, pathOps, imageOps, inlineImgOps, stateOps, textStateOps, genericOps);
+            textOps, partialTextOps, pathOps, imageOps, inlineImgOps, stateOps, textStateOps, genericOps);
 
         using var memoryStream = new MemoryStream();
         using var writer = new StreamWriter(memoryStream, Encoding.ASCII);
@@ -70,6 +71,23 @@ public class ContentStreamBuilder
     /// </summary>
     private void WriteOperation(StreamWriter writer, PdfOperation operation)
     {
+        // Handle partial text operations - they have raw PDF bytes
+        if (operation is PartialTextOperation partialText)
+        {
+            // Flush the StreamWriter to ensure proper byte positioning
+            writer.Flush();
+            var baseStream = writer.BaseStream;
+
+            // Write the raw PDF bytes for this partial text operation
+            baseStream.Write(partialText.RawBytes, 0, partialText.RawBytes.Length);
+            baseStream.WriteByte((byte)'\n');  // Add newline after operation
+
+            _logger.LogDebug("Wrote partial text operation: '{Text}' ({Length} bytes)",
+                partialText.DisplayText.Length > 20 ? partialText.DisplayText.Substring(0, 20) + "..." : partialText.DisplayText,
+                partialText.RawBytes.Length);
+            return;
+        }
+
         // Handle inline images specially - they have raw bytes
         if (operation is InlineImageOperation inlineImg)
         {
