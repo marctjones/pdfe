@@ -81,7 +81,12 @@ public class CharacterMatcher
             bool xMatch = letterLeft >= opLeft - xTolerance;
 
             return yMatch && xMatch;
-        }).OrderBy(l => l.GlyphRectangle.Left).ToList();
+        })
+        // CRITICAL: Sort by position to get reading order!
+        // PDFs often encode letters out of order in content stream
+        .OrderBy(l => pageHeight - l.GlyphRectangle.Top)  // Top to bottom
+        .ThenBy(l => l.GlyphRectangle.Left)               // Left to right
+        .ToList();
 
         if (candidateLetters.Count == 0)
         {
