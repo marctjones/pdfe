@@ -97,8 +97,25 @@ public partial class MainWindowViewModel
             throw new System.IO.FileNotFoundException($"File not found: {filePath}", filePath);
         }
 
-        await LoadDocumentAsync(filePath);
-        _logger.LogInformation("[SCRIPT] LoadDocumentCommand completed successfully");
+        // For scripting, we need headless document loading (no thumbnails/rendering)
+        // This avoids blocking on UI operations that require a dispatcher
+        _currentFilePath = filePath;
+        FileState.SetDocument(filePath);
+        RedactionWorkflow.Reset();
+
+        _documentService.LoadDocument(filePath);
+
+        this.RaisePropertyChanged(nameof(DocumentName));
+        this.RaisePropertyChanged(nameof(StatusBarText));
+        this.RaisePropertyChanged(nameof(TotalPages));
+        this.RaisePropertyChanged(nameof(StatusText));
+        this.RaisePropertyChanged(nameof(IsDocumentLoaded));
+
+        AddToRecentFiles(filePath);
+
+        _logger.LogInformation("[SCRIPT] LoadDocumentCommand completed successfully (headless mode - no thumbnails)");
+
+        await Task.CompletedTask;
     }
 
     /// <summary>
