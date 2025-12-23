@@ -1,6 +1,10 @@
 #!/bin/bash
 # Run automation script tests and provide concise summary
 # This script is designed to minimize token usage when reviewing results
+#
+# Usage:
+#   ./run-automation-tests.sh           # Build first, then test
+#   ./run-automation-tests.sh --no-build # Skip build, just test
 
 set -e
 
@@ -9,6 +13,12 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$PROJECT_ROOT/logs"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="$LOG_DIR/automation_tests_$TIMESTAMP.log"
+
+# Parse arguments
+SKIP_BUILD=false
+if [[ "$1" == "--no-build" ]]; then
+    SKIP_BUILD=true
+fi
 
 # Create logs directory
 mkdir -p "$LOG_DIR"
@@ -20,8 +30,22 @@ echo ""
 echo "Log file: $LOG_FILE"
 echo ""
 
-# Run tests and capture output (tee shows live output AND logs to file)
 cd "$PROJECT_ROOT"
+
+# Build tests first (unless --no-build specified)
+if [ "$SKIP_BUILD" = false ]; then
+    echo "Building tests to pick up latest code changes..."
+    dotnet build PdfEditor.Tests/PdfEditor.Tests.csproj --nologo -v quiet
+    if [ $? -eq 0 ]; then
+        echo "✅ Build successful"
+    else
+        echo "❌ Build failed"
+        exit 1
+    fi
+    echo ""
+fi
+
+# Run tests and capture output (tee shows live output AND logs to file)
 echo "Running: dotnet test --filter \"AutomationScript\" ..."
 echo ""
 echo "Live output below (also logging to $LOG_FILE):"
@@ -31,6 +55,7 @@ echo ""
 dotnet test PdfEditor.Tests/PdfEditor.Tests.csproj \
     --filter "AutomationScript" \
     --logger "console;verbosity=normal" \
+    --no-build \
     2>&1 | tee "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}
