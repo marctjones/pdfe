@@ -75,13 +75,11 @@ try
         var pdfPath = selectedPdfs[i];
         var filename = Path.GetFileName(pdfPath);
 
-        // Progress indicator
-        if ((i + 1) % 10 == 0)
-        {
-            var elapsed = stopwatch.Elapsed;
-            var rate = (i + 1) / elapsed.TotalSeconds;
-            Console.WriteLine($"\n  Progress: {i + 1}/{selectedPdfs.Count} ({(i + 1) * 100 / selectedPdfs.Count}%) - {rate:F1} PDF/sec");
-        }
+        // Progress indicator for every PDF
+        var progress = ((i + 1) * 100) / selectedPdfs.Count;
+        var elapsed = stopwatch.Elapsed;
+        var rate = elapsed.TotalSeconds > 0 ? (i + 1) / elapsed.TotalSeconds : 0;
+        Console.WriteLine($"\n  [{i + 1}/{selectedPdfs.Count}] ({progress}%) - {rate:F1} PDF/sec - {filename}");
 
         try
         {
