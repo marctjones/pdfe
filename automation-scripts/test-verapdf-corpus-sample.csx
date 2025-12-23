@@ -18,7 +18,20 @@ using System.Collections.Generic;
 Console.WriteLine("=== GUI Test: veraPDF Corpus Sample ===");
 
 // Configuration
-var corpusRoot = "/home/marc/pdfe/test-pdfs/veraPDF-corpus";
+// Find repository root
+var repoRoot = Directory.GetCurrentDirectory();
+while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+{
+    repoRoot = Directory.GetParent(repoRoot)?.FullName;
+}
+
+if (repoRoot == null)
+{
+    Console.WriteLine("❌ FAIL: Could not find repository root");
+    return 1;
+}
+
+var corpusRoot = Path.Combine(repoRoot, "test-pdfs", "verapdf-corpus");
 var sampleSize = 20; // Test with 20 random PDFs
 var outputDir = "/tmp/pdfe-corpus-test";
 

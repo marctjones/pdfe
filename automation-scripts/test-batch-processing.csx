@@ -17,9 +17,22 @@ using System.Diagnostics;
 Console.WriteLine("=== GUI Test: Batch Processing Workflow ===");
 
 // Configuration
-var inputDir = args.Length > 0 ? args[0] : "/home/marc/pdfe/test-pdfs/veraPDF-corpus/PDF-A";
-var outputDir = args.Length > 1 ? args[1] : "/tmp/pdfe-batch-output";
-var maxFiles = args.Length > 2 ? int.Parse(args[2]) : 10;
+// Find repository root
+var repoRoot = Directory.GetCurrentDirectory();
+while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+{
+    repoRoot = Directory.GetParent(repoRoot)?.FullName;
+}
+
+if (repoRoot == null)
+{
+    Console.WriteLine("❌ FAIL: Could not find repository root");
+    return 1;
+}
+
+var inputDir = Path.Combine(repoRoot, "test-pdfs", "verapdf-corpus", "veraPDF-corpus-master", "PDF-A");
+var outputDir = "/tmp/pdfe-batch-output";
+var maxFiles = 10;
 
 var termsToRedact = new[] { "test", "sample", "example", "data" };
 
