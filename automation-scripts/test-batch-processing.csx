@@ -67,7 +67,7 @@ try
         try
         {
             // Load document
-            await LoadDocumentCommand.Execute(inputPath);
+            await LoadDocumentCommand(inputPath);
 
             if (CurrentDocument == null)
             {
@@ -85,7 +85,7 @@ try
             foreach (var term in termsToRedact)
             {
                 var beforeCount = PendingRedactions.Count;
-                await RedactTextCommand.Execute(term);
+                await RedactTextCommand(term);
                 var afterCount = PendingRedactions.Count;
                 var added = afterCount - beforeCount;
 
@@ -101,13 +101,13 @@ try
                 Console.WriteLine($"    Total redactions: {totalRedactions}");
 
                 // Apply redactions
-                await ApplyRedactionsCommand.Execute();
+                await ApplyRedactionsCommand();
 
                 // Save with naming convention: original_name_REDACTED.pdf
                 var outputFilename = Path.GetFileNameWithoutExtension(filename) + "_REDACTED.pdf";
                 var outputPath = Path.Combine(outputDir, outputFilename);
 
-                await SaveDocumentCommand.Execute(outputPath);
+                await SaveDocumentCommand(outputPath);
 
                 if (File.Exists(outputPath))
                 {

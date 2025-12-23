@@ -123,7 +123,7 @@ try
         try
         {
             // Load document
-            await LoadDocumentCommand.Execute(pdfPath);
+            await LoadDocumentCommand(pdfPath);
 
             if (CurrentDocument == null)
             {
@@ -138,7 +138,7 @@ try
             // Try to redact a common word (if document has extractable text)
             // Using "the" as it's likely to appear in many documents
             var beforeCount = PendingRedactions.Count;
-            await RedactTextCommand.Execute("the");
+            await RedactTextCommand("the");
             var afterCount = PendingRedactions.Count;
             var redactionsAdded = afterCount - beforeCount;
 
@@ -147,11 +147,11 @@ try
                 Console.WriteLine($"    Redactions: {redactionsAdded} area(s) created");
 
                 // Apply redactions
-                await ApplyRedactionsCommand.Execute();
+                await ApplyRedactionsCommand();
 
                 // Save to output
                 var outputPath = Path.Combine(outputDir, $"redacted_{filename}");
-                await SaveDocumentCommand.Execute(outputPath);
+                await SaveDocumentCommand(outputPath);
 
                 if (File.Exists(outputPath))
                 {

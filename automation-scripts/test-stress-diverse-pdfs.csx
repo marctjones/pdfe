@@ -73,7 +73,7 @@ try
         try
         {
             // Load document
-            await LoadDocumentCommand.Execute(pdfPath);
+            await LoadDocumentCommand(pdfPath);
 
             if (CurrentDocument == null)
             {
@@ -85,7 +85,7 @@ try
 
             // Try to redact a word
             var beforeCount = PendingRedactions.Count;
-            await RedactTextCommand.Execute("test");
+            await RedactTextCommand("test");
             var afterCount = PendingRedactions.Count;
             var redactionsAdded = afterCount - beforeCount;
 
@@ -94,11 +94,11 @@ try
                 totalRedactions += redactionsAdded;
 
                 // Apply redactions
-                await ApplyRedactionsCommand.Execute();
+                await ApplyRedactionsCommand();
 
                 // Save (optional - comment out to speed up test)
                 // var outputPath = Path.Combine(outputDir, $"stress_{i:D3}_{filename}");
-                // await SaveDocumentCommand.Execute(outputPath);
+                // await SaveDocumentCommand(outputPath);
             }
 
             successCount++;

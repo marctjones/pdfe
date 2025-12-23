@@ -45,7 +45,7 @@ try
 {
     // Step 1: Load document
     Console.WriteLine($"\n[1/5] Loading document: {sourcePdf}");
-    await LoadDocumentCommand.Execute(sourcePdf);
+    await LoadDocumentCommand(sourcePdf);
 
     if (CurrentDocument == null)
     {
@@ -58,7 +58,7 @@ try
     Console.WriteLine($"\n[2/5] Redacting text: '{textToRedact}'");
     var initialPendingCount = PendingRedactions.Count;
 
-    await RedactTextCommand.Execute(textToRedact);
+    await RedactTextCommand(textToRedact);
 
     var newPendingCount = PendingRedactions.Count;
     var redactionsAdded = newPendingCount - initialPendingCount;
@@ -72,7 +72,7 @@ try
 
     // Step 3: Apply redactions
     Console.WriteLine($"\n[3/5] Applying redactions");
-    await ApplyRedactionsCommand.Execute();
+    await ApplyRedactionsCommand();
 
     if (PendingRedactions.Count > 0)
     {
@@ -83,7 +83,7 @@ try
 
     // Step 4: Save document
     Console.WriteLine($"\n[4/5] Saving to: {outputPdf}");
-    await SaveDocumentCommand.Execute(outputPdf);
+    await SaveDocumentCommand(outputPdf);
 
     if (!File.Exists(outputPdf))
     {
