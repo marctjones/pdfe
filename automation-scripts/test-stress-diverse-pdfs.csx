@@ -106,10 +106,37 @@ try
                 continue;
             }
 
-            // Try to redact a word
-            Console.WriteLine($"    Searching...");
+            // Extract text and pick a word to redact
+            var textBefore = ExtractAllText();
+
+            if (string.IsNullOrWhiteSpace(textBefore))
+            {
+                Console.WriteLine($"    ⚠️  No text, skipping");
+                successCount++; // Count as success, just no text to redact
+                continue;
+            }
+
+            // Quick word selection: just pick first suitable word
+            var words = textBefore
+                .Split(new[] { ' ', '\n', '\r', '\t', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']' },
+                       StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 3 && w.Length <= 10)
+                .Where(w => w.All(c => char.IsLetterOrDigit(c)))
+                .Take(20)  // Just look at first 20 words for speed
+                .ToList();
+
+            if (words.Count == 0)
+            {
+                Console.WriteLine($"    ⚠️  No suitable words, skipping");
+                successCount++;
+                continue;
+            }
+
+            var wordToRedact = words[0].ToLower();  // Just pick first word
+            Console.WriteLine($"    Redacting: '{wordToRedact}'");
+
             var beforeCount = PendingRedactions.Count;
-            await RedactTextCommand("test");
+            await RedactTextCommand(wordToRedact);
             var afterCount = PendingRedactions.Count;
             var redactionsAdded = afterCount - beforeCount;
 
