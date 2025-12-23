@@ -154,7 +154,7 @@ public class AutomationScriptTests
         _output.WriteLine("Birth certificate redaction works end-to-end via GUI");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Corpus test")]
+    [Fact]
     public async Task AutomationScript_VeraPdfCorpusSample_ExecutesSuccessfully()
     {
         // Test redaction across diverse PDF standards from veraPDF corpus
@@ -175,7 +175,7 @@ public class AutomationScriptTests
         _output.WriteLine("GUI handles diverse PDF structures (PDF/A, PDF/UA, ISO 32000)");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Stress test")]
+    [Fact]
     public async Task AutomationScript_StressDiversePdfs_ExecutesSuccessfully()
     {
         // Stress test: Process 100 diverse PDFs sequentially
@@ -196,7 +196,7 @@ public class AutomationScriptTests
         _output.WriteLine("GUI maintains stability processing 100 diverse PDFs");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Batch processing")]
+    [Fact]
     public async Task AutomationScript_BatchProcessing_ExecutesSuccessfully()
     {
         // Test realistic batch processing workflow
