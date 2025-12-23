@@ -155,6 +155,28 @@ public class AutomationScriptTests
     }
 
     [Fact]
+    public async Task AutomationScript_BirthCertificateSpecificWords_ExecutesSuccessfully()
+    {
+        // Targeted test: specific known words in birth certificate PDF
+        // Tests precision, case handling, word boundaries
+
+        // Arrange
+        var viewModel = new MainWindowViewModel();
+
+        // Act
+        var result = await RunAutomationScriptAsync("test-birth-certificate-specific-words.csx", viewModel);
+
+        // Assert
+        result.Success.Should().BeTrue("script should compile and execute");
+
+        var exitCode = Convert.ToInt32(result.ReturnValue);
+        exitCode.Should().Be(0, "all specific word redaction tests should pass");
+
+        _output.WriteLine("\n✅ Specific word redaction validated");
+        _output.WriteLine("Known words correctly redacted from known PDF");
+    }
+
+    [Fact]
     public async Task AutomationScript_VeraPdfCorpusSample_ExecutesSuccessfully()
     {
         // Test redaction across diverse PDF standards from veraPDF corpus
@@ -227,6 +249,7 @@ public class AutomationScriptTests
             "test-load-document.csx",
             "test-redact-text.csx",
             "test-birth-certificate.csx",
+            "test-birth-certificate-specific-words.csx",
             "test-verapdf-corpus-sample.csx",
             "test-stress-diverse-pdfs.csx",
             "test-batch-processing.csx",
