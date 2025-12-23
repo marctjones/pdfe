@@ -16,7 +16,20 @@ using System.Collections.Generic;
 
 Console.WriteLine("=== GUI Stress Test: Process 100 Diverse PDFs ===");
 
-var corpusRoot = "/home/marc/pdfe/test-pdfs/veraPDF-corpus";
+// Find repository root
+var repoRoot = Directory.GetCurrentDirectory();
+while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+{
+    repoRoot = Directory.GetParent(repoRoot)?.FullName;
+}
+
+if (repoRoot == null)
+{
+    Console.WriteLine("❌ FAIL: Could not find repository root");
+    return 1;
+}
+
+var corpusRoot = Path.Combine(repoRoot, "test-pdfs", "verapdf-corpus");
 var testCount = 100;
 var outputDir = "/tmp/pdfe-stress-test";
 
