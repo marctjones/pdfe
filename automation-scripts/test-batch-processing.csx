@@ -71,11 +71,14 @@ try
 
     var stopwatch = Stopwatch.StartNew();
     var results = new List<(string filename, int pages, int redactions, bool success, string message)>();
+    var currentIndex = 0;
 
     foreach (var inputPath in pdfFiles)
     {
+        currentIndex++;
         var filename = Path.GetFileName(inputPath);
-        Console.WriteLine($"\n  Processing: {filename}");
+        var progress = (currentIndex * 100) / pdfFiles.Count;
+        Console.WriteLine($"\n  [{currentIndex}/{pdfFiles.Count}] ({progress}%) Processing: {filename}");
 
         try
         {

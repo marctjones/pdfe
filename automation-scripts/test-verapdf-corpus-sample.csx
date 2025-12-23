@@ -125,13 +125,16 @@ try
     int successCount = 0;
     int failureCount = 0;
     int skipCount = 0;
+    int currentIndex = 0;
 
     var results = new List<(string category, string filename, string status, string message)>();
 
     foreach (var (category, pdfPath) in selectedPdfs)
     {
+        currentIndex++;
         var filename = Path.GetFileName(pdfPath);
-        Console.WriteLine($"\n  Testing: {filename} ({category})");
+        var progress = (currentIndex * 100) / selectedPdfs.Count;
+        Console.WriteLine($"\n  [{currentIndex}/{selectedPdfs.Count}] ({progress}%) Testing: {filename} ({category})");
 
         try
         {
