@@ -164,21 +164,72 @@ try
                 continue;
             }
 
-            // Extract text BEFORE redaction to verify word exists
-            Console.WriteLine($"    Extracting text for verification...");
+            // Extract text and intelligently select a word to redact
+            Console.WriteLine($"    Extracting text to select redaction target...");
             var textBefore = ExtractAllText();
-            var wordToRedact = "test";
-            var containsWord = textBefore.ToLower().Contains(wordToRedact.ToLower());
 
-            if (!containsWord)
+            if (string.IsNullOrWhiteSpace(textBefore))
             {
-                Console.WriteLine($"    ⚠️  SKIP - Word '{wordToRedact}' not found in PDF text");
-                results.Add((category, filename, "SKIP", $"Word '{wordToRedact}' not in PDF"));
+                Console.WriteLine($"    ⚠️  SKIP - No extractable text in PDF");
+                results.Add((category, filename, "SKIP", "No extractable text"));
                 skipCount++;
                 continue;
             }
 
-            Console.WriteLine($"    ✅ Verified '{wordToRedact}' exists in PDF (before)");
+            // Parse words from extracted text (simple word extraction)
+            var words = textBefore
+                .Split(new[] { ' ', '\n', '\r', '\t', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}' },
+                       StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 3 && w.Length <= 15)  // Reasonable word length
+                .Where(w => w.All(c => char.IsLetterOrDigit(c)))  // Only alphanumeric
+                .ToList();
+
+            if (words.Count == 0)
+            {
+                Console.WriteLine($"    ⚠️  SKIP - No suitable words found for redaction");
+                results.Add((category, filename, "SKIP", "No suitable words"));
+                skipCount++;
+                continue;
+            }
+
+            // Find a word that occurs 1-5 times (good for testing without being overwhelming)
+            var wordCounts = words.GroupBy(w => w.ToLower())
+                .Select(g => new { Word = g.Key, Count = g.Count() })
+                .Where(x => x.Count >= 1 && x.Count <= 5)
+                .OrderBy(x => x.Count)  // Prefer fewer occurrences first
+                .ToList();
+
+            string wordToRedact;
+            int expectedOccurrences;
+
+            if (wordCounts.Count > 0)
+            {
+                // Pick first word with 1-5 occurrences
+                var selected = wordCounts[0];
+                wordToRedact = selected.Word;
+                expectedOccurrences = selected.Count;
+            }
+            else
+            {
+                // Fallback: just pick any word (even if it occurs many times)
+                var fallbackCounts = words.GroupBy(w => w.ToLower())
+                    .Select(g => new { Word = g.Key, Count = g.Count() })
+                    .OrderBy(x => x.Count)
+                    .FirstOrDefault();
+
+                if (fallbackCounts == null)
+                {
+                    Console.WriteLine($"    ⚠️  SKIP - Could not select redaction target");
+                    results.Add((category, filename, "SKIP", "No redaction target");
+                    skipCount++;
+                    continue;
+                }
+
+                wordToRedact = fallbackCounts.Word;
+                expectedOccurrences = fallbackCounts.Count;
+            }
+
+            Console.WriteLine($"    Selected word: '{wordToRedact}' (occurs {expectedOccurrences}x)");
 
             // Now redact the word
             Console.WriteLine($"    Searching and marking redactions...");
@@ -190,50 +241,55 @@ try
             var redactionsAdded = afterCount - beforeCount;
             Console.WriteLine($"    Search time: {searchTime:F1}s");
 
-            if (redactionsAdded > 0)
+            if (redactionsAdded == 0)
             {
-                Console.WriteLine($"    Redactions: {redactionsAdded} area(s) created");
+                Console.WriteLine($"    ⚠️  WARNING - Expected {expectedOccurrences} redactions, found 0");
+                Console.WriteLine($"    This may indicate search/coordinate issues");
+                results.Add((category, filename, "FAIL", $"Found 0 redactions for '{wordToRedact}'"));
+                failureCount++;
+                continue;
+            }
 
-                // Apply redactions
-                await ApplyRedactionsCommand();
+            Console.WriteLine($"    Redactions: {redactionsAdded} area(s) created (expected ~{expectedOccurrences})");
 
-                // Save to output
-                var outputPath = Path.Combine(outputDir, $"redacted_{filename}");
-                await SaveDocumentCommand(outputPath);
+            // Note: redactionsAdded might not exactly match expectedOccurrences due to:
+            // - Substring matching issues (#87)
+            // - Case sensitivity variations
+            // - Word boundary detection
+            // As long as we found SOME, we can test the redaction workflow
 
-                if (!File.Exists(outputPath))
-                {
-                    Console.WriteLine($"    ❌ FAIL - Output file not created");
-                    results.Add((category, filename, "FAIL", "Output not created"));
-                    failureCount++;
-                    continue;
-                }
+            // Apply redactions
+            await ApplyRedactionsCommand();
 
-                // Verify AFTER redaction by loading output and extracting text
-                Console.WriteLine($"    Verifying redaction (loading saved file)...");
-                await LoadDocumentCommand(outputPath);
-                var textAfter = ExtractAllText();
-                var stillContainsWord = textAfter.ToLower().Contains(wordToRedact.ToLower());
+            // Save to output
+            var outputPath = Path.Combine(outputDir, $"redacted_{filename}");
+            await SaveDocumentCommand(outputPath);
 
-                if (stillContainsWord)
-                {
-                    Console.WriteLine($"    ❌ FAIL - Word '{wordToRedact}' still found after redaction!");
-                    results.Add((category, filename, "FAIL", $"Word '{wordToRedact}' not removed"));
-                    failureCount++;
-                }
-                else
-                {
-                    Console.WriteLine($"    ✅ SUCCESS - Word '{wordToRedact}' completely removed");
-                    results.Add((category, filename, "SUCCESS", $"{redactionsAdded} redactions verified"));
-                    successCount++;
-                }
+            if (!File.Exists(outputPath))
+            {
+                Console.WriteLine($"    ❌ FAIL - Output file not created");
+                results.Add((category, filename, "FAIL", "Output not created"));
+                failureCount++;
+                continue;
+            }
+
+            // Verify AFTER redaction by loading output and extracting text
+            Console.WriteLine($"    Verifying redaction (loading saved file)...");
+            await LoadDocumentCommand(outputPath);
+            var textAfter = ExtractAllText();
+            var stillContainsWord = textAfter.ToLower().Contains(wordToRedact.ToLower());
+
+            if (stillContainsWord)
+            {
+                Console.WriteLine($"    ❌ FAIL - Word '{wordToRedact}' still found after redaction!");
+                results.Add((category, filename, "FAIL", $"Word '{wordToRedact}' not removed"));
+                failureCount++;
             }
             else
             {
-                // No text to redact - still a success (document processed without error)
-                Console.WriteLine($"    ⚠️  SKIP - No extractable text");
-                results.Add((category, filename, "SKIP", "No extractable text"));
-                skipCount++;
+                Console.WriteLine($"    ✅ SUCCESS - Word '{wordToRedact}' completely removed");
+                results.Add((category, filename, "SUCCESS", $"{redactionsAdded} redactions verified"));
+                successCount++;
             }
         }
         catch (Exception ex)
