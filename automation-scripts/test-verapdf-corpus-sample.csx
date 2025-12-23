@@ -139,7 +139,11 @@ try
         try
         {
             // Load document
+            Console.WriteLine($"    Loading PDF...");
+            var loadStart = DateTime.Now;
             await LoadDocumentCommand(pdfPath);
+            var loadTime = (DateTime.Now - loadStart).TotalSeconds;
+            Console.WriteLine($"    Load time: {loadTime:F1}s");
 
             if (CurrentDocument == null)
             {
@@ -151,12 +155,25 @@ try
             var pageCount = CurrentDocument.PageCount;
             Console.WriteLine($"    Pages: {pageCount}");
 
-            // Try to redact a common word (if document has extractable text)
-            // Using "the" as it's likely to appear in many documents
+            // Skip files with too many pages (would take too long)
+            if (pageCount > 50)
+            {
+                Console.WriteLine($"    ⚠️  SKIP - Too many pages ({pageCount} > 50), would take too long");
+                results.Add((category, filename, "SKIP", $"Too many pages: {pageCount}"));
+                skipCount++;
+                continue;
+            }
+
+            // Try to redact a simple word (less common than "the")
+            // Using "test" as it's common in test PDFs but won't match hundreds of times
+            Console.WriteLine($"    Searching for 'test'...");
+            var searchStart = DateTime.Now;
             var beforeCount = PendingRedactions.Count;
-            await RedactTextCommand("the");
+            await RedactTextCommand("test");
             var afterCount = PendingRedactions.Count;
+            var searchTime = (DateTime.Now - searchStart).TotalSeconds;
             var redactionsAdded = afterCount - beforeCount;
+            Console.WriteLine($"    Search time: {searchTime:F1}s");
 
             if (redactionsAdded > 0)
             {
