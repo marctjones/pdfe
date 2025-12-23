@@ -107,7 +107,9 @@ try
             }
 
             // Extract text and pick a word to redact
+            Console.WriteLine($"    Extracting text...");
             var textBefore = ExtractAllText();
+            Console.WriteLine($"    Extracted {textBefore.Length} chars");
 
             if (string.IsNullOrWhiteSpace(textBefore))
             {
@@ -143,8 +145,10 @@ try
             if (redactionsAdded > 0)
             {
                 totalRedactions += redactionsAdded;
+                Console.WriteLine($"    Found {redactionsAdded} match(es)");
 
                 // Apply redactions
+                Console.WriteLine($"    Applying...");
                 await ApplyRedactionsCommand();
 
                 // Save (optional - comment out to speed up test)

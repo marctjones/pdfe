@@ -166,7 +166,10 @@ try
 
             // Extract text and intelligently select a word to redact
             Console.WriteLine($"    Extracting text to select redaction target...");
+            var extractStart = DateTime.Now;
             var textBefore = ExtractAllText();
+            var extractTime = (DateTime.Now - extractStart).TotalSeconds;
+            Console.WriteLine($"    Extracted {textBefore.Length} chars in {extractTime:F1}s");
 
             if (string.IsNullOrWhiteSpace(textBefore))
             {
@@ -177,12 +180,15 @@ try
             }
 
             // Parse words from extracted text (simple word extraction)
+            Console.WriteLine($"    Parsing words...");
             var words = textBefore
                 .Split(new[] { ' ', '\n', '\r', '\t', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}' },
                        StringSplitOptions.RemoveEmptyEntries)
                 .Where(w => w.Length >= 3 && w.Length <= 15)  // Reasonable word length
                 .Where(w => w.All(c => char.IsLetterOrDigit(c)))  // Only alphanumeric
                 .ToList();
+
+            Console.WriteLine($"    Found {words.Count} candidate words");
 
             if (words.Count == 0)
             {
@@ -259,10 +265,12 @@ try
             // As long as we found SOME, we can test the redaction workflow
 
             // Apply redactions
+            Console.WriteLine($"    Applying redactions...");
             await ApplyRedactionsCommand();
 
             // Save to output
             var outputPath = Path.Combine(outputDir, $"redacted_{filename}");
+            Console.WriteLine($"    Saving redacted PDF...");
             await SaveDocumentCommand(outputPath);
 
             if (!File.Exists(outputPath))

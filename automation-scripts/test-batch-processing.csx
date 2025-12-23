@@ -105,6 +105,7 @@ try
             }
 
             // Redact all terms
+            Console.WriteLine($"    Redacting {termsToRedact.Length} term(s)...");
             var totalRedactions = 0;
 
             foreach (var term in termsToRedact)
@@ -126,12 +127,14 @@ try
                 Console.WriteLine($"    Total redactions: {totalRedactions}");
 
                 // Apply redactions
+                Console.WriteLine($"    Applying redactions...");
                 await ApplyRedactionsCommand();
 
                 // Save with naming convention: original_name_REDACTED.pdf
                 var outputFilename = Path.GetFileNameWithoutExtension(filename) + "_REDACTED.pdf";
                 var outputPath = Path.Combine(outputDir, outputFilename);
 
+                Console.WriteLine($"    Saving: {outputFilename}");
                 await SaveDocumentCommand(outputPath);
 
                 if (File.Exists(outputPath))
