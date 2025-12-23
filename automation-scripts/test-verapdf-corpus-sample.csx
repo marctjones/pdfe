@@ -220,7 +220,7 @@ try
                 if (fallbackCounts == null)
                 {
                     Console.WriteLine($"    ⚠️  SKIP - Could not select redaction target");
-                    results.Add((category, filename, "SKIP", "No redaction target");
+                    results.Add((category, filename, "SKIP", "No redaction target"));
                     skipCount++;
                     continue;
                 }
