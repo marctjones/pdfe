@@ -116,7 +116,7 @@ public class AutomationScriptTests
         exitCode.Should().Be(0, "script should pass all assertions");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - RedactTextCommand not implemented yet")]
+    [Fact]
     public async Task AutomationScript_RedactText_ExecutesSuccessfully()
     {
         // Arrange
@@ -132,7 +132,7 @@ public class AutomationScriptTests
         exitCode.Should().Be(0, "complete redaction workflow should succeed");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Birth certificate workflow not implemented yet")]
+    [Fact]
     public async Task AutomationScript_BirthCertificate_ExecutesSuccessfully()
     {
         // This is the CORNERSTONE TEST for v1.3.0 milestone
