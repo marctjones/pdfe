@@ -35,21 +35,40 @@ public partial class MainWindowViewModel
     public System.Collections.ObjectModel.ObservableCollection<PdfEditor.Models.PendingRedaction> PendingRedactions =>
         RedactionWorkflow.PendingRedactions;
 
-    // Scripting Commands (exposed to Roslyn scripts)
-    public ReactiveCommand<string, Unit> LoadDocumentCommand { get; private set; } = null!;
-    public ReactiveCommand<string, Unit> RedactTextCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ApplyRedactionsCommand { get; private set; } = null!;
-    public ReactiveCommand<string, Unit> SaveDocumentCommand { get; private set; } = null!;
+    // Scripting Commands (exposed to Roslyn scripts as Task-based wrappers)
+    // Note: These are NOT ReactiveCommands - they're simple Task-returning methods for scripting
+
+    /// <summary>
+    /// Load a document (for Roslyn scripts).
+    /// Returns a Task that completes when the document is loaded.
+    /// </summary>
+    public Task LoadDocumentCommand(string filePath) => LoadDocumentViaScriptAsync(filePath);
+
+    /// <summary>
+    /// Redact all occurrences of text (for Roslyn scripts).
+    /// Returns a Task that completes when redactions are marked.
+    /// </summary>
+    public Task RedactTextCommand(string text) => RedactTextViaScriptAsync(text);
+
+    /// <summary>
+    /// Apply all pending redactions (for Roslyn scripts).
+    /// Returns a Task that completes when redactions are applied.
+    /// </summary>
+    public Task ApplyRedactionsCommand() => ApplyRedactionsViaScriptAsync();
+
+    /// <summary>
+    /// Save the document (for Roslyn scripts).
+    /// Returns a Task that completes when the document is saved.
+    /// </summary>
+    public Task SaveDocumentCommand(string filePath) => SaveDocumentViaScriptAsync(filePath);
 
     /// <summary>
     /// Initialize scripting commands (call from main constructor)
     /// </summary>
     private void InitializeScriptingCommands()
     {
-        LoadDocumentCommand = ReactiveCommand.CreateFromTask<string>(LoadDocumentViaScriptAsync);
-        RedactTextCommand = ReactiveCommand.CreateFromTask<string>(RedactTextViaScriptAsync);
-        ApplyRedactionsCommand = ReactiveCommand.CreateFromTask(ApplyRedactionsViaScriptAsync);
-        SaveDocumentCommand = ReactiveCommand.CreateFromTask<string>(SaveDocumentViaScriptAsync);
+        // Scripting commands are now simple Task-returning methods (not ReactiveCommands)
+        // No initialization needed
     }
 
     /// <summary>

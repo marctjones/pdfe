@@ -60,7 +60,7 @@ try
     Console.WriteLine($"\n[Step 1/5] Loading birth certificate");
     Console.WriteLine($"  Source: {sourcePdf}");
 
-    await LoadDocumentCommand.Execute(sourcePdf);
+    await LoadDocumentCommand(sourcePdf);
 
     if (CurrentDocument == null)
     {
@@ -82,7 +82,7 @@ try
         Console.WriteLine($"  Searching for: '{term}'");
 
         var beforeCount = PendingRedactions.Count;
-        await RedactTextCommand.Execute(term);
+        await RedactTextCommand(term);
         var afterCount = PendingRedactions.Count;
 
         var added = afterCount - beforeCount;
@@ -111,7 +111,7 @@ try
     // Step 3: Apply redactions
     Console.WriteLine($"\n[Step 3/5] Applying {totalRedactions} redaction(s)");
 
-    await ApplyRedactionsCommand.Execute();
+    await ApplyRedactionsCommand();
 
     if (PendingRedactions.Count > 0)
     {
@@ -124,7 +124,7 @@ try
     // Step 4: Save redacted document
     Console.WriteLine($"\n[Step 4/5] Saving redacted document");
 
-    await SaveDocumentCommand.Execute(outputPdf);
+    await SaveDocumentCommand(outputPdf);
 
     if (!File.Exists(outputPdf))
     {
