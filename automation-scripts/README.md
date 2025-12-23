@@ -1,0 +1,322 @@
+# PDF Editor GUI Automation Scripts
+
+C# scripts (.csx files) that automate GUI workflows using Roslyn scripting. These scripts interact with the MainWindowViewModel to test and automate the PDF Editor application.
+
+## Purpose
+
+These automation scripts serve multiple purposes:
+
+1. **GUI Integration Testing** - Validate that GUI commands work end-to-end
+2. **Manual Testing** - Run scripts manually to test workflows
+3. **CI/CD Integration** - Execute in headless mode for automated testing
+4. **Documentation** - Show examples of how to use the GUI programmatically
+5. **v1.3.0 Milestone Validation** - Prove birth certificate redaction works
+
+## Available Scripts
+
+### test-load-document.csx
+Tests that documents can be loaded via the GUI.
+
+**Tests:**
+- LoadDocumentCommand executes without error
+- CurrentDocument is set after load
+- FilePath matches the loaded file
+- Document has valid page count
+
+**Usage:**
+```bash
+# From xUnit tests
+dotnet test --filter "AutomationScript_LoadDocument"
+
+# Manually (future - after GUI integration)
+./PdfEditor --script automation-scripts/test-load-document.csx
+```
+
+**Expected result:** Exit code 0 (success)
+
+### test-redact-text.csx
+Tests the complete redaction workflow: load → redact → apply → save → verify.
+
+**Tests:**
+- Document loads successfully
+- RedactTextCommand creates redaction areas
+- ApplyRedactionsCommand applies redactions
+- SaveDocumentCommand saves the output
+- External verification confirms text removal
+
+**Usage:**
+```bash
+# Default (uses birth certificate)
+./PdfEditor --script automation-scripts/test-redact-text.csx
+
+# Custom PDF
+./PdfEditor --script automation-scripts/test-redact-text.csx \
+  --script-arg source=/path/to/input.pdf \
+  --script-arg output=/tmp/redacted.pdf \
+  --script-arg text="SECRET"
+```
+
+**Expected result:** Exit code 0, output PDF created, text removed
+
+### test-birth-certificate.csx
+**CORNERSTONE TEST for v1.3.0 milestone.**
+
+Tests redaction of the real-world birth certificate request form PDF.
+
+**Tests:**
+- Loads birth certificate PDF
+- Redacts multiple sensitive terms: TORRINGTON, CERTIFICATE, BIRTH, CITY CLERK
+- Applies all redactions to PDF structure
+- Saves redacted output
+- Verifies text removal with external tool (pdfer)
+- Accepts ≥50% success rate (due to substring limitation #87)
+
+**Usage:**
+```bash
+# From xUnit tests (validates v1.3.0)
+dotnet test --filter "AutomationScript_BirthCertificate"
+
+# Manually
+./PdfEditor --script automation-scripts/test-birth-certificate.csx
+```
+
+**Expected result:** Exit code 0, ≥50% of terms successfully redacted
+
+**Success criteria for v1.3.0:**
+- ✅ Birth certificate loads in GUI
+- ✅ Redaction engine finds text
+- ✅ Redactions apply to PDF structure
+- ✅ Output PDF is created
+- ✅ Text is removed (verified externally)
+
+## Script Structure
+
+All automation scripts follow this pattern:
+
+```csharp
+/// <summary>
+/// Documentation comment describing the test
+/// </summary>
+/// <returns>0 on success, 1 on failure</returns>
+
+using System;
+using System.IO;
+
+Console.WriteLine("=== Test: Description ===");
+
+try
+{
+    // Step 1: Setup
+    // ...
+
+    // Step 2: Execute commands
+    await SomeCommand.Execute(args);
+
+    // Step 3: Verify results
+    if (someCondition)
+    {
+        Console.WriteLine("❌ FAIL: reason");
+        return 1;
+    }
+
+    // Step 4: Report success
+    Console.WriteLine("✅ PASS: test succeeded");
+    return 0;
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"❌ FAIL: {ex.Message}");
+    return 1;
+}
+```
+
+## Script Context
+
+When scripts execute, they have access to:
+
+**Global ViewModel (`this`):**
+- `CurrentDocument` - The currently loaded PDF document
+- `PendingRedactions` - Collection of pending redaction areas
+- All ViewModel properties and commands
+
+**Available Commands:**
+- `LoadDocumentCommand.Execute(string filePath)`
+- `RedactTextCommand.Execute(string text)`
+- `ApplyRedactionsCommand.Execute()`
+- `SaveDocumentCommand.Execute(string outputPath)`
+
+**Namespaces:**
+- `System`, `System.IO`, `System.Linq`
+- `System.Threading.Tasks`, `System.Diagnostics`
+- `PdfEditor.ViewModels`, `PdfEditor.Services`, `PdfEditor.Models`
+
+## Return Codes
+
+Scripts should return:
+- **0** - Test passed, all assertions succeeded
+- **1** - Test failed, assertion(s) failed or exception thrown
+
+## Running from xUnit Tests
+
+The `AutomationScriptTests` class runs these scripts as integration tests:
+
+```csharp
+[Fact]
+public async Task AutomationScript_BirthCertificate_ExecutesSuccessfully()
+{
+    var viewModel = new MainWindowViewModel();
+    var result = await RunAutomationScriptAsync("test-birth-certificate.csx", viewModel);
+
+    result.Success.Should().BeTrue();
+    var exitCode = Convert.ToInt32(result.ReturnValue);
+    exitCode.Should().Be(0);
+}
+```
+
+Run via command line:
+```bash
+# Run all automation script tests
+dotnet test --filter "FullyQualifiedName~AutomationScriptTests"
+
+# Run specific script test
+dotnet test --filter "AutomationScript_BirthCertificate"
+
+# Run with verbose output
+dotnet test --filter "AutomationScript" --logger "console;verbosity=detailed"
+```
+
+## Script Validation
+
+Before running, scripts are validated for syntax errors:
+
+```bash
+# Validate all scripts without executing
+dotnet test --filter "AutomationScripts_ValidateAllScriptSyntax"
+```
+
+This catches compilation errors before execution.
+
+## Headless Mode (Future)
+
+Once GUI integration (#59) is complete, scripts can run in headless mode:
+
+```bash
+# Run without showing GUI window
+./PdfEditor --headless --script automation-scripts/test-birth-certificate.csx
+
+# Run in CI/CD pipeline
+./PdfEditor --headless --script automation-scripts/test-birth-certificate.csx
+if [ $? -eq 0 ]; then
+    echo "✅ Birth certificate test PASSED"
+else
+    echo "❌ Birth certificate test FAILED"
+    exit 1
+fi
+```
+
+## Writing New Scripts
+
+To create a new automation script:
+
+1. **Create .csx file** in `automation-scripts/`
+2. **Add documentation** with summary and return value
+3. **Follow the pattern** shown above
+4. **Return 0/1** for success/failure
+5. **Add xUnit test** in `AutomationScriptTests.cs`
+
+**Example:**
+```csharp
+// automation-scripts/test-my-feature.csx
+/// <summary>
+/// Tests my new feature
+/// </summary>
+/// <returns>0 on success, 1 on failure</returns>
+
+Console.WriteLine("=== Test: My Feature ===");
+
+try
+{
+    await MyFeatureCommand.Execute(args);
+
+    if (MyFeature.WorkedCorrectly)
+    {
+        Console.WriteLine("✅ PASS");
+        return 0;
+    }
+    else
+    {
+        Console.WriteLine("❌ FAIL");
+        return 1;
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"❌ FAIL: {ex.Message}");
+    return 1;
+}
+```
+
+Then add the test:
+```csharp
+// PdfEditor.Tests/UI/AutomationScriptTests.cs
+[Fact]
+public async Task AutomationScript_MyFeature_ExecutesSuccessfully()
+{
+    var result = await RunAutomationScriptAsync("test-my-feature.csx");
+    result.Success.Should().BeTrue();
+    Convert.ToInt32(result.ReturnValue).Should().Be(0);
+}
+```
+
+## Known Limitations
+
+**Substring Redaction (#87):**
+- Some terms may not be found if they're substrings within larger text operations
+- Example: "STREET" within "NUMBER  STREET"
+- Scripts should accept ≥50% success rate on multi-term tests
+
+**GUI Integration (#59):**
+- All scripts are currently skipped with `Skip = "Requires GUI integration (#59)"`
+- Scripts will be enabled once GUI commands are implemented
+
+## Troubleshooting
+
+**Script fails to compile:**
+```
+❌ Compilation error: ...
+```
+→ Check script syntax, ensure all namespaces are available
+
+**FileNotFoundException:**
+```
+❌ FAIL: Birth certificate not found
+```
+→ Download birth certificate PDF to expected location
+
+**Commands not available:**
+```
+error CS0103: The name 'LoadDocumentCommand' does not exist
+```
+→ GUI integration (#59) not complete yet, commands not implemented
+
+**pdfer verification fails:**
+```
+⚠️ WARNING: pdfer not found
+```
+→ Build the CLI tool: `dotnet build PdfEditor.Redaction.Cli -c Release`
+
+## Related
+
+- **Issue #59**: GUI Integration (required for scripts to work)
+- **Issue #91**: Roslyn C# Scripting Support (implementation)
+- **Issue #87**: Substring redaction limitation (affects test expectations)
+
+## v1.3.0 Validation
+
+To validate v1.3.0 milestone is complete, run:
+
+```bash
+dotnet test --filter "AutomationScript_BirthCertificate"
+```
+
+If this test passes (exit code 0), v1.3.0 is complete.

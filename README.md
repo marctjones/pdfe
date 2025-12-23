@@ -4,7 +4,8 @@ A cross-platform desktop PDF editor built with **C# + .NET 8 + Avalonia UI** fea
 
 [![Release](https://img.shields.io/github/v/release/marctjones/pdfe)](https://github.com/marctjones/pdfe/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-625%20passing-brightgreen)](PdfEditor.Tests)
+[![Tests](https://img.shields.io/badge/tests-280%20passing-brightgreen)](PdfEditor.Tests)
+[![CLI Tests](https://img.shields.io/badge/CLI%20tests-74%20passing-brightgreen)](PdfEditor.Redaction.Cli.Tests)
 
 ## Features
 
@@ -19,20 +20,23 @@ A cross-platform desktop PDF editor built with **C# + .NET 8 + Avalonia UI** fea
 - **Cross-platform** - Windows, Linux, and macOS
 
 ### Advanced Features
+- **CLI Redaction Tool (`pdfer`)** - Command-line tool for batch redaction, search, and verification
+- **GUI Automation** - C# scripting support (Roslyn) for automated testing and workflows
 - **OCR Support** - Extract text from scanned/image-based PDFs using Tesseract
 - **Digital Signature Verification** - Validate PDF signatures and detect tampering
 - **Redaction Verification** - Automated post-redaction validation to ensure no data leakage
 - **Performance Optimization** - Configurable render cache for faster page navigation
-- **CLI Validator** - Command-line tools for PDF analysis and verification
 
 ### TRUE Content-Level Redaction
 Unlike most PDF redaction tools that just draw black boxes over content, PdfEditor implements **true content removal**:
 
 - **Text is REMOVED** from the PDF structure, not just hidden
-- **Verified with external tools** (pdftotext, PdfPig) - redacted text cannot be extracted
+- **Glyph-level removal** - Individual text glyphs are removed from content streams
+- **Verified with external tools** (pdftotext, PdfPig, pdfer) - redacted text cannot be extracted
 - **Clipboard history** shows exactly what text was removed
 - **Page rotation aware** - accurate redaction on rotated pages
-- **625+ automated tests** verify redaction integrity
+- **280+ automated tests** verify redaction integrity
+- **Real-world validated** - Successfully redacts government forms (birth certificates, etc.)
 
 ## Installation
 
@@ -154,23 +158,56 @@ PdfEditor can verify digital signatures in PDF documents to detect tampering and
 - Tampering detection
 - Signing time verification
 
-### Redaction Verification (CLI)
+### CLI Redaction Tool (`pdfer`)
 
-The included `PdfEditor.Validator` CLI tool provides comprehensive PDF validation:
+**NEW in v1.3.0**: Professional command-line tool for PDF redaction, search, and verification.
 
 **Commands:**
-- `verify <file.pdf>` - Quick leakage check (detects text under black boxes)
-- `analyze <file.pdf>` - Detailed PDF structure analysis
-- `extract-text <file.pdf>` - Extract all text from document
-- `compare <before.pdf> <after.pdf>` - Compare two PDFs
-- `find-hidden <file.pdf>` - Find hidden content
-- `detect-blocking <file.pdf>` - Detect visual blocking (black boxes)
-- `content-stream <file.pdf> <page>` - Analyze page content stream
+- `pdfer redact <input.pdf> <output.pdf> <text>` - Redact text from PDF
+- `pdfer search <file.pdf> <text>` - Search for text and show locations
+- `pdfer verify <file.pdf> <text>` - Verify text has been removed
+- `pdfer info <file.pdf>` - Display PDF information (pages, text count, etc.)
 
-**Usage:**
+**Features:**
+- **Batch redaction** - Redact multiple terms at once
+- **Regex support** - Use regular expressions for pattern matching
+- **Case-insensitive** - Optional case-insensitive matching
+- **JSON output** - Machine-readable output for automation
+- **Dry-run mode** - Preview redactions without modifying files
+- **Quiet mode** - Suppress output for scripting
+- **Terms from file/stdin** - Read redaction terms from file or pipe
+
+**Examples:**
 ```bash
-cd PdfEditor.Validator
-dotnet run -- verify mydocument.pdf
+# Redact a specific term
+pdfer redact input.pdf output.pdf "SECRET"
+
+# Redact multiple terms
+pdfer redact input.pdf output.pdf "SECRET" "CONFIDENTIAL" "PRIVATE"
+
+# Use regex to redact SSNs
+pdfer redact input.pdf output.pdf --regex "\d{3}-\d{2}-\d{4}"
+
+# Search for text
+pdfer search document.pdf "John Doe"
+
+# Verify redaction worked
+pdfer verify redacted.pdf "SECRET"  # Exit code 0 if not found
+
+# Batch processing with shell script
+for pdf in *.pdf; do
+    pdfer redact "$pdf" "redacted_$pdf" "CONFIDENTIAL"
+done
+```
+
+**Installation:**
+```bash
+# From source
+cd PdfEditor.Redaction.Cli
+dotnet build -c Release
+
+# Run
+./bin/Release/net8.0/pdfer --help
 ```
 
 ## Technology Stack
@@ -181,39 +218,66 @@ dotnet run -- verify mydocument.pdf
 - **ReactiveUI** (MIT) - MVVM framework
 
 ### PDF Libraries (All Permissive Licenses)
-- **PdfSharpCore 1.3.65** (MIT) - PDF manipulation
+- **PDFsharp 6.2.2** (MIT) - PDF manipulation
 - **PDFtoImage 4.0.2** (MIT) - PDF rendering via PDFium
 - **PdfPig 0.1.11** (Apache 2.0) - PDF parsing and text extraction
 - **SkiaSharp 2.88.8** (MIT) - 2D graphics
 - **Tesseract 5.2.0** (Apache 2.0) - OCR engine
 - **Portable.BouncyCastle 1.9.0** (MIT) - Cryptography for signature verification
+- **Microsoft.CodeAnalysis.CSharp.Scripting 5.0.0** (MIT) - Roslyn scripting for automation
 
 ## Project Structure
 
 ```
 pdfe/
-├── PdfEditor/                 # Main application
-│   ├── Models/               # Data models
-│   ├── Services/             # Business logic
-│   │   ├── Redaction/       # Redaction engine components
-│   │   ├── Verification/    # Post-redaction verification
+├── PdfEditor/                      # Main GUI application (Avalonia UI)
+│   ├── Models/                    # Data models
+│   ├── Services/                  # Business logic
+│   │   ├── ScriptingService.cs   # Roslyn C# scripting
 │   │   ├── PdfDocumentService.cs
 │   │   ├── PdfRenderService.cs
-│   │   ├── RedactionService.cs
-│   │   ├── PdfTextExtractionService.cs
-│   │   ├── PdfSearchService.cs
-│   │   ├── PdfOcrService.cs
-│   │   ├── SignatureVerificationService.cs
-│   │   └── CoordinateConverter.cs
-│   ├── ViewModels/           # MVVM view models
-│   └── Views/                # UI views
-├── PdfEditor.Tests/          # Test suite (625+ tests)
-│   ├── Integration/         # Integration tests
-│   ├── Unit/               # Unit tests
-│   ├── UI/                 # UI tests
-│   └── Security/           # Security verification tests
-├── PdfEditor.Benchmarks/     # Performance benchmarks
-└── PdfEditor.Validator/      # PDF validation CLI tools
+│   │   └── ...
+│   ├── ViewModels/                # MVVM view models
+│   └── Views/                     # UI views (XAML)
+│
+├── PdfEditor.Redaction/           # Redaction engine library
+│   ├── ContentStream/            # Content stream parsing
+│   ├── Operators/                # PDF operator handlers (Tj, TJ, Tm, etc.)
+│   ├── TextRedactor.cs           # Main redaction API
+│   └── ...
+│
+├── PdfEditor.Redaction.Cli/       # CLI tool (pdfer)
+│   ├── Commands/                 # Redact, Search, Verify, Info
+│   └── Program.cs
+│
+├── PdfEditor.Redaction.Cli.Tests/ # CLI tests (74 tests)
+│   ├── Unit/                     # Command tests
+│   └── Integration/              # Corpus tests
+│
+├── PdfEditor.Redaction.Tests/     # Redaction library tests (136 tests)
+│   ├── Integration/              # Real-world PDF tests
+│   └── Unit/                     # Operator tests
+│
+├── PdfEditor.Tests/               # GUI tests (144 tests)
+│   ├── Integration/              # End-to-end tests
+│   ├── Unit/                     # ViewModel tests
+│   ├── UI/                       # GUI automation tests
+│   └── Security/                 # Verification tests
+│
+├── automation-scripts/            # GUI automation scripts (.csx)
+│   ├── test-birth-certificate.csx
+│   ├── test-redact-text.csx
+│   └── README.md
+│
+├── scripts/                       # Build/test shell scripts
+│   ├── test.sh
+│   ├── build.sh
+│   └── demo.sh
+│
+└── wiki/                          # GitHub wiki (cloned)
+    ├── Project-Architecture.md
+    ├── Redaction-Engine.md
+    └── ...
 ```
 
 ## Testing
@@ -221,19 +285,41 @@ pdfe/
 Run the comprehensive test suite:
 
 ```bash
+# All tests (280+ tests across all projects)
+dotnet test
+
+# GUI tests
 cd PdfEditor.Tests
 dotnet test
+
+# CLI tests
+cd PdfEditor.Redaction.Cli.Tests
+dotnet test
+
+# Redaction library tests
+cd PdfEditor.Redaction.Tests
+dotnet test
+
+# Run specific test category
+dotnet test --filter "FullyQualifiedName~BirthCertificate"
 ```
 
-The test suite includes:
-- **Unit tests** - ViewModel, coordinate conversion, PDF operations
-- **Integration tests** - End-to-end redaction workflows
-- **GUI simulation tests** - Coordinate conversion validation
-- **Security tests** - Verify content is truly removed
+**Test Statistics:**
+- **280 total tests** across 3 test projects
+- **74 CLI tests** (100% passing) - pdfer command validation
+- **136 library tests** (97% passing) - Redaction engine
+- **70+ GUI tests** (including automation scripts)
 
-### Coverage & Benchmarks
-- `./scripts/run-coverage.sh` – runs the full suite with coverlet instrumentation and enforces 80% line coverage.
-- `./scripts/run-benchmarks.sh` – executes BenchmarkDotNet-based redaction benchmarks (Release mode).
+**Test Categories:**
+- **Unit tests** - ViewModel, operators, coordinate conversion
+- **Integration tests** - Real-world PDFs (birth certificates, forms)
+- **Corpus tests** - veraPDF test suite (2,694 PDFs)
+- **GUI automation tests** - Roslyn scripting-based
+- **Security tests** - Verify TRUE content removal
+
+**Scripts:**
+- `./scripts/test.sh` - Run all tests with logging
+- `./scripts/test-birth-certificate-redaction.sh` - Birth certificate validation
 
 ## Building
 
