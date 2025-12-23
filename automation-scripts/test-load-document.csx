@@ -10,7 +10,29 @@ using System.IO;
 Console.WriteLine("=== GUI Test: Load Document ===");
 
 // Test configuration
-var testPdf = args.Length > 0 ? args[0] : "/home/marc/Downloads/Birth Certificate Request (PDF).pdf";
+// Default to birth certificate from test-pdfs if no argument provided
+var testPdf = args.Length > 0 ? args[0] : null;
+
+if (testPdf == null)
+{
+    // Find repository root
+    var repoRoot = Directory.GetCurrentDirectory();
+    while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+    {
+        repoRoot = Directory.GetParent(repoRoot)?.FullName;
+    }
+
+    if (repoRoot != null)
+    {
+        testPdf = Path.Combine(repoRoot, "test-pdfs", "sample-pdfs", "birth-certificate-request-scrambled.pdf");
+    }
+}
+
+if (testPdf == null)
+{
+    Console.WriteLine("❌ FAIL: Could not determine test PDF path");
+    return 1;
+}
 
 // Validate input
 if (!File.Exists(testPdf))
