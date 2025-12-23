@@ -1570,18 +1570,6 @@ public partial class MainWindowViewModel : ViewModelBase
                             throw;
                         }
 
-                        // Add explicit check right after await returns
-                        try
-                        {
-                            Console.WriteLine($">>> RenderThumbnailAsync RETURNED for page {pageIndex}");
-                            _logger.LogInformation(">>> LoadPageThumbnailsAsync: RenderThumbnailAsync RETURNED for page {PageIndex}", pageIndex);
-                        }
-                        catch (Exception logEx)
-                        {
-                            Console.WriteLine($"!!! LOGGER CRASHED for page {pageIndex}: {logEx.Message}");
-                            throw;
-                        }
-
                         if (image == null)
                         {
                             _logger.LogWarning(">>> LoadPageThumbnailsAsync: RenderThumbnailAsync returned null for page {PageIndex}", pageIndex);
