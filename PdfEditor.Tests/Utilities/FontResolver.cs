@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 namespace PdfEditor.Tests.Utilities;
 
 /// <summary>
-/// Cross-platform font resolver for PdfSharpCore.
+/// Cross-platform font resolver for PDFsharp.
 /// Locates system fonts on Windows, Linux, and macOS.
 /// </summary>
 public class CustomFontResolver : IFontResolver

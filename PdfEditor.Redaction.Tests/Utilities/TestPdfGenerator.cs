@@ -1,5 +1,5 @@
-using PdfSharpCore.Drawing;
-using PdfSharpCore.Pdf;
+using PdfSharp.Drawing;
+using PdfSharp.Pdf;
 
 namespace PdfEditor.Redaction.Tests.Utilities;
 
@@ -108,12 +108,12 @@ public static class TestPdfGenerator
 
     /// <summary>
     /// Create a PDF that uses TJ array with kerning (more complex text storage).
-    /// This requires manually constructing PDF content, which PdfSharpCore may not produce directly.
+    /// This requires manually constructing PDF content, which PDFsharp may not produce directly.
     /// For now, this creates a simple PDF - TJ testing requires sample PDFs.
     /// </summary>
     public static void CreateKernedTextPdf(string outputPath, string text)
     {
-        // PdfSharpCore typically generates Tj operators
+        // PDFsharp typically generates Tj operators
         // For TJ testing, we'll need actual PDF samples
         CreateSimpleTextPdf(outputPath, text);
     }

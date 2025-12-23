@@ -8,7 +8,7 @@ namespace PdfEditor.Tests.Utilities;
 
 /// <summary>
 /// Test setup that initializes the font resolver before any tests run.
-/// This ensures PdfSharpCore can find fonts on all platforms (Windows, Linux, macOS).
+/// This ensures PDFsharp can find fonts on all platforms (Windows, Linux, macOS).
 /// </summary>
 public class TestSetup : Xunit.Sdk.XunitTestFramework
 {

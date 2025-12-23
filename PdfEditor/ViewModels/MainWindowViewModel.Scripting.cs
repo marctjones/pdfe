@@ -63,6 +63,12 @@ public partial class MainWindowViewModel
     public Task SaveDocumentCommand(string filePath) => SaveDocumentViaScriptAsync(filePath);
 
     /// <summary>
+    /// Extract all text from the currently loaded PDF (for Roslyn scripts).
+    /// Returns a string containing all text from all pages concatenated.
+    /// </summary>
+    public string ExtractAllText() => ExtractAllTextViaScript();
+
+    /// <summary>
     /// Initialize scripting commands (call from main constructor)
     /// </summary>
     private void InitializeScriptingCommands()
@@ -297,6 +303,32 @@ public partial class MainWindowViewModel
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SCRIPT] SaveDocumentCommand failed");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Extract all text from the currently loaded PDF (for Roslyn scripts).
+    /// </summary>
+    private string ExtractAllTextViaScript()
+    {
+        _logger.LogInformation("[SCRIPT] ExtractAllText()");
+
+        if (!_documentService.IsDocumentLoaded || _textExtractionService == null)
+        {
+            _logger.LogError("[SCRIPT] ExtractAllText: No document loaded");
+            throw new InvalidOperationException("No document loaded. Call LoadDocumentCommand first.");
+        }
+
+        try
+        {
+            var allText = _textExtractionService.ExtractAllText(_currentFilePath);
+            _logger.LogInformation("[SCRIPT] ExtractAllText: Extracted {Length} characters", allText.Length);
+            return allText;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SCRIPT] ExtractAllText failed");
             throw;
         }
     }
