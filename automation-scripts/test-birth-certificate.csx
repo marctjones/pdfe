@@ -15,7 +15,20 @@ using System.Linq;
 Console.WriteLine("=== GUI Test: Birth Certificate Redaction (v1.3.0 Milestone) ===");
 
 // Configuration
-var sourcePdf = "/home/marc/Downloads/Birth Certificate Request (PDF).pdf";
+// Find repository root by walking up from current directory
+var repoRoot = Directory.GetCurrentDirectory();
+while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+{
+    repoRoot = Directory.GetParent(repoRoot)?.FullName;
+}
+
+if (repoRoot == null)
+{
+    Console.WriteLine("❌ FAIL: Could not find repository root (.git directory)");
+    return 1;
+}
+
+var sourcePdf = Path.Combine(repoRoot, "test-pdfs", "sample-pdfs", "birth-certificate-request-scrambled.pdf");
 var outputPdf = "/tmp/birth-certificate-redacted.pdf";
 
 var termsToRedact = new[]

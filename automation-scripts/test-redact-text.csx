@@ -11,9 +11,31 @@ using System.Diagnostics;
 Console.WriteLine("=== GUI Test: Redact Text Workflow ===");
 
 // Test configuration
-var sourcePdf = args.Length > 0 ? args[0] : "/home/marc/Downloads/Birth Certificate Request (PDF).pdf";
+string sourcePdf;
+if (args.Length > 0)
+{
+    sourcePdf = args[0];
+}
+else
+{
+    // Find repository root
+    var repoRoot = Directory.GetCurrentDirectory();
+    while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+    {
+        repoRoot = Directory.GetParent(repoRoot)?.FullName;
+    }
+
+    if (repoRoot == null)
+    {
+        Console.WriteLine("❌ FAIL: Could not find repository root");
+        return 1;
+    }
+
+    sourcePdf = Path.Combine(repoRoot, "test-pdfs", "sample-pdfs", "birth-certificate-request-scrambled.pdf");
+}
+
 var outputPdf = args.Length > 1 ? args[1] : "/tmp/pdfe-test-redacted.pdf";
-var textToRedact = args.Length > 2 ? args[2] : "TORRINGTON";
+var textToRedact = args.Length > 2 ? args[2] : "CITY";
 
 // Clean up previous test output
 if (File.Exists(outputPdf))

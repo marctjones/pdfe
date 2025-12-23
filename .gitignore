@@ -48,7 +48,13 @@ Thumbs.db
 gha-creds-*.json
 
 # Test PDFs (downloaded on demand, not committed)
-test-pdfs/
+test-pdfs/*
+# But do commit our sample PDFs
+!test-pdfs/sample-pdfs/
+!test-pdfs/sample-pdfs/**
 
 # Publish output
 publish/
+
+# Logs from test runs
+logs/
