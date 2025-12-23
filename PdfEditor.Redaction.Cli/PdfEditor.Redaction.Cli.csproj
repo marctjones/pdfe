@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>pdfer</AssemblyName>
+    <RootNamespace>PdfEditor.Redaction.Cli</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Marc Jones</Authors>
+    <Description>CLI tool for TRUE glyph-level PDF redaction verification.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PdfEditor.Redaction\PdfEditor.Redaction.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -164,12 +164,27 @@ try
                 continue;
             }
 
-            // Try to redact a simple word (less common than "the")
-            // Using "test" as it's common in test PDFs but won't match hundreds of times
-            Console.WriteLine($"    Searching for 'test'...");
+            // Extract text BEFORE redaction to verify word exists
+            Console.WriteLine($"    Extracting text for verification...");
+            var textBefore = ExtractAllText();
+            var wordToRedact = "test";
+            var containsWord = textBefore.ToLower().Contains(wordToRedact.ToLower());
+
+            if (!containsWord)
+            {
+                Console.WriteLine($"    ⚠️  SKIP - Word '{wordToRedact}' not found in PDF text");
+                results.Add((category, filename, "SKIP", $"Word '{wordToRedact}' not in PDF"));
+                skipCount++;
+                continue;
+            }
+
+            Console.WriteLine($"    ✅ Verified '{wordToRedact}' exists in PDF (before)");
+
+            // Now redact the word
+            Console.WriteLine($"    Searching and marking redactions...");
             var searchStart = DateTime.Now;
             var beforeCount = PendingRedactions.Count;
-            await RedactTextCommand("test");
+            await RedactTextCommand(wordToRedact);
             var afterCount = PendingRedactions.Count;
             var searchTime = (DateTime.Now - searchStart).TotalSeconds;
             var redactionsAdded = afterCount - beforeCount;
@@ -186,17 +201,31 @@ try
                 var outputPath = Path.Combine(outputDir, $"redacted_{filename}");
                 await SaveDocumentCommand(outputPath);
 
-                if (File.Exists(outputPath))
-                {
-                    Console.WriteLine($"    ✅ SUCCESS - Redacted and saved");
-                    results.Add((category, filename, "SUCCESS", $"{redactionsAdded} redactions"));
-                    successCount++;
-                }
-                else
+                if (!File.Exists(outputPath))
                 {
                     Console.WriteLine($"    ❌ FAIL - Output file not created");
                     results.Add((category, filename, "FAIL", "Output not created"));
                     failureCount++;
+                    continue;
+                }
+
+                // Verify AFTER redaction by loading output and extracting text
+                Console.WriteLine($"    Verifying redaction (loading saved file)...");
+                await LoadDocumentCommand(outputPath);
+                var textAfter = ExtractAllText();
+                var stillContainsWord = textAfter.ToLower().Contains(wordToRedact.ToLower());
+
+                if (stillContainsWord)
+                {
+                    Console.WriteLine($"    ❌ FAIL - Word '{wordToRedact}' still found after redaction!");
+                    results.Add((category, filename, "FAIL", $"Word '{wordToRedact}' not removed"));
+                    failureCount++;
+                }
+                else
+                {
+                    Console.WriteLine($"    ✅ SUCCESS - Word '{wordToRedact}' completely removed");
+                    results.Add((category, filename, "SUCCESS", $"{redactionsAdded} redactions verified"));
+                    successCount++;
                 }
             }
             else
