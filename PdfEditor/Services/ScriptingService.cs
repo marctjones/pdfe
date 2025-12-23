@@ -84,21 +84,21 @@ public class ScriptingService
             if (diagnostics.Any())
             {
                 var errors = diagnostics.Select(d => d.GetMessage()).ToList();
-                return ScriptExecutionResult.Error(string.Join("\n", errors));
+                return ScriptExecutionResult.FromError(string.Join("\n", errors));
             }
 
             // Execute the script
             var result = await script.RunAsync(_viewModel);
 
-            return ScriptExecutionResult.Success(result.ReturnValue);
+            return ScriptExecutionResult.FromSuccess(result.ReturnValue);
         }
         catch (CompilationErrorException ex)
         {
-            return ScriptExecutionResult.Error($"Compilation error: {ex.Message}");
+            return ScriptExecutionResult.FromError($"Compilation error: {ex.Message}");
         }
         catch (Exception ex)
         {
-            return ScriptExecutionResult.Error($"Runtime error: {ex.Message}\n{ex.StackTrace}");
+            return ScriptExecutionResult.FromError($"Runtime error: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
@@ -111,7 +111,7 @@ public class ScriptingService
     {
         if (!File.Exists(scriptFilePath))
         {
-            return ScriptExecutionResult.Error($"Script file not found: {scriptFilePath}");
+            return ScriptExecutionResult.FromError($"Script file not found: {scriptFilePath}");
         }
 
         try
@@ -121,7 +121,7 @@ public class ScriptingService
         }
         catch (Exception ex)
         {
-            return ScriptExecutionResult.Error($"Failed to read script file: {ex.Message}");
+            return ScriptExecutionResult.FromError($"Failed to read script file: {ex.Message}");
         }
     }
 
@@ -156,10 +156,10 @@ public class ScriptExecutionResult
     public object? ReturnValue { get; init; }
     public string? ErrorMessage { get; init; }
 
-    public static ScriptExecutionResult Success(object? returnValue = null) =>
+    public static ScriptExecutionResult FromSuccess(object? returnValue = null) =>
         new() { Success = true, ReturnValue = returnValue };
 
-    public static ScriptExecutionResult Error(string errorMessage) =>
+    public static ScriptExecutionResult FromError(string errorMessage) =>
         new() { Success = false, ErrorMessage = errorMessage };
 
     public override string ToString()

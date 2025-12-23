@@ -65,6 +65,99 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _lastVerifyFailed;
     private string _operationStatus = string.Empty;
 
+    /// <summary>
+    /// Parameterless constructor for testing and scripting scenarios.
+    /// Creates a ViewModel with default (NullLogger) dependencies.
+    /// </summary>
+    public MainWindowViewModel()
+    {
+        var nullLoggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var renderService = new PdfRenderService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfRenderService>.Instance);
+
+        _logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<MainWindowViewModel>.Instance;
+        _loggerFactory = nullLoggerFactory;
+        _documentService = new PdfDocumentService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfDocumentService>.Instance);
+        _renderService = renderService;
+        _redactionService = new RedactionService(Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionService>.Instance, nullLoggerFactory);
+        _textExtractionService = new PdfTextExtractionService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfTextExtractionService>.Instance);
+        _searchService = new PdfSearchService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfSearchService>.Instance);
+        _ocrService = new PdfOcrService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfOcrService>.Instance, renderService);
+        _signatureService = new SignatureVerificationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<SignatureVerificationService>.Instance);
+        _verifier = new RedactionVerifier(Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionVerifier>.Instance, nullLoggerFactory);
+        _filenameSuggestionService = new FilenameSuggestionService();
+
+        // Initialize state managers
+        FileState = new DocumentStateManager();
+        RedactionWorkflow = new RedactionWorkflowManager();
+
+        _logger.LogInformation("MainWindowViewModel initialized (test mode)");
+
+        PageThumbnails = new ObservableCollection<PageThumbnail>();
+        ClipboardHistory = new ObservableCollection<ClipboardEntry>();
+
+        // Commands
+        _logger.LogDebug("Setting up ReactiveUI commands");
+        OpenFileCommand = ReactiveCommand.CreateFromTask(OpenFileAsync);
+        SaveFileCommand = ReactiveCommand.CreateFromTask(SaveFileAsync);
+        RemoveCurrentPageCommand = ReactiveCommand.CreateFromTask(RemoveCurrentPageAsync);
+        AddPagesCommand = ReactiveCommand.CreateFromTask(AddPagesAsync);
+        ToggleRedactionModeCommand = ReactiveCommand.Create(ToggleRedactionMode);
+        ApplyRedactionCommand = ReactiveCommand.CreateFromTask(ApplyRedactionAsync);
+        RemovePendingRedactionCommand = ReactiveCommand.Create<Guid>(RemovePendingRedaction);
+        ClearAllRedactionsCommand = ReactiveCommand.Create(ClearAllRedactions);
+        ApplyAllRedactionsCommand = ReactiveCommand.CreateFromTask(ApplyAllRedactionsAsync);
+
+        ApplyRedactionCommand.ThrownExceptions.Subscribe(ex =>
+            _logger.LogError(ex, "ApplyRedactionCommand threw exception"));
+
+        ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
+        CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
+        ZoomInCommand = ReactiveCommand.Create(ZoomIn);
+        ZoomOutCommand = ReactiveCommand.Create(ZoomOut);
+        NextPageCommand = ReactiveCommand.CreateFromTask(NextPageAsync);
+        PreviousPageCommand = ReactiveCommand.CreateFromTask(PreviousPageAsync);
+        GoToPageCommand = ReactiveCommand.CreateFromTask<int>(GoToPageAsync);
+
+        RotatePageLeftCommand = ReactiveCommand.CreateFromTask(RotatePageLeftAsync);
+        RotatePageRightCommand = ReactiveCommand.CreateFromTask(RotatePageRightAsync);
+        RotatePage180Command = ReactiveCommand.CreateFromTask(RotatePage180Async);
+
+        ZoomActualSizeCommand = ReactiveCommand.Create(ZoomActualSize);
+        ZoomFitWidthCommand = ReactiveCommand.Create(ZoomFitWidth);
+        ZoomFitPageCommand = ReactiveCommand.Create(ZoomFitPage);
+
+        SaveAsCommand = ReactiveCommand.CreateFromTask(SaveAsAsync);
+        CloseDocumentCommand = ReactiveCommand.Create(CloseDocument);
+        ExitCommand = ReactiveCommand.Create(Exit);
+        LoadRecentFileCommand = ReactiveCommand.CreateFromTask<string>(LoadRecentFileAsync);
+
+        ExportPagesCommand = ReactiveCommand.CreateFromTask(ExportPagesAsync);
+        PrintCommand = ReactiveCommand.CreateFromTask(PrintAsync);
+
+        AboutCommand = ReactiveCommand.Create(ShowAbout);
+        ShowShortcutsCommand = ReactiveCommand.Create(ShowKeyboardShortcuts);
+        ShowDocumentationCommand = ReactiveCommand.Create(ShowDocumentation);
+        RunVerifyNowCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (!string.IsNullOrEmpty(_currentFilePath))
+            {
+                await RunVerifyAsync(_currentFilePath);
+            }
+        });
+
+        RunOcrCommand = ReactiveCommand.CreateFromTask(RunOcrOnCurrentPageAsync);
+        RunOcrAllPagesCommand = ReactiveCommand.CreateFromTask(RunOcrOnAllPagesAsync);
+        VerifySignaturesCommand = ReactiveCommand.CreateFromTask(VerifySignaturesAsync);
+        ShowPreferencesCommand = ReactiveCommand.Create(ShowPreferences);
+
+        InitializeSearchCommands();
+        InitializeScriptingCommands();
+
+        LoadRecentFiles();
+
+        _logger.LogDebug("MainWindowViewModel initialization complete (test mode)");
+    }
+
     public MainWindowViewModel(
         ILogger<MainWindowViewModel> logger,
         ILoggerFactory loggerFactory,
@@ -163,6 +256,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         // Initialize search commands
         InitializeSearchCommands();
+
+        // Initialize scripting commands (for Roslyn automation)
+        InitializeScriptingCommands();
 
         // Load recent files
         LoadRecentFiles();
