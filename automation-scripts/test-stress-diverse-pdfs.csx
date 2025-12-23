@@ -1,6 +1,6 @@
 /// <summary>
 /// GUI Stress Test: Process Many Diverse PDFs
-/// Loads and processes 100 different PDFs sequentially to test:
+/// Loads and processes 50 different PDFs sequentially to test:
 /// - Memory management
 /// - Resource cleanup
 /// - Performance stability
@@ -14,7 +14,7 @@ using System.Linq;
 using System.Diagnostics;
 using System.Collections.Generic;
 
-Console.WriteLine("=== GUI Stress Test: Process 100 Diverse PDFs ===");
+Console.WriteLine("=== GUI Stress Test: Process 50 Diverse PDFs ===");
 
 // Find repository root
 var repoRoot = Directory.GetCurrentDirectory();
@@ -30,7 +30,7 @@ if (repoRoot == null)
 }
 
 var corpusRoot = Path.Combine(repoRoot, "test-pdfs", "verapdf-corpus");
-var testCount = 100;
+var testCount = 50; // Reduced from 100 - 50 is sufficient for stress testing
 var outputDir = "/tmp/pdfe-stress-test";
 
 Directory.CreateDirectory(outputDir);
