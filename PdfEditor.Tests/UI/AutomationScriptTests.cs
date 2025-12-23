@@ -154,6 +154,69 @@ public class AutomationScriptTests
         _output.WriteLine("Birth certificate redaction works end-to-end via GUI");
     }
 
+    [Fact(Skip = "Requires GUI integration (#59) - Corpus test")]
+    public async Task AutomationScript_VeraPdfCorpusSample_ExecutesSuccessfully()
+    {
+        // Test redaction across diverse PDF standards from veraPDF corpus
+
+        // Arrange
+        var viewModel = new MainWindowViewModel();
+
+        // Act
+        var result = await RunAutomationScriptAsync("test-verapdf-corpus-sample.csx", viewModel);
+
+        // Assert
+        result.Success.Should().BeTrue("script should compile and execute");
+
+        var exitCode = Convert.ToInt32(result.ReturnValue);
+        exitCode.Should().Be(0, "corpus sample test should achieve ≥70% success rate");
+
+        _output.WriteLine("\n✅ Corpus diversity validated");
+        _output.WriteLine("GUI handles diverse PDF structures (PDF/A, PDF/UA, ISO 32000)");
+    }
+
+    [Fact(Skip = "Requires GUI integration (#59) - Stress test")]
+    public async Task AutomationScript_StressDiversePdfs_ExecutesSuccessfully()
+    {
+        // Stress test: Process 100 diverse PDFs sequentially
+
+        // Arrange
+        var viewModel = new MainWindowViewModel();
+
+        // Act
+        var result = await RunAutomationScriptAsync("test-stress-diverse-pdfs.csx", viewModel);
+
+        // Assert
+        result.Success.Should().BeTrue("script should compile and execute");
+
+        var exitCode = Convert.ToInt32(result.ReturnValue);
+        exitCode.Should().Be(0, "stress test should achieve ≥80% success rate");
+
+        _output.WriteLine("\n✅ Stress test passed");
+        _output.WriteLine("GUI maintains stability processing 100 diverse PDFs");
+    }
+
+    [Fact(Skip = "Requires GUI integration (#59) - Batch processing")]
+    public async Task AutomationScript_BatchProcessing_ExecutesSuccessfully()
+    {
+        // Test realistic batch processing workflow
+
+        // Arrange
+        var viewModel = new MainWindowViewModel();
+
+        // Act
+        var result = await RunAutomationScriptAsync("test-batch-processing.csx", viewModel);
+
+        // Assert
+        result.Success.Should().BeTrue("script should compile and execute");
+
+        var exitCode = Convert.ToInt32(result.ReturnValue);
+        exitCode.Should().Be(0, "batch processing should complete successfully");
+
+        _output.WriteLine("\n✅ Batch processing validated");
+        _output.WriteLine("GUI supports production batch workflows");
+    }
+
     [Fact]
     public void AutomationScripts_AllScriptsExist()
     {
@@ -164,6 +227,9 @@ public class AutomationScriptTests
             "test-load-document.csx",
             "test-redact-text.csx",
             "test-birth-certificate.csx",
+            "test-verapdf-corpus-sample.csx",
+            "test-stress-diverse-pdfs.csx",
+            "test-batch-processing.csx",
         };
 
         foreach (var scriptName in requiredScripts)

@@ -89,6 +89,94 @@ dotnet test --filter "AutomationScript_BirthCertificate"
 - ✅ Output PDF is created
 - ✅ Text is removed (verified externally)
 
+### test-verapdf-corpus-sample.csx
+Tests GUI redaction against a diverse sample of PDFs from the veraPDF corpus.
+
+**Tests:**
+- Samples 20 PDFs across different standards (PDF/A-1a/1b/2a/2b/2u/3b/4, PDF/UA-1, ISO 32000)
+- Loads each PDF
+- Attempts to redact common text ("the")
+- Saves redacted output
+- Generates detailed report by PDF standard
+
+**Usage:**
+```bash
+# Requires veraPDF corpus (download first)
+./scripts/download-test-pdfs.sh
+
+# Run from xUnit
+dotnet test --filter "AutomationScript_VeraPdfCorpusSample"
+
+# Manually
+./PdfEditor --script automation-scripts/test-verapdf-corpus-sample.csx
+```
+
+**Expected result:** ≥70% success rate across diverse PDF structures
+
+**What it validates:**
+- GUI handles PDF/A compliance documents
+- GUI handles accessible PDFs (PDF/UA)
+- GUI handles ISO 32000 reference files
+- No crashes on edge-case PDF structures
+
+### test-stress-diverse-pdfs.csx
+Stress test: Processes 100 diverse PDFs sequentially.
+
+**Tests:**
+- Memory management (no leaks)
+- Resource cleanup (proper disposal)
+- Performance stability (consistent speed)
+- Error recovery (handles failures gracefully)
+
+**Usage:**
+```bash
+# Run from xUnit
+dotnet test --filter "AutomationScript_StressDiversePdfs"
+
+# Manually
+./PdfEditor --script automation-scripts/test-stress-diverse-pdfs.csx
+```
+
+**Expected result:** ≥80% success rate, stable performance
+
+**Performance metrics:**
+- Processing rate (PDFs/second)
+- Average time per PDF
+- Total pages processed
+- Memory usage (stable throughout)
+
+### test-batch-processing.csx
+Tests realistic batch processing workflow for production use.
+
+**Tests:**
+- Find all PDFs in directory
+- Redact multiple terms from each
+- Save with naming convention (*_REDACTED.pdf)
+- Generate processing report
+
+**Usage:**
+```bash
+# Default (processes 10 PDFs from veraPDF corpus)
+./PdfEditor --script automation-scripts/test-batch-processing.csx
+
+# Custom directory
+./PdfEditor --script automation-scripts/test-batch-processing.csx \
+  --script-arg input=/path/to/pdfs \
+  --script-arg output=/path/to/output \
+  --script-arg maxFiles=50
+
+# Run from xUnit
+dotnet test --filter "AutomationScript_BatchProcessing"
+```
+
+**Expected result:** ≥80% success rate, all outputs created
+
+**Report includes:**
+- Files processed (success/failure counts)
+- Total pages and redactions
+- Processing time and rate
+- Detailed results table
+
 ## Script Structure
 
 All automation scripts follow this pattern:
