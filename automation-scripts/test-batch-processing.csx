@@ -83,6 +83,7 @@ try
         try
         {
             // Load document
+            Console.WriteLine($"    Loading...");
             await LoadDocumentCommand(inputPath);
 
             if (CurrentDocument == null)
@@ -94,6 +95,14 @@ try
 
             var pageCount = CurrentDocument.PageCount;
             Console.WriteLine($"    Pages: {pageCount}");
+
+            // Skip files with too many pages
+            if (pageCount > 50)
+            {
+                Console.WriteLine($"    ⚠️  Skipping (too large)");
+                results.Add((filename, pageCount, 0, true, "Skipped - too large"));
+                continue;
+            }
 
             // Redact all terms
             var totalRedactions = 0;

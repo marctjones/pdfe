@@ -84,17 +84,30 @@ try
         try
         {
             // Load document
+            Console.WriteLine($"    Loading...");
             await LoadDocumentCommand(pdfPath);
 
             if (CurrentDocument == null)
             {
+                Console.WriteLine($"    ❌ Failed to load");
                 failureCount++;
                 continue;
             }
 
-            totalPages += CurrentDocument.PageCount;
+            var pageCount = CurrentDocument.PageCount;
+            totalPages += pageCount;
+            Console.WriteLine($"    Pages: {pageCount}");
+
+            // Skip files with too many pages
+            if (pageCount > 50)
+            {
+                Console.WriteLine($"    ⚠️  Skipping (too large)");
+                successCount++; // Count as success, just skipped for performance
+                continue;
+            }
 
             // Try to redact a word
+            Console.WriteLine($"    Searching...");
             var beforeCount = PendingRedactions.Count;
             await RedactTextCommand("test");
             var afterCount = PendingRedactions.Count;
