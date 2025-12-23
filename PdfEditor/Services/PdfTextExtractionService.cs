@@ -72,6 +72,45 @@ public class PdfTextExtractionService
     }
 
     /// <summary>
+    /// Extract all text from all pages in the PDF document
+    /// </summary>
+    /// <param name="pdfPath">Path to PDF file</param>
+    /// <returns>Concatenated text from all pages</returns>
+    public string ExtractAllText(string pdfPath)
+    {
+        _logger.LogInformation("Extracting all text from {FileName}", Path.GetFileName(pdfPath));
+
+        try
+        {
+            using var document = PdfDocument.Open(pdfPath);
+            var allText = new StringBuilder();
+
+            for (int i = 0; i < document.NumberOfPages; i++)
+            {
+                var page = document.GetPage(i + 1); // PdfPig uses 1-based indexing
+                var pageText = page.Text;
+
+                if (!string.IsNullOrWhiteSpace(pageText))
+                {
+                    allText.Append(pageText);
+                    allText.Append('\n'); // Separate pages with newline
+                }
+            }
+
+            var result = allText.ToString();
+            _logger.LogInformation("Extracted {Length} total characters from {PageCount} pages",
+                result.Length, document.NumberOfPages);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extracting all text from {FileName}", pdfPath);
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
     /// Extract text from a specific area of the page (stream-based - primary method)
     /// </summary>
     /// <param name="pdfStream">PDF document stream (can be file stream or memory stream)</param>
