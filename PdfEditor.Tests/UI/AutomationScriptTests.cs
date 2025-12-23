@@ -99,7 +99,7 @@ public class AutomationScriptTests
         return null;
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - LoadDocumentCommand not implemented yet")]
+    [Fact]
     public async Task AutomationScript_LoadDocument_ExecutesSuccessfully()
     {
         // Arrange
