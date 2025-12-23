@@ -67,6 +67,7 @@ try
         Console.WriteLine($"  Purpose: {testCase.Description}");
 
         // Load fresh document for each test
+        Console.WriteLine($"  Loading document...");
         await LoadDocumentCommand(sourcePdf);
 
         if (CurrentDocument == null)
@@ -76,8 +77,13 @@ try
             continue;
         }
 
+        Console.WriteLine($"  Document loaded: {CurrentDocument.PageCount} page(s)");
+
         // Verify word exists BEFORE
+        Console.WriteLine($"  Extracting text to verify word exists...");
         var textBefore = ExtractAllText();
+        Console.WriteLine($"  Extracted {textBefore.Length} characters");
+
         var existsBefore = textBefore.Contains(testCase.Word, StringComparison.OrdinalIgnoreCase);
 
         if (!existsBefore)
@@ -91,6 +97,7 @@ try
         Console.WriteLine($"  ✅ Word exists in source (verified)");
 
         // Redact
+        Console.WriteLine($"  Searching for '{testCase.Word}' and marking redactions...");
         var beforeCount = PendingRedactions.Count;
         await RedactTextCommand(testCase.Word);
         var afterCount = PendingRedactions.Count;
@@ -112,9 +119,11 @@ try
         }
 
         // Apply and save
+        Console.WriteLine($"  Applying redactions...");
         await ApplyRedactionsCommand();
 
         var outputPath = Path.Combine(outputDir, $"redacted_{testCase.Word.ToLower()}.pdf");
+        Console.WriteLine($"  Saving to: {Path.GetFileName(outputPath)}");
         await SaveDocumentCommand(outputPath);
 
         if (!File.Exists(outputPath))
@@ -125,8 +134,11 @@ try
         }
 
         // Verify word is GONE
+        Console.WriteLine($"  Verifying redaction (reloading and extracting text)...");
         await LoadDocumentCommand(outputPath);
         var textAfter = ExtractAllText();
+        Console.WriteLine($"  Extracted {textAfter.Length} characters from redacted PDF");
+
         var stillExists = textAfter.Contains(testCase.Word, StringComparison.OrdinalIgnoreCase);
 
         if (stillExists)
