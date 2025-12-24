@@ -33,126 +33,145 @@ public class GlyphRemover
     }
 
     /// <summary>
-    /// Process text operations to perform glyph-level redaction.
+    /// Process text operations to perform glyph-level redaction using block-aware filtering.
     /// </summary>
-    /// <param name="operations">All operations from the page content stream.</param>
-    /// <param name="letters">PdfPig letters from the page (for spatial matching).</param>
-    /// <param name="redactionArea">Area to redact.</param>
-    /// <returns>Modified list of operations with glyphs removed.</returns>
     public List<PdfOperation> ProcessOperations(
         List<PdfOperation> operations,
         IReadOnlyList<Letter> letters,
         PdfRectangle redactionArea)
     {
+        _logger.LogInformation("=== STARTING OPERATION PROCESSING ===");
+        _logger.LogInformation("Total operations: {Count}, Redaction area: ({L:F2},{B:F2})-({R:F2},{T:F2})",
+            operations.Count, redactionArea.Left, redactionArea.Bottom, redactionArea.Right, redactionArea.Top);
+
+        // PHASE 1: Identify text blocks and mark those with reconstructed text
+        var textBlocks = IdentifyTextBlocks(operations, redactionArea);
+        _logger.LogInformation("Identified {Count} text blocks, {ReconstructedCount} will be reconstructed",
+            textBlocks.Count, textBlocks.Count(b => b.HasReconstructedText));
+
+        // PHASE 2: Build output, filtering operations from reconstructed blocks
         var modifiedOperations = new List<PdfOperation>();
-        int operationsProcessed = 0;
-        int operationsModified = 0;
         int textOpsFound = 0;
+        int operationsReconstructed = 0;
+        int operationsSkippedFromReconstructedBlocks = 0;
+        int operationsKeptAsIs = 0;
 
         foreach (var operation in operations)
         {
-            // Only process text operations
-            if (operation is not TextOperation textOp)
+            // Find which text block (if any) contains this operation
+            var containingBlock = textBlocks.FirstOrDefault(b => b.Contains(operation.StreamPosition));
+
+            if (containingBlock != null && containingBlock.HasReconstructedText)
             {
-                // Keep ALL non-text operations (including TextStateOperations)
-                // This preserves the original PDF structure for unmodified text
-                modifiedOperations.Add(operation);
-                continue;
-            }
-
-            textOpsFound++;
-
-            operationsProcessed++;
-
-            // Check if operation intersects with redaction area
-            bool intersects = textOp.IntersectsWith(redactionArea);
-
-            if (!intersects)
-            {
-                // No intersection - keep as-is
-                modifiedOperations.Add(operation);
-                continue;
-            }
-
-            // Operation intersects - perform glyph-level redaction
-            _logger.LogDebug("Processing text operation: Text='{Text}', FontName='{Font}', FontSize={Size}",
-                textOp.Text.Length > 50 ? textOp.Text.Substring(0, 50) + "..." : textOp.Text,
-                textOp.FontName,
-                textOp.FontSize);
-
-            var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
-
-            // Update the text operation's bounding box with REAL positions from PdfPig
-            if (letterMatches.Count > 0)
-            {
-                var realBoundingBox = CalculateBoundingBoxFromLetters(letterMatches);
-                // Create a new TextOperation with updated bounding box
-                textOp = new TextOperation
+                // This operation is inside a text block that will be reconstructed
+                // We must reconstruct ALL TextOperations in this block, not just intersecting ones
+                if (operation is TextOperation textOp)
                 {
-                    Operator = textOp.Operator,
-                    Operands = textOp.Operands,
-                    StreamPosition = textOp.StreamPosition,
-                    Text = textOp.Text,
-                    Glyphs = textOp.Glyphs,
-                    FontName = textOp.FontName,
-                    FontSize = textOp.FontSize,
-                    BoundingBox = realBoundingBox  // Use REAL bounding box from PdfPig
-                };
+                    // Reconstruct this text operation
+                    textOpsFound++;
+                    var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
 
-                _logger.LogDebug("Updated bounding box from ({OldL:F2},{OldB:F2},{OldR:F2},{OldT:F2}) to ({NewL:F2},{NewB:F2},{NewR:F2},{NewT:F2})",
-                    operation is TextOperation oldOp ? oldOp.BoundingBox.Left : 0,
-                    operation is TextOperation oldOp2 ? oldOp2.BoundingBox.Bottom : 0,
-                    operation is TextOperation oldOp3 ? oldOp3.BoundingBox.Right : 0,
-                    operation is TextOperation oldOp4 ? oldOp4.BoundingBox.Top : 0,
-                    realBoundingBox.Left, realBoundingBox.Bottom, realBoundingBox.Right, realBoundingBox.Top);
+                    // Update bbox with real positions if we have letter matches
+                    if (letterMatches.Count > 0)
+                    {
+                        var realBBox = CalculateBoundingBoxFromLetters(letterMatches);
+                        textOp = new TextOperation
+                        {
+                            Operator = textOp.Operator,
+                            Operands = textOp.Operands,
+                            StreamPosition = textOp.StreamPosition,
+                            Text = textOp.Text,
+                            Glyphs = textOp.Glyphs,
+                            FontName = textOp.FontName,
+                            FontSize = textOp.FontSize,
+                            BoundingBox = realBBox
+                        };
+                    }
 
-                // Re-check intersection with REAL bounding box
-                intersects = textOp.IntersectsWith(redactionArea);
-                if (!intersects)
+                    var segments = _textSegmenter.BuildSegments(textOp, letterMatches, redactionArea);
+
+                    if (segments.Count > 0)
+                    {
+                        var reconstructed = _operationReconstructor.ReconstructWithPositioning(segments, textOp);
+                        modifiedOperations.AddRange(reconstructed);
+                        operationsReconstructed++;
+                        _logger.LogInformation("Reconstructed TextOp '{Text}' into {Count} segments",
+                            textOp.Text.Length > 30 ? textOp.Text.Substring(0, 30) + "..." : textOp.Text,
+                            segments.Count);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("All segments removed (complete redaction) for '{Text}'",
+                            textOp.Text.Length > 30 ? textOp.Text.Substring(0, 30) + "..." : textOp.Text);
+                    }
+                }
+                else
                 {
-                    _logger.LogDebug("After updating bounding box, operation no longer intersects - keeping as-is");
-                    modifiedOperations.Add(textOp);
-                    continue;
+                    // Skip - this operation is part of a reconstructed block but not a TextOperation
+                    // (Could be BT, ET, Tf, Tm, Tc, Tw, etc.)
+                    operationsSkippedFromReconstructedBlocks++;
                 }
             }
-
-            if (letterMatches.Count == 0)
+            else
             {
-                // No letter matches - fall back to whole-operation removal
-                _logger.LogDebug("No letter matches for operation '{Text}', removing entire operation",
-                    textOp.Text.Length > 50 ? textOp.Text.Substring(0, 50) + "..." : textOp.Text);
-                // Don't add to modifiedOperations (removes entire operation)
-                operationsModified++;
-                continue;
+                // Not in a reconstructed block - keep as-is
+                operationsKeptAsIs++;
+                modifiedOperations.Add(operation);
             }
-
-            // Build segments
-            var segments = _textSegmenter.BuildSegments(textOp, letterMatches, redactionArea);
-
-            if (segments.Count == 0)
-            {
-                // All text is in redaction area - remove entire operation
-                _logger.LogDebug("All segments removed for operation '{Text}'",
-                    textOp.Text.Length > 50 ? textOp.Text.Substring(0, 50) + "..." : textOp.Text);
-                operationsModified++;
-                continue;
-            }
-
-            // Reconstruct operations for kept segments
-            var reconstructedOps = _operationReconstructor.ReconstructWithPositioning(segments, textOp);
-
-            modifiedOperations.AddRange(reconstructedOps);
-            operationsModified++;
-
-            _logger.LogDebug("Redacted operation '{Original}' into {Count} segments",
-                textOp.Text.Length > 50 ? textOp.Text.Substring(0, 50) + "..." : textOp.Text,
-                segments.Count);
         }
 
-        _logger.LogInformation("Processed {Total} text operations, modified {Modified}",
-            operationsProcessed, operationsModified);
+        _logger.LogInformation("=== OPERATION PROCESSING COMPLETE ===");
+        _logger.LogInformation("Text operations reconstructed: {Reconstructed}", operationsReconstructed);
+        _logger.LogInformation("Operations skipped from reconstructed blocks: {Skipped}", operationsSkippedFromReconstructedBlocks);
+        _logger.LogInformation("Operations kept as-is: {Kept}", operationsKeptAsIs);
+        _logger.LogInformation("Total operations in output: {Output} (vs {Input} input)",
+            modifiedOperations.Count, operations.Count);
 
         return modifiedOperations;
+    }
+
+    /// <summary>
+    /// Identify text blocks (BT...ET ranges) and mark those containing intersecting text.
+    /// </summary>
+    private List<TextBlockInfo> IdentifyTextBlocks(List<PdfOperation> operations, PdfRectangle redactionArea)
+    {
+        var blocks = new List<TextBlockInfo>();
+        var btStack = new Stack<int>();  // Track BT positions (handles nested BT in malformed PDFs)
+
+        for (int i = 0; i < operations.Count; i++)
+        {
+            var op = operations[i];
+
+            if (op is TextStateOperation tso && tso.Operator == "BT")
+            {
+                btStack.Push(op.StreamPosition);
+            }
+            else if (op is TextStateOperation tso2 && tso2.Operator == "ET")
+            {
+                if (btStack.Count > 0)
+                {
+                    var btPos = btStack.Pop();
+
+                    // Check if any TextOperation in this range intersects
+                    var hasReconstructedText = operations
+                        .Where(o => o.StreamPosition >= btPos && o.StreamPosition <= op.StreamPosition)
+                        .OfType<TextOperation>()
+                        .Any(to => to.IntersectsWith(redactionArea));
+
+                    blocks.Add(new TextBlockInfo
+                    {
+                        BtStreamPosition = btPos,
+                        EtStreamPosition = op.StreamPosition,
+                        HasReconstructedText = hasReconstructedText
+                    });
+
+                    _logger.LogDebug("Text block [{Bt},{Et}]: HasReconstructedText={Has}",
+                        btPos, op.StreamPosition, hasReconstructedText);
+                }
+            }
+        }
+
+        return blocks;
     }
 
     /// <summary>
@@ -183,11 +202,6 @@ public class GlyphRemover
     /// <summary>
     /// Perform glyph-level redaction on a page and return new content stream bytes.
     /// </summary>
-    /// <param name="pdfPath">Path to PDF file.</param>
-    /// <param name="pageNumber">Page number (1-indexed).</param>
-    /// <param name="operations">Parsed operations from the page.</param>
-    /// <param name="redactionArea">Area to redact.</param>
-    /// <returns>New content stream bytes with glyphs removed.</returns>
     public byte[] RedactPage(
         string pdfPath,
         int pageNumber,
@@ -212,4 +226,17 @@ public class GlyphRemover
 
         return contentBytes;
     }
+}
+
+/// <summary>
+/// Information about a text block (BT...ET range).
+/// </summary>
+internal class TextBlockInfo
+{
+    public required int BtStreamPosition { get; init; }
+    public required int EtStreamPosition { get; init; }
+    public required bool HasReconstructedText { get; init; }
+
+    public bool Contains(int streamPosition) =>
+        streamPosition >= BtStreamPosition && streamPosition <= EtStreamPosition;
 }

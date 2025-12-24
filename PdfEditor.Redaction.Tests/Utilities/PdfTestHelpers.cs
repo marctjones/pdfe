@@ -1,5 +1,6 @@
 using System.Text;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 
 namespace PdfEditor.Redaction.Tests.Utilities;
 
@@ -117,4 +118,27 @@ public static class PdfTestHelpers
                 l.GlyphRectangle.Top))
             .ToList();
     }
+
+    /// <summary>
+    /// Extract raw content stream from a PDF page for testing.
+    /// </summary>
+    public static string ExtractContentStream(string pdfPath, int pageNumber = 1)
+    {
+        using var document = PdfDocument.Open(pdfPath);
+        var page = document.GetPage(pageNumber);
+
+        // Access content stream through PdfPig's internal structure
+        // This is for testing purposes to verify PDF structure
+        var operations = page.Operations;
+        var sb = new StringBuilder();
+
+        foreach (var op in operations)
+        {
+            // Format: operands operator
+            sb.AppendLine(op.ToString());
+        }
+
+        return sb.ToString();
+    }
 }
+

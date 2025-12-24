@@ -11,13 +11,16 @@ public class EtOperatorHandler : IOperatorHandler
     public PdfOperation? Handle(IReadOnlyList<object> operands, PdfParserState state)
     {
         // ET takes no operands
+        // Mark operation as inside text block (it's the ending marker, but still within the block)
+        bool wasInTextObject = state.InTextObject;
         state.EndTextObject();
 
         return new TextStateOperation
         {
             Operator = OperatorName,
             Operands = operands,
-            StreamPosition = state.StreamPosition
+            StreamPosition = state.StreamPosition,
+            InsideTextBlock = wasInTextObject  // ET is inside the text block it closes
         };
     }
 }

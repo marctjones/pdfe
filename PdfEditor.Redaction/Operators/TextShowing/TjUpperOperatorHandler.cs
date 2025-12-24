@@ -43,6 +43,7 @@ public class TjUpperOperatorHandler : IOperatorHandler
             Operator = OperatorName,
             Operands = operands,
             StreamPosition = state.StreamPosition,
+            InsideTextBlock = state.InTextObject,
             Text = text,
             Glyphs = glyphs,
             FontName = state.FontName,

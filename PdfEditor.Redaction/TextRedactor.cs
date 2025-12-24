@@ -56,6 +56,29 @@ public class TextRedactor : ITextRedactor
         _logger = logger;
     }
 
+    /// <summary>
+    /// Create a TextRedactor with full logging for debugging (for testing).
+    /// </summary>
+    public TextRedactor(
+        IContentStreamParser parser,
+        IContentStreamBuilder builder,
+        ILogger<TextRedactor> logger,
+        ILogger<GlyphRemover> glyphRemoverLogger,
+        ILogger<LetterFinder> letterFinderLogger,
+        ILogger<TextSegmenter> textSegmenterLogger,
+        ILogger<OperationReconstructor> operationReconstructorLogger)
+    {
+        _parser = parser;
+        _builder = builder;
+        _glyphRemover = new GlyphRemover(
+            builder,
+            glyphRemoverLogger,
+            letterFinderLogger,
+            textSegmenterLogger,
+            operationReconstructorLogger);
+        _logger = logger;
+    }
+
     /// <inheritdoc />
     public RedactionResult RedactText(string inputPath, string outputPath, string textToRedact, RedactionOptions? options = null)
     {

@@ -89,16 +89,18 @@ public class TextSegmenter
             }
             else
             {
-                // No letter match for this index - estimate based on operation bbox
-                // This can happen if letter count != text length
+                // No letter match for this index - use FIXED width estimate
+                // This happens for unmapped characters (trailing spaces, etc.)
+                // CRITICAL: Don't use operation bbox width - for reconstructed operations,
+                // this is a placeholder that causes massive width accumulation!
                 keep = true;  // Conservative: keep if unknown
                 glyphX = textOperation.BoundingBox.Left;
                 glyphY = textOperation.BoundingBox.Bottom;
-                glyphWidth = textOperation.BoundingBox.Width / textOperation.Text.Length;
-                glyphHeight = textOperation.BoundingBox.Height;
+                glyphWidth = 5.0;   // Fixed approximate space width
+                glyphHeight = 12.0; // Fixed approximate text height
 
-                _logger.LogDebug("No letter match for character index {Index} in '{Text}'",
-                    i, textOperation.Text);
+                _logger.LogDebug("No letter match for character index {Index} in '{Text}', using fixed width {Width}",
+                    i, textOperation.Text, glyphWidth);
             }
 
             // Start new segment if keep status changed

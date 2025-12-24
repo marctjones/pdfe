@@ -67,9 +67,14 @@ public class ContentStreamParser : IContentStreamParser
                 state.StreamPosition = operationIndex++;
                 var handler = _registry.GetHandler(token.StringValue);
 
+                // CRITICAL: Pass a COPY of operandStack, not the list itself!
+                // Otherwise when we Clear() the stack, it clears the list that was assigned
+                // to the operation's Operands property.
+                var operandsCopy = operandStack.ToList();
+
                 if (handler != null)
                 {
-                    var operation = handler.Handle(operandStack, state);
+                    var operation = handler.Handle(operandsCopy, state);
                     if (operation != null)
                     {
                         operations.Add(operation);
@@ -78,7 +83,7 @@ public class ContentStreamParser : IContentStreamParser
                 else
                 {
                     // Unhandled operator - create generic operation
-                    var genericOp = CreateGenericOperation(token.StringValue, operandStack, state);
+                    var genericOp = CreateGenericOperation(token.StringValue, operandsCopy, state);
                     if (genericOp != null)
                     {
                         operations.Add(genericOp);
@@ -367,6 +372,7 @@ public class ContentStreamParser : IContentStreamParser
                     Operator = opName,
                     Operands = operands.ToList(),
                     StreamPosition = state.StreamPosition,
+                    InsideTextBlock = state.InTextObject,
                     IsSave = true
                 };
 
@@ -377,6 +383,7 @@ public class ContentStreamParser : IContentStreamParser
                     Operator = opName,
                     Operands = operands.ToList(),
                     StreamPosition = state.StreamPosition,
+                    InsideTextBlock = state.InTextObject,
                     IsRestore = true
                 };
 
@@ -396,7 +403,8 @@ public class ContentStreamParser : IContentStreamParser
                 {
                     Operator = opName,
                     Operands = operands.ToList(),
-                    StreamPosition = state.StreamPosition
+                    StreamPosition = state.StreamPosition,
+                    InsideTextBlock = state.InTextObject
                 };
 
             // Path operators
@@ -422,6 +430,7 @@ public class ContentStreamParser : IContentStreamParser
                     Operator = opName,
                     Operands = operands.ToList(),
                     StreamPosition = state.StreamPosition,
+                    InsideTextBlock = state.InTextObject,
                     Type = GetPathType(opName)
                 };
 
@@ -433,16 +442,19 @@ public class ContentStreamParser : IContentStreamParser
                     Operator = opName,
                     Operands = operands.ToList(),
                     StreamPosition = state.StreamPosition,
+                    InsideTextBlock = state.InTextObject,
                     XObjectName = xobjName
                 };
 
             default:
                 // Unknown operator - return generic state operation
+                // This handles text state operators like Tc, Tw, Tz, Ts, Tr that don't have dedicated handlers
                 return new TextStateOperation
                 {
                     Operator = opName,
                     Operands = operands.ToList(),
-                    StreamPosition = state.StreamPosition
+                    StreamPosition = state.StreamPosition,
+                    InsideTextBlock = state.InTextObject
                 };
         }
     }
