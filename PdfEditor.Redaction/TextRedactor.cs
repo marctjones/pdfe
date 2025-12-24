@@ -93,7 +93,12 @@ public class TextRedactor : ITextRedactor
 
             if (locations.Count == 0)
             {
-                _logger.LogInformation("No occurrences of '{Text}' found", textToRedact);
+                _logger.LogInformation("No occurrences of '{Text}' found, copying input to output", textToRedact);
+
+                // Copy input to output so sequential redactions don't break
+                // When no redactions are needed, the output should be identical to input
+                File.Copy(inputPath, outputPath, overwrite: true);
+
                 return RedactionResult.Succeeded(0, Array.Empty<int>());
             }
 
@@ -117,6 +122,11 @@ public class TextRedactor : ITextRedactor
 
         if (locationList.Count == 0)
         {
+            _logger.LogInformation("No redaction locations provided, copying input to output");
+
+            // Copy input to output for consistency
+            File.Copy(inputPath, outputPath, overwrite: true);
+
             return RedactionResult.Succeeded(0, Array.Empty<int>());
         }
 
@@ -224,6 +234,34 @@ public class TextRedactor : ITextRedactor
     }
 
     /// <summary>
+    /// Normalize text for more robust matching.
+    /// Handles Unicode apostrophes, quotes, and whitespace variations.
+    /// </summary>
+    private static string NormalizeText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var normalized = text
+            // Replace various apostrophe/quote characters with ASCII apostrophe
+            .Replace('\u2019', '\'')  // Right single quotation mark (')
+            .Replace('\u2018', '\'')  // Left single quotation mark (')
+            .Replace('\u02BC', '\'')  // Modifier letter apostrophe (ʼ)
+            .Replace('\u2032', '\'')  // Prime (′)
+
+            // Replace various dash characters with ASCII hyphen
+            .Replace('\u2013', '-')   // En dash (–)
+            .Replace('\u2014', '-')   // Em dash (—)
+            .Replace('\u2212', '-')   // Minus sign (−)
+
+            // Normalize whitespace
+            .Trim();
+
+        // Replace multiple consecutive spaces with single space
+        return System.Text.RegularExpressions.Regex.Replace(normalized, @"\s+", " ");
+    }
+
+    /// <summary>
     /// Find text matches in a sequence of letters.
     /// </summary>
     private List<List<Letter>> FindTextMatches(List<Letter> letters, string searchText, StringComparison comparison)
@@ -241,19 +279,56 @@ public class TextRedactor : ITextRedactor
         _logger.LogInformation("FindTextMatches: Full text length = {Length}, searching for '{Text}'", fullText.Length, searchText);
         _logger.LogInformation("FindTextMatches: First 200 chars = '{Preview}'", fullText.Substring(0, Math.Min(200, fullText.Length)));
 
+        // Normalize the search text for more robust matching
+        var normalizedSearchText = NormalizeText(searchText);
+        _logger.LogInformation("FindTextMatches: After normalization, searching for '{NormalizedText}'", normalizedSearchText);
+
         int searchIndex = 0;
 
-        while ((searchIndex = fullText.IndexOf(searchText, searchIndex, comparison)) != -1)
+        // Search character by character, building up normalized strings to compare
+        int i = 0;
+        while (i <= fullText.Length - normalizedSearchText.Length)
         {
-            _logger.LogInformation("FindTextMatches: Found match at index {Index}", searchIndex);
-            // Map text index back to letters
-            var matchLetters = letters.Skip(searchIndex).Take(searchText.Length).ToList();
-            _logger.LogInformation("FindTextMatches: Mapped to {Count} letters (expected {Expected})", matchLetters.Count, searchText.Length);
-            if (matchLetters.Count == searchText.Length)
+            // Extract substring and normalize it
+            var substring = fullText.Substring(i, Math.Min(normalizedSearchText.Length * 2, fullText.Length - i));
+            var normalizedSubstring = NormalizeText(substring);
+
+            // Check if this position matches
+            if (normalizedSubstring.StartsWith(normalizedSearchText, comparison))
             {
-                matches.Add(matchLetters);
+                _logger.LogInformation("FindTextMatches: Found match at index {Index}", i);
+
+                // Find the actual end position in the original text
+                // We need to take enough characters to match the normalized search text
+                int endIndex = i;
+                var currentNormalized = "";
+
+                while (endIndex < fullText.Length && currentNormalized.Length < normalizedSearchText.Length)
+                {
+                    currentNormalized = NormalizeText(fullText.Substring(i, endIndex - i + 1));
+                    if (currentNormalized == normalizedSearchText)
+                    {
+                        break;
+                    }
+                    endIndex++;
+                }
+
+                var matchLength = endIndex - i + 1;
+                var matchLetters = letters.Skip(i).Take(matchLength).ToList();
+
+                _logger.LogInformation("FindTextMatches: Mapped to {Count} letters from index {Start} to {End}",
+                    matchLetters.Count, i, endIndex);
+
+                if (matchLetters.Count > 0)
+                {
+                    matches.Add(matchLetters);
+                    // Skip past this match to avoid overlapping matches
+                    i = endIndex + 1;
+                    continue;
+                }
             }
-            searchIndex++;
+
+            i++;
         }
 
         return matches;
