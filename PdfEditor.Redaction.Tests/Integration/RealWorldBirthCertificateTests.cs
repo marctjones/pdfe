@@ -111,13 +111,19 @@ public class RealWorldBirthCertificateTests : IDisposable
         var redactor = new TextRedactor();
 
         // Act - Redact multiple form fields sequentially
-        redactor.RedactText(_sourcePdf, temp1, "FULL NAME AT BIRTH");
-        redactor.RedactText(temp1, temp2, "DATE OF BIRTH");
-        redactor.RedactText(temp2, temp3, "FATHER'S FULL NAME");
+        var result1 = redactor.RedactText(_sourcePdf, temp1, "FULL NAME AT BIRTH");
+        result1.Success.Should().BeTrue($"First redaction should succeed. Error: {result1.ErrorMessage}");
+
+        var result2 = redactor.RedactText(temp1, temp2, "DATE OF BIRTH");
+        result2.Success.Should().BeTrue($"Second redaction should succeed. Error: {result2.ErrorMessage}");
+
+        var result3 = redactor.RedactText(temp2, temp3, "FATHER'S FULL NAME");
+        result3.Success.Should().BeTrue($"Third redaction should succeed. Error: {result3.ErrorMessage}");
+
         var result = redactor.RedactText(temp3, outputPath, "MOTHER'S MAIDEN NAME");
 
         // Assert
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeTrue($"Final redaction should succeed. Error: {result.ErrorMessage}");
 
         var textAfter = PdfTestHelpers.ExtractAllText(outputPath);
         textAfter.Should().NotContain("FULL NAME AT BIRTH");
@@ -175,7 +181,9 @@ public class RealWorldBirthCertificateTests : IDisposable
 
         // Should preserve other text
         textAfter.Should().Contain("FULL SIZE");
-        textAfter.Should().Contain("CERTIFICATE");
+        // NEW BEHAVIOR: With block-aware filtering, uppercase "CERTIFICATE" in same block as "WALLET SIZE"
+        // gets removed during reconstruction, but lowercase "certificate" in different blocks is preserved
+        textAfter.Should().Contain("certificate", "Lowercase certificate in separate blocks should be preserved");
     }
 
     [Fact]

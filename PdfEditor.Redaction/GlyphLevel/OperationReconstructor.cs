@@ -74,15 +74,15 @@ public class OperationReconstructor
     /// Generate positioning operator (Tm - set text matrix) for a text segment.
     /// </summary>
     /// <param name="segment">The text segment to position.</param>
-    /// <returns>State operation representing Tm operator.</returns>
-    public StateOperation CreatePositioningOperation(TextSegment segment)
+    /// <returns>Text state operation representing Tm operator.</returns>
+    public TextStateOperation CreatePositioningOperation(TextSegment segment)
     {
         // Tm operator: a b c d e f Tm
         // For simple positioning (no rotation/skew):
         // [1 0 0 1 x y] Tm
         // Where (x, y) is the text position
 
-        return new StateOperation
+        return new TextStateOperation
         {
             Operator = "Tm",
             Operands = new List<object>
@@ -94,7 +94,8 @@ public class OperationReconstructor
                 segment.StartX,  // e - horizontal position
                 segment.StartY   // f - vertical position (baseline)
             },
-            StreamPosition = 0  // Will be set during serialization
+            StreamPosition = 0,  // Will be set during serialization
+            InsideTextBlock = false  // Reconstructed operations are NOT inside the original text block
         };
     }
 
@@ -121,23 +122,23 @@ public class OperationReconstructor
         {
             Operator = "BT",
             Operands = new List<object>(),
-            StreamPosition = 0
+            StreamPosition = 0,
+            InsideTextBlock = false  // Reconstructed operations are NOT inside the original text block
         });
 
         // Set font and size (Tf operator)
-        // Use font from original operation, or default to /F1 if not available
-        var fontName = originalOperation.FontName ?? "/F1";
+        var fontName = originalOperation.FontName;
         var fontSize = originalOperation.FontSize;
 
-        _logger.LogDebug("ReconstructWithPositioning: FontName='{Font}', FontSize={Size}", fontName, fontSize);
-        _logger.LogDebug("ReconstructWithPositioning: Creating Tf operator with {ArgCount} operands", 2);
-
-        operations.Add(new TextStateOperation
+        var tfOperation = new TextStateOperation
         {
             Operator = "Tf",
             Operands = new List<object> { fontName, fontSize },
-            StreamPosition = 0
-        });
+            StreamPosition = 0,
+            InsideTextBlock = false  // Reconstructed operations are NOT inside the original text block
+        };
+
+        operations.Add(tfOperation);
 
         foreach (var segment in segments)
         {
@@ -145,6 +146,10 @@ public class OperationReconstructor
             operations.Add(CreatePositioningOperation(segment));
 
             // Add text operation
+            // CRITICAL: Don't set a bounding box based on segment width!
+            // For reconstructed operations, segment width may be inaccurate due to
+            // unmapped characters. Use a minimal bbox and rely on PdfPig to provide
+            // accurate positions when this gets parsed again.
             var textOp = new TextOperation
             {
                 Operator = "Tj",
@@ -152,12 +157,13 @@ public class OperationReconstructor
                 BoundingBox = new PdfRectangle(
                     segment.StartX,
                     segment.StartY,
-                    segment.StartX + segment.Width,
-                    segment.StartY + segment.Height),
+                    segment.StartX + (segment.Text.Length * 6.0), // Minimal estimate: 6pts per char
+                    segment.StartY + 12.0), // Fixed height
                 Text = segment.Text,
                 FontName = fontName,
                 FontSize = fontSize,
                 StreamPosition = 0,
+                InsideTextBlock = false,  // Reconstructed operations are NOT inside the original text block
                 Glyphs = new List<GlyphPosition>()
             };
 
@@ -169,7 +175,8 @@ public class OperationReconstructor
         {
             Operator = "ET",
             Operands = new List<object>(),
-            StreamPosition = 0
+            StreamPosition = 0,
+            InsideTextBlock = false  // Reconstructed operations are NOT inside the original text block
         });
 
         _logger.LogDebug("Reconstructed {Count} segments into {OpCount} operations (with BT/Tf/ET and positioning)",

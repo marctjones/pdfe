@@ -27,7 +27,8 @@ public class ContentStreamBuilder : IContentStreamBuilder
             sb.Append('\n');
         }
 
-        return Encoding.ASCII.GetBytes(sb.ToString());
+        var result = sb.ToString();
+        return Encoding.ASCII.GetBytes(result);
     }
 
     /// <summary>

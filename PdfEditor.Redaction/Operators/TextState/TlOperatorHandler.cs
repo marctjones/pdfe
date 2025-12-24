@@ -20,7 +20,8 @@ public class TlOperatorHandler : IOperatorHandler
         {
             Operator = OperatorName,
             Operands = operands,
-            StreamPosition = state.StreamPosition
+            StreamPosition = state.StreamPosition,
+            InsideTextBlock = state.InTextObject
         };
     }
 

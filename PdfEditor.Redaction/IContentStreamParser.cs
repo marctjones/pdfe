@@ -42,6 +42,12 @@ public abstract class PdfOperation
     public int StreamPosition { get; init; }
 
     /// <summary>
+    /// Whether this operation was inside a BT...ET text block.
+    /// Used to filter TextStateOperations during glyph-level redaction.
+    /// </summary>
+    public bool InsideTextBlock { get; init; }
+
+    /// <summary>
     /// Check if this operation intersects with a rectangle.
     /// </summary>
     public virtual bool IntersectsWith(PdfRectangle area) => BoundingBox.IntersectsWith(area);

@@ -108,9 +108,12 @@ public class GlyphRemoverTests : IDisposable
             letters[4].GlyphRectangle.Right,
             letters[0].GlyphRectangle.Top);
 
+        // NEW BEHAVIOR: TextOperations must be inside BT...ET block
         var operations = new List<PdfOperation>
         {
-            CreateTextOperation("Hello", bbox)
+            new TextStateOperation { Operator = "BT", Operands = new List<object>(), StreamPosition = 0, InsideTextBlock = false },
+            CreateTextOperation("Hello", bbox, streamPosition: 1),
+            new TextStateOperation { Operator = "ET", Operands = new List<object>(), StreamPosition = 2, InsideTextBlock = true }
         };
 
         // Redaction area covering all letters
@@ -124,7 +127,8 @@ public class GlyphRemoverTests : IDisposable
         var result = _glyphRemover.ProcessOperations(operations, letters, redactionArea);
 
         // Assert
-        result.Should().BeEmpty();  // All text removed
+        // NEW BEHAVIOR: All text removed, BT/ET filtered out from reconstructed block
+        result.Should().BeEmpty();
     }
 
     [Fact]
@@ -141,9 +145,12 @@ public class GlyphRemoverTests : IDisposable
             letters[4].GlyphRectangle.Right,
             letters[0].GlyphRectangle.Top);
 
+        // NEW BEHAVIOR: TextOperations must be inside BT...ET block
         var operations = new List<PdfOperation>
         {
-            CreateTextOperation("ABCDE", bbox)
+            new TextStateOperation { Operator = "BT", Operands = new List<object>(), StreamPosition = 0, InsideTextBlock = false },
+            CreateTextOperation("ABCDE", bbox, streamPosition: 1),
+            new TextStateOperation { Operator = "ET", Operands = new List<object>(), StreamPosition = 2, InsideTextBlock = true }
         };
 
         // Redact middle letter 'C' only (exact bounds, no margin)
@@ -157,7 +164,7 @@ public class GlyphRemoverTests : IDisposable
         var result = _glyphRemover.ProcessOperations(operations, letters, redactionArea);
 
         // Assert
-        // Should get: BT, Tf, Tm, Tj("AB"), Tm, Tj("DE"), ET = 7 operations
+        // NEW BEHAVIOR: Should get reconstructed block: BT, Tf, Tm, Tj("AB"), Tm, Tj("DE"), ET = 7 operations
         result.Should().HaveCount(7);
 
         result[0].Operator.Should().Be("BT");
@@ -186,11 +193,14 @@ public class GlyphRemoverTests : IDisposable
             letters[3].GlyphRectangle.Right,
             letters[0].GlyphRectangle.Top);
 
+        // NEW BEHAVIOR: TextOperations must be inside BT...ET block
         var operations = new List<PdfOperation>
         {
-            new StateOperation { Operator = "q", Operands = new List<object>(), StreamPosition = 0 },
-            CreateTextOperation("Test", bbox),
-            new StateOperation { Operator = "Q", Operands = new List<object>(), StreamPosition = 2 }
+            new StateOperation { Operator = "q", Operands = new List<object>(), StreamPosition = 0, InsideTextBlock = false },
+            new TextStateOperation { Operator = "BT", Operands = new List<object>(), StreamPosition = 1, InsideTextBlock = false },
+            CreateTextOperation("Test", bbox, streamPosition: 2),
+            new TextStateOperation { Operator = "ET", Operands = new List<object>(), StreamPosition = 3, InsideTextBlock = true },
+            new StateOperation { Operator = "Q", Operands = new List<object>(), StreamPosition = 4, InsideTextBlock = false }
         };
 
         // Redact all text
@@ -204,6 +214,7 @@ public class GlyphRemoverTests : IDisposable
         var result = _glyphRemover.ProcessOperations(operations, letters, redactionArea);
 
         // Assert
+        // NEW BEHAVIOR: q/Q preserved, BT/ET filtered from reconstructed block (all text removed)
         result.Should().HaveCount(2);
         result[0].Operator.Should().Be("q");
         result[1].Operator.Should().Be("Q");
@@ -258,11 +269,16 @@ public class GlyphRemoverTests : IDisposable
             letters[2].GlyphRectangle.Right,
             letters[0].GlyphRectangle.Top);
 
+        // NEW BEHAVIOR: TextOperations must be inside BT...ET blocks
         var operations = new List<PdfOperation>
         {
-            CreateTextOperation("ABC", bbox),  // Will be redacted
-            new StateOperation { Operator = "q", Operands = new List<object>(), StreamPosition = 1 },
-            CreateTextOperation("ABC", bbox)   // Will be redacted
+            new TextStateOperation { Operator = "BT", Operands = new List<object>(), StreamPosition = 0, InsideTextBlock = false },
+            CreateTextOperation("ABC", bbox, streamPosition: 1),  // Will be redacted
+            new TextStateOperation { Operator = "ET", Operands = new List<object>(), StreamPosition = 2, InsideTextBlock = true },
+            new StateOperation { Operator = "q", Operands = new List<object>(), StreamPosition = 3, InsideTextBlock = false },
+            new TextStateOperation { Operator = "BT", Operands = new List<object>(), StreamPosition = 4, InsideTextBlock = false },
+            CreateTextOperation("ABC", bbox, streamPosition: 5),   // Will be redacted
+            new TextStateOperation { Operator = "ET", Operands = new List<object>(), StreamPosition = 6, InsideTextBlock = true }
         };
 
         // Redact all text
@@ -276,7 +292,8 @@ public class GlyphRemoverTests : IDisposable
         var result = _glyphRemover.ProcessOperations(operations, letters, redactionArea);
 
         // Assert
-        result.Should().HaveCount(1);  // Only the 'q' operation remains
+        // NEW BEHAVIOR: Both text blocks completely redacted (BT/ET filtered), only 'q' remains
+        result.Should().HaveCount(1);
         result[0].Operator.Should().Be("q");
     }
 
@@ -290,17 +307,18 @@ public class GlyphRemoverTests : IDisposable
         return path;
     }
 
-    private static TextOperation CreateTextOperation(string text, PdfRectangle bbox)
+    private static TextOperation CreateTextOperation(string text, PdfRectangle bbox, int streamPosition = 1)
     {
         return new TextOperation
         {
             Operator = "Tj",
             Operands = new List<object> { text },
             BoundingBox = bbox,
-            StreamPosition = 1,
+            StreamPosition = streamPosition,
             Text = text,
             Glyphs = new List<GlyphPosition>(),
-            FontSize = 12
+            FontSize = 12,
+            InsideTextBlock = true  // TextOperations are inside BT...ET
         };
     }
 }
