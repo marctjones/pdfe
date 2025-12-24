@@ -3,8 +3,11 @@
 # This script is designed to minimize token usage when reviewing results
 #
 # Usage:
-#   ./run-automation-tests.sh           # Build first, then test
-#   ./run-automation-tests.sh --no-build # Skip build, just test
+#   ./run-automation-tests.sh           # Build first, then test (with logging)
+#   ./run-automation-tests.sh --no-build # Skip build, just test (with logging)
+#
+# Output is automatically logged to logs/automation_tests_TIMESTAMP.log
+# Live output is shown on screen AND saved to log file
 
 set -e
 
@@ -20,8 +23,12 @@ if [[ "$1" == "--no-build" ]]; then
     SKIP_BUILD=true
 fi
 
-# Create logs directory
+# Create logs directory BEFORE setting up redirection
 mkdir -p "$LOG_DIR"
+
+# Redirect all output to both console and log file using tee
+exec > >(tee "$LOG_FILE")
+exec 2>&1
 
 echo "================================================="
 echo "Automation Script Tests"
@@ -45,20 +52,19 @@ if [ "$SKIP_BUILD" = false ]; then
     echo ""
 fi
 
-# Run tests and capture output (tee shows live output AND logs to file)
+# Run tests (output already redirected to both console and log via exec above)
 echo "Running: dotnet test --filter \"AutomationScript\" ..."
 echo ""
-echo "Live output below (also logging to $LOG_FILE):"
+echo "Live output below:"
 echo "================================================="
 echo ""
 
 dotnet test PdfEditor.Tests/PdfEditor.Tests.csproj \
     --filter "AutomationScript" \
     --logger "console;verbosity=normal" \
-    --no-build \
-    2>&1 | tee "$LOG_FILE"
+    --no-build
 
-EXIT_CODE=${PIPESTATUS[0]}
+EXIT_CODE=$?
 
 echo "================================================="
 echo "Test Results Summary"

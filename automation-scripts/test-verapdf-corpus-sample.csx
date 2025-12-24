@@ -79,14 +79,15 @@ try
     foreach (var pdf in allPdfs)
     {
         var path = pdf.ToLower();
-        if (path.Contains("pdf-a-1a") || path.Contains("pdfa-1a")) categories["PDF/A-1a"].Add(pdf);
-        else if (path.Contains("pdf-a-1b") || path.Contains("pdfa-1b")) categories["PDF/A-1b"].Add(pdf);
-        else if (path.Contains("pdf-a-2a") || path.Contains("pdfa-2a")) categories["PDF/A-2a"].Add(pdf);
-        else if (path.Contains("pdf-a-2b") || path.Contains("pdfa-2b")) categories["PDF/A-2b"].Add(pdf);
-        else if (path.Contains("pdf-a-2u") || path.Contains("pdfa-2u")) categories["PDF/A-2u"].Add(pdf);
-        else if (path.Contains("pdf-a-3b") || path.Contains("pdfa-3b")) categories["PDF/A-3b"].Add(pdf);
-        else if (path.Contains("pdf-a-4") || path.Contains("pdfa-4")) categories["PDF/A-4"].Add(pdf);
-        else if (path.Contains("pdfua-1") || path.Contains("pdf-ua-1")) categories["PDF/UA-1"].Add(pdf);
+        // Note: Directory names use underscores (PDF_A-1a, PDF_UA-1) not hyphens
+        if (path.Contains("pdf_a-1a") || path.Contains("pdfa-1a")) categories["PDF/A-1a"].Add(pdf);
+        else if (path.Contains("pdf_a-1b") || path.Contains("pdfa-1b")) categories["PDF/A-1b"].Add(pdf);
+        else if (path.Contains("pdf_a-2a") || path.Contains("pdfa-2a")) categories["PDF/A-2a"].Add(pdf);
+        else if (path.Contains("pdf_a-2b") || path.Contains("pdfa-2b")) categories["PDF/A-2b"].Add(pdf);
+        else if (path.Contains("pdf_a-2u") || path.Contains("pdfa-2u")) categories["PDF/A-2u"].Add(pdf);
+        else if (path.Contains("pdf_a-3b") || path.Contains("pdfa-3b")) categories["PDF/A-3b"].Add(pdf);
+        else if (path.Contains("pdf_a-4") || path.Contains("pdfa-4")) categories["PDF/A-4"].Add(pdf);
+        else if (path.Contains("pdf_ua-1") || path.Contains("pdfua-1")) categories["PDF/UA-1"].Add(pdf);
         else if (path.Contains("iso") && path.Contains("32000")) categories["ISO32000"].Add(pdf);
     }
 

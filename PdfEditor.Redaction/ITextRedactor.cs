@@ -73,6 +73,14 @@ public class RedactionOptions
     /// Default: true
     /// </summary>
     public bool CaseSensitive { get; set; } = true;
+
+    /// <summary>
+    /// Whether to use glyph-level redaction (removes individual characters).
+    /// When true, only glyphs intersecting the redaction area are removed.
+    /// When false, entire text operations are removed (whole-operation removal).
+    /// Default: true (TRUE glyph-level redaction is the purpose of this library)
+    /// </summary>
+    public bool UseGlyphLevelRedaction { get; set; } = true;
 }
 
 /// <summary>

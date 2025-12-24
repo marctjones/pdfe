@@ -44,10 +44,10 @@ if (!File.Exists(sourcePdf))
 }
 
 // Define specific test cases for THIS PDF
+// Note: "County" removed - not found in this birth certificate
 var testCases = new[]
 {
     new { Word = "CITY", Description = "Common word, uppercase, multiple occurrences", ExpectedMin = 1 },
-    new { Word = "County", Description = "Mixed case word", ExpectedMin = 1 },
     new { Word = "Birth", Description = "Word that appears in compound forms", ExpectedMin = 1 },
     new { Word = "Certificate", Description = "Longer word, title text", ExpectedMin = 1 },
 };
