@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PdfEditor.Redaction.ContentStream.Building;
 using PdfEditor.Redaction.ContentStream.Parsing;
+using PdfEditor.Redaction.GlyphLevel;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.Advanced;
 using PdfSharp.Pdf.IO;
@@ -18,6 +19,7 @@ public class TextRedactor : ITextRedactor
 {
     private readonly IContentStreamParser _parser;
     private readonly IContentStreamBuilder _builder;
+    private readonly GlyphRemover? _glyphRemover;
     private readonly ILogger<TextRedactor> _logger;
 
     /// <summary>
@@ -50,6 +52,7 @@ public class TextRedactor : ITextRedactor
     {
         _parser = parser;
         _builder = builder;
+        _glyphRemover = new GlyphRemover(builder);
         _logger = logger;
     }
 
@@ -119,7 +122,7 @@ public class TextRedactor : ITextRedactor
                 var redactionAreas = pageLocations.Select(l => l.BoundingBox).ToList();
 
                 // Process this page
-                var pageDetails = RedactPageContent(page, redactionAreas, options);
+                var pageDetails = RedactPageContent(inputPath, pageNumber, page, redactionAreas, options);
                 details.AddRange(pageDetails.Select(d => new RedactionDetail
                 {
                     PageNumber = pageNumber,
@@ -263,6 +266,8 @@ public class TextRedactor : ITextRedactor
     /// Returns details of what was redacted.
     /// </summary>
     private List<(string text, PdfRectangle box)> RedactPageContent(
+        string pdfPath,
+        int pageNumber,
         PdfPage page,
         List<PdfRectangle> redactionAreas,
         RedactionOptions options)
@@ -292,41 +297,80 @@ public class TextRedactor : ITextRedactor
             RedactionLogger.LogRedactionArea(_logger, area, 0);
         }
 
-        // Find operations to redact
-        var textOps = operations.OfType<TextOperation>().ToList();
-        var opsToRemove = new HashSet<int>();
+        // Choose redaction strategy based on options
+        byte[] newContentBytes;
 
-        for (int i = 0; i < textOps.Count; i++)
+        if (options.UseGlyphLevelRedaction && _glyphRemover != null)
         {
-            var textOp = textOps[i];
-            RedactionLogger.LogTextOperation(_logger, textOp, i);
+            _logger.LogInformation("Using glyph-level redaction for page {Page}", pageNumber);
+
+            // Use glyph-level redaction for each area
+            var modifiedOps = new List<PdfOperation>(operations);
 
             foreach (var area in redactionAreas)
             {
-                var intersects = textOp.IntersectsWith(area);
-                RedactionLogger.LogIntersection(_logger, textOp, area, intersects);
+                // Get PdfPig letters for this page
+                using var doc = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+                var pigPage = doc.GetPage(pageNumber);
+                var letters = pigPage.Letters;
 
-                if (intersects)
+                // Process operations with glyph-level redaction
+                modifiedOps = _glyphRemover.ProcessOperations(modifiedOps, letters, area);
+
+                // Track redacted text (approximate - we don't have exact text anymore)
+                var textOps = operations.OfType<TextOperation>()
+                    .Where(op => op.IntersectsWith(area))
+                    .ToList();
+
+                foreach (var textOp in textOps)
                 {
-                    opsToRemove.Add(textOp.StreamPosition);
                     redactedItems.Add((textOp.Text, textOp.BoundingBox));
-                    break;
                 }
             }
+
+            // Build new content stream from modified operations
+            newContentBytes = _builder.Build(modifiedOps);
         }
-
-        RedactionLogger.LogParseComplete(_logger, operations.Count, textOps.Count);
-
-        if (opsToRemove.Count == 0)
+        else
         {
-            _logger.LogDebug("No operations to redact on this page");
-            return redactedItems;
+            _logger.LogInformation("Using whole-operation redaction for page {Page}", pageNumber);
+
+            // Original whole-operation removal logic
+            var textOps = operations.OfType<TextOperation>().ToList();
+            var opsToRemove = new HashSet<int>();
+
+            for (int i = 0; i < textOps.Count; i++)
+            {
+                var textOp = textOps[i];
+                RedactionLogger.LogTextOperation(_logger, textOp, i);
+
+                foreach (var area in redactionAreas)
+                {
+                    var intersects = textOp.IntersectsWith(area);
+                    RedactionLogger.LogIntersection(_logger, textOp, area, intersects);
+
+                    if (intersects)
+                    {
+                        opsToRemove.Add(textOp.StreamPosition);
+                        redactedItems.Add((textOp.Text, textOp.BoundingBox));
+                        break;
+                    }
+                }
+            }
+
+            RedactionLogger.LogParseComplete(_logger, operations.Count, textOps.Count);
+
+            if (opsToRemove.Count == 0)
+            {
+                _logger.LogDebug("No operations to redact on this page");
+                return redactedItems;
+            }
+
+            _logger.LogDebug("Removing {Count} operations from content stream", opsToRemove.Count);
+
+            // Build new content stream with redacted operations
+            newContentBytes = _builder.BuildWithRedactions(operations, redactionAreas);
         }
-
-        _logger.LogDebug("Removing {Count} operations from content stream", opsToRemove.Count);
-
-        // Build new content stream with redacted operations
-        var newContentBytes = _builder.BuildWithRedactions(operations, redactionAreas);
 
         // Replace page content
         ReplacePageContent(page, newContentBytes);

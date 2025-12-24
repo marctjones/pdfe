@@ -172,14 +172,14 @@ try
     var successful = results.Count(r => r.success);
     var failed = results.Count(r => !r.success);
     var totalPages = results.Sum(r => r.pages);
-    var totalRedactions = results.Sum(r => r.redactions);
+    var totalRedactionsAcrossAllFiles = results.Sum(r => r.redactions);
 
     Console.WriteLine($"Files processed: {pdfFiles.Count}");
     Console.WriteLine($"  ✅ Successful: {successful}");
     Console.WriteLine($"  ❌ Failed: {failed}");
     Console.WriteLine($"\nStatistics:");
     Console.WriteLine($"  Total pages: {totalPages}");
-    Console.WriteLine($"  Total redactions: {totalRedactions}");
+    Console.WriteLine($"  Total redactions: {totalRedactionsAcrossAllFiles}");
     Console.WriteLine($"  Processing time: {stopwatch.Elapsed:mm\\:ss}");
     Console.WriteLine($"  Average: {stopwatch.Elapsed.TotalSeconds / pdfFiles.Count:F1} sec/file");
 

@@ -433,6 +433,48 @@ This redaction implementation:
 
 For maximum security, also remove metadata and flatten the PDF after redaction.
 
+## Current Status (v1.3.0 → v1.4.0)
+
+### v1.3.0 Status
+
+**Redaction:** Whole-operation removal (stable, no corruption)
+- ✅ Works correctly - no text doubling/corruption
+- ❌ Limitation: Redacting "Birth" removes entire "Birth Certificate"
+- Library: `PdfEditor.Redaction.TextRedactor` - proven to work
+- GUI: Character-level filtering DISABLED (was buggy)
+
+**What Happened:**
+- User testing revealed text corruption in GUI redaction
+- Root cause: `CharacterLevelTextFilter` in GUI (not library)
+- Temporary fix: Disabled character-level, use whole-operation removal
+- See: #103, #104, #106 for bug details
+
+### v1.4.0 Plan: Glyph-Level Redaction
+
+**Goal:** Implement TRUE glyph-level redaction in `PdfEditor.Redaction` library
+
+**Implementation Issues:**
+- #112 - Master tracking issue
+- #113 - GlyphRemover (orchestrator)
+- #114 - LetterFinder (spatial matching)
+- #115 - TextSegmenter (split operations)
+- #116 - OperationReconstructor (build new ops)
+- #117 - ContentStreamBuilder (Tm operator emission)
+- #118 - TextRedactor integration
+- #119 - Comprehensive tests
+
+**Resources:**
+- Discussion: https://github.com/marctjones/pdfe/discussions/120 (implementation plan)
+- Wiki: `docs/WIKI_PAGES_TODO.md` (PDF operators, content streams, glyph-level redaction)
+
+**Timeline:** 20-26 hours
+
+**Why it will work:**
+- All logic in library (not GUI)
+- Spatial matching (not text search)
+- Use PdfPig's accurate letter positions
+- Proper ContentStreamBuilder integration (no raw bytes)
+
 ## Task Tracking and GitHub Issues
 
 **IMPORTANT**: This project uses GitHub Issues for ALL task tracking, feature requests, bugs, and enhancements.
@@ -533,13 +575,38 @@ if (!System.IO.File.Exists(filePath))
 ### Current High-Priority Issues
 
 Check GitHub for the latest, but as of this writing:
-- **#17**: Test Recent Files menu functionality
-- **#18**: Test pending redactions UI display
-- **#19**: Implement "Apply All Redactions" button (critical for v1.3.0)
-- **#28**: Add integration test for mark-then-apply workflow
-- **#30**: Verify PDF conformance for mark-then-apply workflow
+- **#95**: Text leak - substring redaction leaves partial text (CRITICAL, security)
+- **#96**: Empty area redactions - coordinate mismatch (HIGH)
+- **#87**: Substring matching limitations (additional test cases added)
 
 View all: `gh issue list --label "priority: high,priority: critical"`
+
+### Using Discussions for Research and Ideas
+
+GitHub Discussions is enabled for collaborative research, ideas, and questions that don't fit the issue tracker. However, the GitHub CLI doesn't support creating Discussions directly, so we use a hybrid approach:
+
+**When to use Discussions vs Issues:**
+- **Discussions:** Research questions, ideas, open-ended exploration, lab notes
+- **Issues:** Bugs, features, tasks with clear completion criteria
+
+**Workflow:**
+1. Create research issues with `question` label (like #97)
+2. When ready for community input, manually convert to Discussion on GitHub
+3. Reference the Discussion in related issues
+
+**Checking for Research Topics:**
+```bash
+# List research/question issues
+gh issue list --label "question"
+
+# Check if any are ready to convert to Discussions
+# Look for issues with active conversation but no clear action items
+```
+
+**Important:** When reaching a stable milestone (like v1.3.0), review Discussions for:
+- Ideas that have crystallized into actionable features
+- Research findings that inform next steps
+- Community feedback on direction
 
 ### Bulk Issue Management
 

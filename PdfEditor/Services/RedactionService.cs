@@ -374,49 +374,30 @@ public class RedactionService
 
             foreach (var operation in operations)
             {
-                // For text operations with available letters, use CHARACTER-LEVEL filtering
-                if (operation is TextOperation textOp && letters != null && !string.IsNullOrWhiteSpace(textOp.Text))
+                // TEMPORARY FIX for v1.3.0: Disable character-level filtering
+                // Character-level redaction (CharacterLevelTextFilter) causes text corruption (#103, #106)
+                // For now, use whole-operation removal (proven to work in PdfEditor.Redaction library)
+                // TODO v1.4.0: Re-enable character-level after fixing corruption bugs (#103, #104, #106)
+
+                if (operation is TextOperation textOp)
                 {
-                    // Use CharacterLevelTextFilter to split the operation at character boundaries
-                    var filterResult = _characterFilter.FilterTextOperation(textOp, letters, area, pageHeight);
+                    // Use simple bounding box intersection (same as TextRedactor library - proven to work)
+                    bool shouldRemove = textOp.IntersectsWith(area);
 
-                    if (filterResult.FallbackToOperationLevel)
+                    if (shouldRemove)
                     {
-                        // Character matching failed - fall back to operation-level check
-                        if (!textOp.IntersectsWith(area))
-                        {
-                            filteredOperations.Add(textOp);
-                        }
-                        else
-                        {
-                            removedCount++;
-                            _redactedTerms.Add(textOp.Text);
-                            _logger.LogInformation("REMOVE (fallback bounding box): '{Text}'",
-                                textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
+                        removedCount++;
+                        _redactedTerms.Add(textOp.Text);
+                        _logger.LogInformation("REMOVE (whole operation): '{Text}'",
+                            textOp.Text.Length > 20 ? textOp.Text.Substring(0, 20) + "..." : textOp.Text);
 
-                            if (!removedByType.ContainsKey("TextOperation"))
-                                removedByType["TextOperation"] = 0;
-                            removedByType["TextOperation"]++;
-                        }
+                        if (!removedByType.ContainsKey("TextOperation"))
+                            removedByType["TextOperation"] = 0;
+                        removedByType["TextOperation"]++;
                     }
                     else
                     {
-                        // Character-level filtering succeeded
-                        if (filterResult.Operations.Count > 0)
-                        {
-                            filteredOperations.AddRange(filterResult.Operations);
-                        }
-                        if (!string.IsNullOrEmpty(filterResult.RemovedText))
-                        {
-                            removedCount++;
-                            _redactedTerms.Add(filterResult.RemovedText);
-                            _logger.LogInformation("REMOVE (character-level): '{Text}'",
-                                filterResult.RemovedText.Length > 20 ? filterResult.RemovedText.Substring(0, 20) + "..." : filterResult.RemovedText);
-
-                            if (!removedByType.ContainsKey("TextOperation"))
-                                removedByType["TextOperation"] = 0;
-                            removedByType["TextOperation"]++;
-                        }
+                        filteredOperations.Add(textOp);
                     }
                 }
                 else
