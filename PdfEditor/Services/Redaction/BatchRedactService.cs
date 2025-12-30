@@ -27,6 +27,7 @@ public class BatchRedactService
     /// </summary>
     public BatchRedactionResult RedactMatches(
         PdfDocument document,
+        string pdfFilePath,
         List<TextMatch> matches,
         RedactionOptions options)
     {
@@ -63,7 +64,7 @@ public class BatchRedactService
                     try
                     {
                         // Redact at 72 DPI (PDF native)
-                        redactionService.RedactArea(page, match.BoundingBox, 72);
+                        redactionService.RedactArea(page, match.BoundingBox, pdfFilePath, 72);
                         result.RedactedCount++;
 
                         // Track per-page stats
@@ -140,7 +141,7 @@ public class BatchRedactService
         _logger.LogInformation("Found {Count} matches for pattern \"{Pattern}\"", matches.Count, pattern);
 
         // Redact matches
-        return RedactMatches(document, matches, redactionOptions);
+        return RedactMatches(document, document.FullPath ?? string.Empty, matches, redactionOptions);
     }
 
     /// <summary>
@@ -168,7 +169,7 @@ public class BatchRedactService
 
         _logger.LogInformation("Total PII matches to redact: {Count}", allMatches.Count);
 
-        return RedactMatches(document, allMatches, options);
+        return RedactMatches(document, document.FullPath ?? string.Empty, allMatches, options);
     }
 
     /// <summary>

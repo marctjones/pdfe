@@ -33,6 +33,11 @@ public class RedactionWorkflowManager : ReactiveObject
     public int PendingCount => _pending.Count;
 
     /// <summary>
+    /// Whether there are any pending redactions (issue #19 - button enable state)
+    /// </summary>
+    public bool HasPendingRedactions => _pending.Count > 0;
+
+    /// <summary>
     /// Number of applied redactions
     /// </summary>
     public int AppliedCount => _applied.Count;
@@ -56,6 +61,7 @@ public class RedactionWorkflowManager : ReactiveObject
 
         _pending.Add(pending);
         this.RaisePropertyChanged(nameof(PendingCount));
+        this.RaisePropertyChanged(nameof(HasPendingRedactions)); // Issue #19 button state
         this.RaisePropertyChanged(nameof(PendingRedactions)); // Force UI update
     }
 
@@ -69,6 +75,7 @@ public class RedactionWorkflowManager : ReactiveObject
         {
             _pending.Remove(item);
             this.RaisePropertyChanged(nameof(PendingCount));
+            this.RaisePropertyChanged(nameof(HasPendingRedactions)); // Issue #19 button state
             return true;
         }
         return false;
@@ -81,6 +88,7 @@ public class RedactionWorkflowManager : ReactiveObject
     {
         _pending.Clear();
         this.RaisePropertyChanged(nameof(PendingCount));
+        this.RaisePropertyChanged(nameof(HasPendingRedactions)); // Issue #19 button state
     }
 
     /// <summary>
@@ -95,6 +103,7 @@ public class RedactionWorkflowManager : ReactiveObject
 
         _pending.Clear();
         this.RaisePropertyChanged(nameof(PendingCount));
+        this.RaisePropertyChanged(nameof(HasPendingRedactions)); // Issue #19 button state
         this.RaisePropertyChanged(nameof(AppliedCount));
     }
 
@@ -122,6 +131,7 @@ public class RedactionWorkflowManager : ReactiveObject
         _pending.Clear();
         _applied.Clear();
         this.RaisePropertyChanged(nameof(PendingCount));
+        this.RaisePropertyChanged(nameof(HasPendingRedactions)); // Issue #19 button state
         this.RaisePropertyChanged(nameof(AppliedCount));
     }
 }

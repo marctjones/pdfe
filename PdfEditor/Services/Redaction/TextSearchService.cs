@@ -123,9 +123,10 @@ public class TextSearchService
                     var piiMatches = matcher.FindPII(pageText, piiType);
 
                     // Map text matches to bounding boxes
+                    // Issue #95: Expand PII matches to word boundaries to prevent context leakage
                     foreach (var piiMatch in piiMatches)
                     {
-                        var bounds = FindTextBounds(page, piiMatch.MatchedText, piiMatch.StartIndex);
+                        var bounds = FindTextBounds(page, piiMatch.MatchedText, piiMatch.StartIndex, expandToWord: true);
                         if (bounds.HasValue)
                         {
                             matches.Add(new TextMatch
@@ -205,9 +206,10 @@ public class TextSearchService
                 var piiMatches = matcher.FindPII(pageText, piiType);
 
                 // Map text matches to bounding boxes
+                // Issue #95: Expand PII matches to word boundaries to prevent context leakage
                 foreach (var piiMatch in piiMatches)
                 {
-                    var bounds = FindTextBounds(page, piiMatch.MatchedText, piiMatch.StartIndex);
+                    var bounds = FindTextBounds(page, piiMatch.MatchedText, piiMatch.StartIndex, expandToWord: true);
                     if (bounds.HasValue)
                     {
                         matches.Add(new TextMatch
@@ -290,6 +292,9 @@ public class TextSearchService
             ? StringComparison.Ordinal
             : StringComparison.OrdinalIgnoreCase;
 
+        // Issue #95: Determine if we should expand substring matches to word boundaries
+        var expandToWord = options.ExpandSubstringToWord && !options.WholeWord;
+
         if (options.UseRegex)
         {
             // Regex search
@@ -301,7 +306,7 @@ public class TextSearchService
 
                 foreach (Match regexMatch in regexMatches)
                 {
-                    var bounds = FindTextBounds(page, regexMatch.Value, regexMatch.Index);
+                    var bounds = FindTextBounds(page, regexMatch.Value, regexMatch.Index, expandToWord);
                     if (bounds.HasValue)
                     {
                         matches.Add(new TextMatch
@@ -339,7 +344,7 @@ public class TextSearchService
                     continue;
                 }
 
-                var bounds = FindTextBounds(page, matchedText, index);
+                var bounds = FindTextBounds(page, matchedText, index, expandToWord);
                 if (bounds.HasValue)
                 {
                     matches.Add(new TextMatch
@@ -360,7 +365,7 @@ public class TextSearchService
         return matches;
     }
 
-    private UglyToad.PdfPig.Core.PdfRectangle? FindTextBounds(Page page, string text, int startIndex)
+    private UglyToad.PdfPig.Core.PdfRectangle? FindTextBounds(Page page, string text, int startIndex, bool expandToWord = true)
     {
         try
         {
@@ -392,6 +397,19 @@ public class TextSearchService
 
                 if (matchingLetters.Count > 0)
                 {
+                    // Issue #95: If expandToWord is true, find the containing word
+                    // and use its bounding box to prevent context leakage
+                    if (expandToWord)
+                    {
+                        var containingWord = FindContainingWord(words, matchingLetters.First());
+                        if (containingWord != null && containingWord.Text.Length > text.Length)
+                        {
+                            _logger.LogDebug("Expanding substring match '{Match}' to word '{Word}' to prevent context leakage",
+                                text, containingWord.Text);
+                            return containingWord.BoundingBox;
+                        }
+                    }
+
                     var minX = matchingLetters.Min(l => l.GlyphRectangle.Left);
                     var minY = matchingLetters.Min(l => l.GlyphRectangle.Bottom);
                     var maxX = matchingLetters.Max(l => l.GlyphRectangle.Right);
@@ -416,6 +434,27 @@ public class TextSearchService
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Find the word that contains the given letter (issue #95).
+    /// </summary>
+    private Word? FindContainingWord(List<Word> words, Letter letter)
+    {
+        foreach (var word in words)
+        {
+            // Check if the letter's position falls within the word's bounding box
+            var letterCenter = new UglyToad.PdfPig.Core.PdfPoint(
+                (letter.GlyphRectangle.Left + letter.GlyphRectangle.Right) / 2,
+                (letter.GlyphRectangle.Bottom + letter.GlyphRectangle.Top) / 2);
+
+            if (word.BoundingBox.Left <= letterCenter.X && letterCenter.X <= word.BoundingBox.Right &&
+                word.BoundingBox.Bottom <= letterCenter.Y && letterCenter.Y <= word.BoundingBox.Top)
+            {
+                return word;
+            }
+        }
+        return null;
     }
 
     private Rect ConvertToAvaloniaRect(UglyToad.PdfPig.Core.PdfRectangle pdfRect, double pageHeight)
@@ -472,6 +511,13 @@ public class SearchOptions
     public bool UseRegex { get; set; } = false;
     public int MaxResults { get; set; } = 1000;
     public List<int>? PageRange { get; set; }
+
+    /// <summary>
+    /// When true, redaction of a substring match will expand to cover the entire
+    /// containing word to prevent context leakage (issue #95).
+    /// Default is true for security.
+    /// </summary>
+    public bool ExpandSubstringToWord { get; set; } = true;
 }
 
 /// <summary>

@@ -3,6 +3,7 @@ using PdfEditor.Services;
 using ReactiveUI;
 using System;
 using System.Reactive;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace PdfEditor.ViewModels;
@@ -14,6 +15,13 @@ namespace PdfEditor.ViewModels;
 public partial class MainWindowViewModel
 {
     // Scripting Properties (exposed to Roslyn scripts)
+
+    /// <summary>
+    /// Timeout for loading documents in scripting mode.
+    /// Set to 0 or negative to disable timeout (default: 30 seconds).
+    /// Issue #93: Prevents hangs on malformed PDFs in corpus tests.
+    /// </summary>
+    public int LoadDocumentTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
     /// Wrapper for the currently loaded PDF document that provides scripting-friendly properties.
@@ -80,6 +88,7 @@ public partial class MainWindowViewModel
     /// <summary>
     /// Load a document (for Roslyn scripts).
     /// Usage: await LoadDocumentCommand.Execute("/path/to/file.pdf")
+    /// Issue #93: Includes configurable timeout to prevent hangs on malformed PDFs.
     /// </summary>
     private async Task LoadDocumentViaScriptAsync(string filePath)
     {
@@ -103,7 +112,28 @@ public partial class MainWindowViewModel
         FileState.SetDocument(filePath);
         RedactionWorkflow.Reset();
 
-        _documentService.LoadDocument(filePath);
+        // Issue #93: Use timeout to prevent hangs on malformed PDFs
+        if (LoadDocumentTimeoutSeconds > 0)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(LoadDocumentTimeoutSeconds));
+
+            try
+            {
+                // Run LoadDocument on a background thread with timeout
+                await Task.Run(() => _documentService.LoadDocument(filePath), cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError("[SCRIPT] LoadDocumentCommand: Timeout after {Seconds}s loading '{FilePath}'",
+                    LoadDocumentTimeoutSeconds, filePath);
+                throw new TimeoutException($"Loading PDF timed out after {LoadDocumentTimeoutSeconds} seconds: {filePath}");
+            }
+        }
+        else
+        {
+            // No timeout - original behavior
+            _documentService.LoadDocument(filePath);
+        }
 
         this.RaisePropertyChanged(nameof(DocumentName));
         this.RaisePropertyChanged(nameof(StatusBarText));
@@ -114,8 +144,6 @@ public partial class MainWindowViewModel
         AddToRecentFiles(filePath);
 
         _logger.LogInformation("[SCRIPT] LoadDocumentCommand completed successfully (headless mode - no thumbnails)");
-
-        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -172,6 +200,10 @@ public partial class MainWindowViewModel
                 var pageHeight = pageHeights[match.PageIndex];
 
                 // Convert Y from PDF (bottom-left) to Avalonia (top-left)
+                // match.Y = BoundingBox.Bottom (lower Y value in PDF coords)
+                // match.Height = height of the bounding box
+                // Top in PDF coords = match.Y + match.Height
+                // avaloniaY = pageHeight - Top = pageHeight - (match.Y + match.Height)
                 var avaloniaY = pageHeight - match.Y - match.Height;
 
                 // Scale to screen coordinates (150 DPI render = 2.083x PDF 72 DPI)
@@ -254,7 +286,7 @@ public partial class MainWindowViewModel
                 var page = document.Pages[pageIndex];
 
                 // pending.Area is in 150 DPI image pixels (screen coordinates)
-                _redactionService.RedactArea(page, pending.Area, renderDpi: 150);
+                _redactionService.RedactArea(page, pending.Area, _currentFilePath, renderDpi: 150);
             }
 
             // Move redactions to applied list

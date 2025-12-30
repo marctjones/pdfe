@@ -180,16 +180,19 @@ public class PdfTextExtractionService
             }
 
             // Group letters into lines based on Y coordinate
+            // Issue #105: Use StartBaseLine.Y for more reliable vertical positioning
+            // which handles PDFs with complex text matrices better than GlyphRectangle
             const double lineHeightThreshold = 5.0;
             var lines = new List<List<Letter>>();
 
             foreach (var letter in selectedLetters)
             {
-                var letterMid = (letter.GlyphRectangle.Top + letter.GlyphRectangle.Bottom) / 2.0;
+                // Use StartBaseLine.Y as the primary position indicator
+                var letterY = letter.StartBaseLine.Y;
                 var line = lines.FirstOrDefault(l =>
                 {
-                    var lineMid = (l[0].GlyphRectangle.Top + l[0].GlyphRectangle.Bottom) / 2.0;
-                    return Math.Abs(lineMid - letterMid) < lineHeightThreshold;
+                    var lineY = l[0].StartBaseLine.Y;
+                    return Math.Abs(lineY - letterY) < lineHeightThreshold;
                 });
 
                 if (line == null)
@@ -200,14 +203,22 @@ public class PdfTextExtractionService
                 line.Add(letter);
             }
 
-            // Sort lines top to bottom
-            var sortedLines = lines.OrderByDescending(line =>
-                (line[0].GlyphRectangle.Top + line[0].GlyphRectangle.Bottom) / 2.0).ToList();
+            // Sort lines top to bottom (higher Y = top in PDF coordinates)
+            var sortedLines = lines.OrderByDescending(line => line[0].StartBaseLine.Y).ToList();
 
             // Within each line, sort letters left to right
+            // Issue #105: Use StartBaseLine.X for sorting as it's more reliable than GlyphRectangle.Left
+            // in PDFs with complex text positioning (Type 1 fonts, Tz scaling issues)
             foreach (var line in sortedLines)
             {
-                line.Sort((a, b) => a.GlyphRectangle.Left.CompareTo(b.GlyphRectangle.Left));
+                line.Sort((a, b) =>
+                {
+                    // Prefer StartBaseLine.X as it represents the actual text rendering position
+                    // Fall back to GlyphRectangle.Left for compatibility
+                    var aX = a.StartBaseLine.X;
+                    var bX = b.StartBaseLine.X;
+                    return aX.CompareTo(bX);
+                });
             }
 
             // Build text with proper spacing

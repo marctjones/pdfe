@@ -19,18 +19,20 @@ public class PdfRenderService
 {
     private readonly ILogger<PdfRenderService> _logger;
     private int _maxCacheEntries = 20;
+    private long _maxCacheMemoryBytes = 100 * 1024 * 1024; // 100 MB default
     private long _cacheHits;
     private long _cacheMisses;
+    private long _currentCacheBytes;
 
     // Cache SKBitmap data directly as PNG bytes
-    private record RenderCacheEntry(byte[] PngData, DateTime LastAccessUtc); 
+    private record RenderCacheEntry(byte[] PngData, DateTime LastAccessUtc, long SizeBytes);
     private readonly ConcurrentDictionary<string, RenderCacheEntry> _cache = new();
 
     public PdfRenderService(ILogger<PdfRenderService> logger)
     {
         _logger = logger;
-        _logger.LogDebug("PdfRenderService instance created");
-        // Cache size is now configured through UI preferences (default: 20)
+        _logger.LogDebug("PdfRenderService instance created with max cache: {Entries} entries, {MemoryMB} MB",
+            _maxCacheEntries, _maxCacheMemoryBytes / (1024 * 1024));
     }
 
     /// <summary>
@@ -43,14 +45,59 @@ public class PdfRenderService
     }
 
     /// <summary>
-    /// Clear the render cache (force re-render on next request).
+    /// Maximum cache memory in bytes. Defaults to 100 MB.
     /// </summary>
-    public void ClearCache() => _cache.Clear();
+    public long MaxCacheMemoryBytes
+    {
+        get => _maxCacheMemoryBytes;
+        set => _maxCacheMemoryBytes = Math.Max(1024 * 1024, value); // Minimum 1 MB
+    }
 
     /// <summary>
-    /// Get cache statistics (current entries, max limit).
+    /// Clear the render cache (force re-render on next request).
     /// </summary>
-    public (int Count, int Max, long Hits, long Misses) GetCacheStats() => (_cache.Count, _maxCacheEntries, _cacheHits, _cacheMisses);
+    public void ClearCache()
+    {
+        _cache.Clear();
+        System.Threading.Interlocked.Exchange(ref _currentCacheBytes, 0);
+        _logger.LogInformation("Cache cleared");
+    }
+
+    /// <summary>
+    /// Get cache statistics (current entries, max entries, hits, misses, current bytes, max bytes).
+    /// </summary>
+    public CacheStatistics GetCacheStats() => new(
+        Count: _cache.Count,
+        MaxEntries: _maxCacheEntries,
+        Hits: _cacheHits,
+        Misses: _cacheMisses,
+        CurrentBytes: _currentCacheBytes,
+        MaxBytes: _maxCacheMemoryBytes,
+        HitRate: _cacheHits + _cacheMisses > 0 ? (double)_cacheHits / (_cacheHits + _cacheMisses) : 0
+    );
+
+    /// <summary>
+    /// Log current cache statistics at Info level.
+    /// </summary>
+    public void LogCacheStats()
+    {
+        var stats = GetCacheStats();
+        _logger.LogInformation(
+            "Cache stats: {Count}/{MaxEntries} entries, {CurrentMB:F1}/{MaxMB:F1} MB, " +
+            "hit rate: {HitRate:P1} ({Hits} hits, {Misses} misses)",
+            stats.Count, stats.MaxEntries,
+            stats.CurrentBytes / (1024.0 * 1024.0), stats.MaxBytes / (1024.0 * 1024.0),
+            stats.HitRate, stats.Hits, stats.Misses);
+    }
+
+    public record CacheStatistics(
+        int Count,
+        int MaxEntries,
+        long Hits,
+        long Misses,
+        long CurrentBytes,
+        long MaxBytes,
+        double HitRate);
 
     /// <summary>
     /// Render a specific page of a PDF to a bitmap
@@ -211,26 +258,53 @@ public class PdfRenderService
 
     private void AddToCache(string key, byte[] pngData)
     {
-        _cache[key] = new RenderCacheEntry(pngData, DateTime.UtcNow);
+        long entrySize = pngData.Length;
 
-        if (_cache.Count > _maxCacheEntries)
+        // Update entry (or add new one)
+        if (_cache.TryGetValue(key, out var existingEntry))
         {
-            // Evict oldest entry
-            var oldest = DateTime.MaxValue;
-            string? oldestKey = null;
-            foreach (var kvp in _cache)
-            {
-                if (kvp.Value.LastAccessUtc < oldest)
-                {
-                    oldest = kvp.Value.LastAccessUtc;
-                    oldestKey = kvp.Key;
-                }
-            }
+            // Entry exists - update it and adjust size
+            System.Threading.Interlocked.Add(ref _currentCacheBytes, entrySize - existingEntry.SizeBytes);
+            _cache[key] = new RenderCacheEntry(pngData, DateTime.UtcNow, entrySize);
+        }
+        else
+        {
+            // New entry
+            _cache[key] = new RenderCacheEntry(pngData, DateTime.UtcNow, entrySize);
+            System.Threading.Interlocked.Add(ref _currentCacheBytes, entrySize);
+        }
 
-            if (oldestKey != null)
+        // Evict entries if over limits (entry count OR memory)
+        while (_cache.Count > _maxCacheEntries ||
+               System.Threading.Interlocked.Read(ref _currentCacheBytes) > _maxCacheMemoryBytes)
+        {
+            if (!EvictOldestEntry())
+                break; // No more entries to evict
+        }
+    }
+
+    private bool EvictOldestEntry()
+    {
+        var oldest = DateTime.MaxValue;
+        string? oldestKey = null;
+
+        foreach (var kvp in _cache)
+        {
+            if (kvp.Value.LastAccessUtc < oldest)
             {
-                _cache.TryRemove(oldestKey, out _);
+                oldest = kvp.Value.LastAccessUtc;
+                oldestKey = kvp.Key;
             }
         }
+
+        if (oldestKey != null && _cache.TryRemove(oldestKey, out var evicted))
+        {
+            System.Threading.Interlocked.Add(ref _currentCacheBytes, -evicted.SizeBytes);
+            _logger.LogDebug("Evicted cache entry: {Key}, freed {SizeKB:F1} KB",
+                oldestKey, evicted.SizeBytes / 1024.0);
+            return true;
+        }
+
+        return false;
     }
 }
