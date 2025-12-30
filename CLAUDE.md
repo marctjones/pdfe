@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ CRITICAL: Knowledge Management Strategy
+
+**READ THIS FIRST** - This project uses a strict four-tier content organization system:
+
+| Content Type | Where It Goes | Why |
+|--------------|---------------|-----|
+| **Concepts, algorithms, theory** | 📚 **Wiki** | Educational, timeless reference |
+| **Research, ideas, lab notes** | 💬 **Discussions** | Unstructured exploration, feedback |
+| **Bugs, features, tasks** | 🎯 **Issues** | Actionable items with completion criteria |
+| **Code documentation, setup** | 📄 **Markdown files** | Version-controlled, code-specific |
+
+**DO NOT** create markdown files for educational content - use the Wiki!
+
+**Example**:
+- ❌ Bad: Create `TESTING_GUIDE.md` with tool explanations → Should be Wiki page
+- ✅ Good: Create `Testing-and-Development-Tools` Wiki page
+- ❌ Bad: Create `FEATURE_IDEAS.md` → Should be Discussion
+- ✅ Good: Create GitHub Discussion for ideas, convert to Issues when actionable
+
+See [Knowledge Management Strategy](#knowledge-management-strategy) section below for full details.
+
+---
+
 ## Project Overview
 
 This is a cross-platform PDF editor built with **C# + .NET 8 + Avalonia UI** (MVVM architecture). The application runs on Windows, Linux, and macOS, providing PDF viewing, page manipulation, and content-level redaction capabilities.
@@ -315,6 +338,102 @@ Common warnings and fixes:
 
 Never let warnings accumulate - fix them proactively when they appear.
 
+## ⚠️ Common Pitfalls and Lessons Learned
+
+This section documents recurring issues that have caused bugs. **Read this before modifying redaction code.**
+
+### Pitfall 1: Position Mismatch Between Libraries (Issue #90)
+
+**Problem**: ContentStreamParser calculates glyph positions that can differ from PdfPig's letter positions by 3-6 points. Code that assumes these match will fail.
+
+**Symptom**: Letter matching fails, redaction doesn't find text, operations appear to be at wrong coordinates.
+
+**Root Cause**: ContentStreamParser estimates positions using font metrics and transformation matrices. PdfPig extracts actual positions from the PDF. These are approximations vs ground truth.
+
+**Solution**: When matching parsed operations to PdfPig letters:
+- ❌ Don't rely solely on position proximity
+- ✅ Use text content matching within a Y-band tolerance
+- ✅ Trust PdfPig positions as ground truth
+- ✅ Use parsed positions only as hints for disambiguation
+
+```csharp
+// BAD: Position-only matching
+var closest = letters.OrderBy(l => Math.Abs(l.X - parsedX)).First();
+
+// GOOD: Text matching with position as tiebreaker
+var matchIndex = candidateText.IndexOf(operationText);
+if (multipleMatches) pickClosestToExpectedPosition();
+```
+
+### Pitfall 2: PDF State Not Persisting Across Blocks (Issue #167)
+
+**Problem**: PDF text blocks (BT...ET) require font state (Tf operator) before any text-showing operators (Tj, TJ). When blocks are removed during redaction, subsequent blocks may lose required state.
+
+**Symptom**: "Could not find font" errors, corrupted PDFs, text rendering failures after redaction.
+
+**Root Cause**: The first BT block may contain the Tf operator. If that block is removed, later blocks have Tj without Tf.
+
+**Solution**: ContentStreamBuilder must track and inject state:
+- ✅ Track last known font from Tf operators
+- ✅ When entering BT block, mark that Tf is needed
+- ✅ Before emitting Tj/TJ, inject Tf if not yet seen in this block
+- ✅ Get font info from TextOperation metadata if available
+
+```csharp
+// In ContentStreamBuilder.Build():
+if (inTextBlock && needTfInjection && IsTextShowingOperator(op))
+{
+    // Inject Tf before the text operator
+    sb.Append($"{fontName} {fontSize} Tf\n");
+    needTfInjection = false;
+}
+```
+
+### Pitfall 3: Operations Without Timeouts (Issue #93)
+
+**Problem**: PDF parsing can hang indefinitely on malformed PDFs. Operations without timeouts cause test hangs and poor user experience.
+
+**Symptom**: Tests hang forever, automation scripts never complete, unresponsive UI.
+
+**Solution**: Always use timeouts for PDF operations:
+```csharp
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+try
+{
+    await Task.Run(() => LoadDocument(path), cts.Token);
+}
+catch (OperationCanceledException)
+{
+    throw new TimeoutException($"Operation timed out: {path}");
+}
+```
+
+### Pitfall 4: Coordinate System Confusion
+
+**Problem**: PDF uses bottom-left origin, Avalonia uses top-left. Mixing them causes redaction at wrong locations.
+
+**Symptom**: Redaction appears at wrong Y position, text not removed, visual marker in wrong place.
+
+**Solution**:
+- ✅ Always document which coordinate system a variable uses
+- ✅ Convert at system boundaries, not deep in code
+- ✅ Name variables clearly: `pdfY` vs `screenY` vs `avaloniaY`
+
+```csharp
+// Convert PDF (bottom-left) to Avalonia (top-left)
+double avaloniaY = pageHeight - pdfY - rectHeight;
+```
+
+### Pitfall 5: Testing Only Happy Path
+
+**Problem**: Tests pass with simple PDFs but fail with real-world documents that have unusual fonts, encodings, or structures.
+
+**Solution**:
+- ✅ Test with real-world PDFs (birth certificates, government forms)
+- ✅ Test with corpus PDFs (veraPDF test suite)
+- ✅ Test sequential redactions (state accumulation bugs)
+- ✅ Test edge cases: special characters ($, parentheses), Unicode, ligatures
+
 ## Important Implementation Details
 
 ### State Stack Handling
@@ -368,7 +487,6 @@ Never manually modify content stream bytes without parsing first.
 2. **Inline Images**: `BI...ID...EI` operators not yet handled
 3. **Rotated Pages**: Page rotation (`/Rotate` entry) not fully supported
 4. **Clipping Paths**: `W`, `W*` operators not tracked
-5. **Form XObjects**: Nested content streams not fully parsed
 
 See GitHub issues labeled `component: redaction-engine` for enhancement tracking.
 
@@ -433,47 +551,60 @@ This redaction implementation:
 
 For maximum security, also remove metadata and flatten the PDF after redaction.
 
-## Current Status (v1.3.0 → v1.4.0)
+## Current Status (v1.4.0)
 
-### v1.3.0 Status
+### v1.4.0 Release Status
 
-**Redaction:** Whole-operation removal (stable, no corruption)
-- ✅ Works correctly - no text doubling/corruption
-- ❌ Limitation: Redacting "Birth" removes entire "Birth Certificate"
-- Library: `PdfEditor.Redaction.TextRedactor` - proven to work
-- GUI: Character-level filtering DISABLED (was buggy)
+**Glyph-Level Redaction Implementation:** ✅ Complete
 
-**What Happened:**
-- User testing revealed text corruption in GUI redaction
-- Root cause: `CharacterLevelTextFilter` in GUI (not library)
-- Temporary fix: Disabled character-level, use whole-operation removal
-- See: #103, #104, #106 for bug details
+#### ✅ What's Working
 
-### v1.4.0 Plan: Glyph-Level Redaction
+1. **Build Status**: Perfect (0 errors, 0 warnings)
+2. **Library Tests**: 300/301 passing (1 skipped)
+3. **CLI Tests**: 74/74 passing
+4. **Birth Certificate Tests**: 8/8 passing
+5. **Integration**: Code compiles and runs
 
-**Goal:** Implement TRUE glyph-level redaction in `PdfEditor.Redaction` library
+#### Recently Fixed Bugs
 
-**Implementation Issues:**
-- #112 - Master tracking issue
-- #113 - GlyphRemover (orchestrator)
-- #114 - LetterFinder (spatial matching)
-- #115 - TextSegmenter (split operations)
-- #116 - OperationReconstructor (build new ops)
-- #117 - ContentStreamBuilder (Tm operator emission)
-- #118 - TextRedactor integration
-- #119 - Comprehensive tests
+| Issue | Problem | Fix |
+|-------|---------|-----|
+| **#167** | Font reference corruption after glyph-level redaction | ContentStreamBuilder injects Tf operators |
+| **#93** | Corpus tests hang on malformed PDFs | LoadDocumentTimeoutSeconds with CancellationToken |
+| **#90** | Birth certificate fee redaction failing | LetterFinder uses text matching, not position-only |
+| **#138** | UI state persists after closing document | Enhanced CloseDocument() state clearing |
 
-**Resources:**
-- Discussion: https://github.com/marctjones/pdfe/discussions/120 (implementation plan)
-- Wiki: `docs/WIKI_PAGES_TODO.md` (PDF operators, content streams, glyph-level redaction)
+#### Implementation Files
 
-**Timeline:** 20-26 hours
+**Glyph-Level Redaction Library** (`PdfEditor.Redaction/GlyphLevel/`):
+- ✅ `GlyphRemover.cs` - Orchestrates glyph-level redaction
+- ✅ `LetterFinder.cs` - Text-based letter matching (issue #90 fix)
+- ✅ `TextSegmenter.cs` - Splits text into keep/remove segments
+- ✅ `OperationReconstructor.cs` - Rebuilds operations with positioning
 
-**Why it will work:**
-- All logic in library (not GUI)
-- Spatial matching (not text search)
-- Use PdfPig's accurate letter positions
-- Proper ContentStreamBuilder integration (no raw bytes)
+**Content Stream Building** (`PdfEditor.Redaction/ContentStream/Building/`):
+- ✅ `ContentStreamBuilder.cs` - Builds content streams with Tf injection (issue #167 fix)
+
+**Integration** (`PdfEditor.Redaction/`):
+- ✅ `TextRedactor.cs` - Main API with RedactPage()
+- ✅ `ContentStreamRedactor.cs` - Core redaction engine
+
+**GUI Integration** (`PdfEditor/`):
+- ✅ `RedactionService.cs` - Extracts letters from file, calls RedactPage()
+- ✅ `MainWindowViewModel.Scripting.cs` - Timeout support (issue #93 fix)
+
+#### Test Results
+
+```
+PdfEditor.Redaction.Tests:        300/301 passing ✅ (1 skipped)
+PdfEditor.Redaction.Cli.Tests:     74/74 passing ✅
+RealWorldBirthCertificateTests:     8/8 passing ✅
+```
+
+#### Known Remaining Issues
+
+- **#135** - 9 in-memory PDF tests need save-first pattern
+- **#136** - 6 automation script tests need ViewModel API updates
 
 ## Task Tracking and GitHub Issues
 

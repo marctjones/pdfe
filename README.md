@@ -82,28 +82,56 @@ dotnet run
 3. **Zoom**: Ctrl+Plus/Minus, or use View menu
 4. **Search**: Ctrl+F to find text
 
-### Redaction
+### Redaction (Mark-Then-Apply Workflow)
+
+PdfEditor uses a **mark-then-apply** workflow for precise, batch redaction:
+
 1. **Enable redaction mode**: Click "Redact Mode" button or press R
-2. **Select area**: Click and drag to select the area to redact
-3. **Apply redaction**: Click "Apply Redaction" to permanently remove content
-4. **Verify**: Check clipboard history sidebar to see what was removed
-5. **Save**: File > Save to save the redacted PDF
+2. **Mark areas**: Click and drag to select areas to redact (red dashed outline shows pending)
+3. **Review**: Pending redactions are shown in the sidebar with preview text
+4. **Apply all**: Click "Apply Redaction" to permanently remove all marked content
+5. **Verify**: Check clipboard history sidebar to see what was removed
+6. **Save**: Click "Save" - automatically suggests `filename_REDACTED.pdf` to protect originals
+
+**Key Features:**
+- **Batch redaction**: Mark multiple areas across pages, then apply all at once
+- **Visual feedback**: Pending (red dashed) vs. applied (black solid) distinction
+- **Preview**: See exactly what text will be removed before applying
+- **Original protection**: Cannot accidentally overwrite the original file
+- **TRUE removal**: Text is removed from PDF structure, not just visually hidden
 
 ### Keyboard Shortcuts
-| Action | Shortcut |
-|--------|----------|
-| Open file | Ctrl+O |
-| Save | Ctrl+S |
-| Find | Ctrl+F |
-| Zoom in | Ctrl+Plus |
-| Zoom out | Ctrl+Minus |
-| Actual size | Ctrl+1 |
-| Fit width | Ctrl+2 |
-| Fit page | Ctrl+3 |
-| Next page | Page Down |
-| Previous page | Page Up |
-| Toggle redaction | R |
-| Toggle text selection | T |
+
+Press **F1** to view all shortcuts in the application.
+
+| Category | Action | Shortcut |
+|----------|--------|----------|
+| **File** | Open | Ctrl+O |
+| | Save | Ctrl+S |
+| | Save As | Ctrl+Shift+S |
+| | Close Document | Ctrl+W |
+| | Print | Ctrl+P |
+| | Exit | Alt+F4 |
+| **Edit** | Find | Ctrl+F |
+| | Find Next | F3 |
+| | Find Previous | Shift+F3 |
+| | Copy Text | Ctrl+C |
+| | Preferences | Ctrl+, |
+| **View** | Zoom In | Ctrl+Plus |
+| | Zoom Out | Ctrl+Minus |
+| | Actual Size | Ctrl+0 |
+| | Fit Width | Ctrl+1 |
+| | Fit Page | Ctrl+2 |
+| **Navigation** | Next Page | Page Down |
+| | Previous Page | Page Up |
+| | First Page | Home |
+| | Last Page | End |
+| **Modes** | Toggle Redaction Mode | R |
+| | Toggle Text Selection | T |
+| | Apply Redaction | Enter |
+| **Pages** | Rotate Left | Ctrl+L |
+| | Rotate Right | Ctrl+R |
+| **Help** | Keyboard Shortcuts | F1 |
 
 ### OCR (Optical Character Recognition)
 

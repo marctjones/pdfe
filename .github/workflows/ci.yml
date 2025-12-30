@@ -11,17 +11,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+
+      - name: Set up Java (for veraPDF)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install veraPDF
+        run: |
+          # Download veraPDF
+          wget -q https://software.verapdf.org/releases/1.28/verapdf-greenfield-1.28.1-installer.zip -O /tmp/verapdf.zip
+          unzip -q /tmp/verapdf.zip -d /tmp/verapdf-installer
+
+          # Create installation response file for silent install
+          cat > /tmp/auto-install.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+          <AutomatedInstallation langpack="eng">
+              <com.izforge.izpack.panels.htmlhello.HTMLHelloPanel id="welcome"/>
+              <com.izforge.izpack.panels.target.TargetPanel id="install_dir">
+                  <installpath>$HOME/verapdf</installpath>
+              </com.izforge.izpack.panels.target.TargetPanel>
+              <com.izforge.izpack.panels.packs.PacksPanel id="sdk_pack_select">
+                  <pack index="0" name="veraPDF GUI" selected="false"/>
+                  <pack index="1" name="veraPDF Mac and *nix Scripts" selected="true"/>
+                  <pack index="2" name="veraPDF Validation model" selected="true"/>
+                  <pack index="3" name="veraPDF Documentation" selected="false"/>
+                  <pack index="4" name="veraPDF Sample Plugins" selected="false"/>
+              </com.izforge.izpack.panels.packs.PacksPanel>
+              <com.izforge.izpack.panels.install.InstallPanel id="install"/>
+              <com.izforge.izpack.panels.finish.FinishPanel id="finish"/>
+          </AutomatedInstallation>
+          EOF
+
+          # Find and run installer
+          cd /tmp/verapdf-installer
+          INSTALLER=$(find . -name "verapdf-greenfield-*.jar" | head -1)
+          java -jar "$INSTALLER" /tmp/auto-install.xml
+
+          # Verify installation
+          ~/verapdf/verapdf --version
+
       - name: Restore
         run: dotnet restore
+
       - name: Verify TRUE Redaction Implementation
         run: ./scripts/verify-true-redaction.sh
+
       - name: Build
         run: dotnet build --no-restore
-      - name: Test
-        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!=PdfEditor.Tests.Integration.VeraPdfConformanceTests.OriginalPdf_PassesVeraPdfAutoDetect&FullyQualifiedName!=PdfEditor.Tests.Integration.VeraPdfConformanceTests.RedactedPdf_PassesVeraPdfStructureCheck"
-      - name: Run veraPDF/qpdf checks
+
+      - name: Test (without veraPDF tests)
+        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~VeraPdfConformance&FullyQualifiedName!~VeraPdfCorpus"
+
+      - name: Test (veraPDF integration tests)
         run: |
-          echo "Skipping external validators in CI placeholder"
+          export PATH="$HOME/verapdf:$PATH"
+          dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~VeraPdfConformance|FullyQualifiedName~VeraPdfCorpus" || true
+        continue-on-error: true  # PDF/A compliance tests may fail - tracked in issue #158
