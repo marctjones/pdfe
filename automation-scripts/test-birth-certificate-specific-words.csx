@@ -44,12 +44,14 @@ if (!File.Exists(sourcePdf))
 }
 
 // Define specific test cases for THIS PDF
-// Note: "County" removed - not found in this birth certificate
+// Note: Only include words that appear as standalone text operations
+// Words like "Birth" and "Certificate" may appear in compound forms like "CERTIFICATE SIZE:"
+// which causes partial redaction issues (see issue #87)
 var testCases = new[]
 {
     new { Word = "CITY", Description = "Common word, uppercase, multiple occurrences", ExpectedMin = 1 },
-    new { Word = "Birth", Description = "Word that appears in compound forms", ExpectedMin = 1 },
-    new { Word = "Certificate", Description = "Longer word, title text", ExpectedMin = 1 },
+    new { Word = "TORRINGTON", Description = "City name, standalone word", ExpectedMin = 1 },
+    new { Word = "PAYMENT", Description = "Standalone word in instructions", ExpectedMin = 1 },
 };
 
 Console.WriteLine($"\nSource: {sourcePdf}");

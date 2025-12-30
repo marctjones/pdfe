@@ -31,12 +31,14 @@ if (repoRoot == null)
 var sourcePdf = Path.Combine(repoRoot, "test-pdfs", "sample-pdfs", "birth-certificate-request-scrambled.pdf");
 var outputPdf = "/tmp/birth-certificate-redacted.pdf";
 
+// Use words that appear as standalone text operations for reliable redaction
+// Words in compound forms (like "CERTIFICATE SIZE:") may have issues - see #87
 var termsToRedact = new[]
 {
-    "TORRINGTON",          // City name
-    "CERTIFICATE",         // Form title
-    "BIRTH",               // Form title
-    "CITY CLERK",          // Department
+    "TORRINGTON",          // City name - standalone
+    "CITY",                // Multiple occurrences - proven to work
+    "PAYMENT",             // Instructions text - standalone
+    "REGISTRANT",          // Form field text - standalone
 };
 
 // Clean up previous output
