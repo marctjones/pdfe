@@ -132,6 +132,38 @@ public class PdfSearchServiceTests : IDisposable
         results.Should().BeEmpty("Invalid path should return empty results");
     }
 
+    /// <summary>
+    /// Test for issue #96: Ensures duplicate words on the same page
+    /// get distinct, correct bounding boxes for each occurrence.
+    /// </summary>
+    [Fact]
+    public void Search_DuplicateWords_ReturnDistinctBoundingBoxes()
+    {
+        // Arrange: Create PDF with same word appearing multiple times at different positions
+        var duplicatePdfPath = Path.Combine(_testOutputDir, "duplicates.pdf");
+        TestPdfGenerator.CreateTextOnlyPdf(duplicatePdfPath, new[]
+        {
+            "CITY is a great place. I love CITY life. CITY CITY CITY."
+        });
+
+        // Act
+        var results = _searchService.Search(duplicatePdfPath, "CITY", caseSensitive: true, wholeWordsOnly: true);
+
+        // Assert: Should find 5 occurrences (each "CITY" is a whole word)
+        results.Should().HaveCountGreaterOrEqualTo(3, "Should find multiple CITY occurrences");
+
+        // Each result should have a distinct position (X or Y)
+        // If bounding boxes are all the same, that's the bug from #96
+        var boundingBoxes = results
+            .Select(r => (r.X, r.Y, r.Width, r.Height))
+            .ToList();
+
+        // At minimum, the X positions should vary for words on the same line
+        var distinctXPositions = results.Select(r => r.X).Distinct().Count();
+        distinctXPositions.Should().BeGreaterOrEqualTo(2,
+            "Different occurrences of CITY should have different X positions (issue #96 fix)");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testOutputDir))

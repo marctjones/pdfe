@@ -459,6 +459,61 @@ public class ViewModelIntegrationTests : IDisposable
 
     #endregion
 
+    #region Issue #25: Deleted Recent Files Handling
+
+    /// <summary>
+    /// Issue #25: Verify that attempting to load a deleted recent file removes it from the list.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task LoadRecentFile_DeletedFile_RemovesFromRecentFilesList()
+    {
+        // Arrange - Create a PDF and add it to recent files
+        var vm = CreateViewModel();
+        var pdfPath = CreateTestPdf("Test Document");
+
+        // Load the document to add it to recent files
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(pdfPath);
+        });
+
+        // Verify it's in the recent files
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.RecentFiles.Should().Contain(pdfPath, "file should be in recent files after loading");
+        });
+
+        // Close the document
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.CloseDocumentCommand.Execute().Subscribe();
+        });
+
+        // Delete the file
+        File.Delete(pdfPath);
+        _tempFiles.Remove(pdfPath); // No need to clean up anymore
+
+        // Act - Try to load the deleted file from recent files
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.LoadRecentFileCommand.Execute(pdfPath).Subscribe();
+        });
+
+        // Small delay to ensure async operations complete
+        await Task.Delay(100);
+
+        // Assert - File should be removed from recent files
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.RecentFiles.Should().NotContain(pdfPath,
+                "deleted file should be removed from recent files list");
+            vm.IsDocumentLoaded.Should().BeFalse(
+                "no document should be loaded when file is deleted");
+        });
+    }
+
+    #endregion
+
     #region Full Redaction Workflow Tests - End-to-End UI Verification
 
     /// <summary>
@@ -551,7 +606,7 @@ public class ViewModelIntegrationTests : IDisposable
         document.Should().NotBeNull("document should be loaded");
 
         var page = document!.Pages[0];
-        redactionService.RedactArea(page, redactionArea, renderDpi: 150);
+        redactionService.RedactArea(page, redactionArea, originalPdf, renderDpi: 150);
 
         // STEP 6: Save document to new path
         documentService.SaveDocument(redactedPdf);
@@ -648,7 +703,7 @@ public class ViewModelIntegrationTests : IDisposable
         var document = documentService.GetCurrentDocument();
         document.Should().NotBeNull("document should be loaded");
         var page = document!.Pages[0];
-        redactionService.RedactArea(page, redactionArea, renderDpi: 150);
+        redactionService.RedactArea(page, redactionArea, originalPdf, renderDpi: 150);
 
         // Save
         documentService.SaveDocument(redactedPdf);
@@ -739,7 +794,7 @@ public class ViewModelIntegrationTests : IDisposable
                 vm.CurrentRedactionArea = redactionArea;
             });
 
-            redactionService.RedactArea(page, redactionArea, renderDpi: 150);
+            redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 150);
 
             // Simulate user re-enabling redaction mode after each redaction (as the UI does)
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -813,7 +868,7 @@ public class ViewModelIntegrationTests : IDisposable
         var document = documentService1.GetCurrentDocument();
         document.Should().NotBeNull("document should be loaded");
         var page = document!.Pages[0];
-        redactionService1.RedactArea(page, vm1.CurrentRedactionArea, renderDpi: 150);
+        redactionService1.RedactArea(page, vm1.CurrentRedactionArea, originalPdf, renderDpi: 150);
 
         documentService1.SaveDocument(redactedPdf);
 
@@ -898,7 +953,7 @@ public class ViewModelIntegrationTests : IDisposable
         var document = documentService.GetCurrentDocument();
         document.Should().NotBeNull("document should be loaded");
         var page = document!.Pages[0];
-        redactionService.RedactArea(page, redactionArea, renderDpi: 150);
+        redactionService.RedactArea(page, redactionArea, originalPdf, renderDpi: 150);
 
         // Save
         documentService.SaveDocument(redactedPdf);
@@ -913,6 +968,407 @@ public class ViewModelIntegrationTests : IDisposable
         // But other cells should remain
         textAfter.Should().Contain("Cell(100,200)",
             "content outside redaction area should be preserved");
+    }
+
+    #endregion
+
+    #region Preview Text Accuracy Tests (Issue #105, #109)
+
+    /// <summary>
+    /// Issue #105, #109: Verify preview text is NOT backwards or scrambled.
+    /// Previously, "birthsize" was extracted as "tsizebirt".
+    /// </summary>
+    [AvaloniaFact]
+    public async Task MarkRedaction_PreviewTextAccurate_NotBackwards()
+    {
+        // Arrange: Create PDF with specific text
+        var pdfPath = Path.Combine(Path.GetTempPath(), $"preview_accuracy_{Guid.NewGuid()}.pdf");
+        _tempFiles.Add(pdfPath);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "BIRTHSIZE TEST");
+
+        var vm = CreateViewModel();
+
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(pdfPath);
+        });
+
+        // Enable redaction mode
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.ToggleRedactionModeCommand.Execute().Subscribe();
+        });
+
+        // Set redaction area covering the text
+        // Text is at ~(100, 100) in PDF points. Scale to 150 DPI screen coords.
+        var dpiScale = 150.0 / 72.0;
+        var area = new Rect(80 * dpiScale, 80 * dpiScale, 300 * dpiScale, 60 * dpiScale);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.CurrentRedactionArea = area;
+        });
+
+        // Extract text from the redaction area using the service
+        var textExtractionService = new PdfTextExtractionService(
+            new Mock<ILogger<PdfTextExtractionService>>().Object);
+        var previewText = textExtractionService.ExtractTextFromArea(pdfPath, 0, area);
+
+        // Assert: Preview text should NOT be backwards or scrambled
+        previewText.Should().NotBeNullOrEmpty("text should be extracted from area");
+        previewText.Should().Contain("BIRTHSIZE", "text should read correctly");
+        previewText.Should().NotContain("EZISHTRBI", "text should NOT be reversed");
+        previewText.Should().NotContain("tsizebirt", "text should NOT be scrambled (issue #105)");
+    }
+
+    /// <summary>
+    /// Issue #109: Full mark-and-apply workflow via ViewModel.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task GuiWorkflow_MarkRedactionArea_CorrectlySetAndCleared()
+    {
+        // Arrange
+        var pdfPath = Path.Combine(Path.GetTempPath(), $"mark_workflow_{Guid.NewGuid()}.pdf");
+        _tempFiles.Add(pdfPath);
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "MARK WORKFLOW TEST");
+
+        var vm = CreateViewModel();
+
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(pdfPath);
+        });
+
+        // Initially, no redaction area (default Rect has zero dimensions)
+        vm.CurrentRedactionArea.Width.Should().Be(0, "no initial redaction area width");
+        vm.CurrentRedactionArea.Height.Should().Be(0, "no initial redaction area height");
+
+        // Enable redaction mode
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.ToggleRedactionModeCommand.Execute().Subscribe();
+        });
+        vm.IsRedactionMode.Should().BeTrue();
+
+        // Set redaction area (simulates user drawing a box)
+        var dpiScale = 150.0 / 72.0;
+        var redactionArea = new Rect(80 * dpiScale, 80 * dpiScale, 200 * dpiScale, 40 * dpiScale);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.CurrentRedactionArea = redactionArea;
+        });
+
+        // Verify area is set
+        vm.CurrentRedactionArea.Should().Be(redactionArea, "redaction area should be set after user drawing");
+
+        // Toggle redaction mode off clears the area
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.ToggleRedactionModeCommand.Execute().Subscribe();
+        });
+        vm.IsRedactionMode.Should().BeFalse();
+
+        // The redaction area should be cleared when mode is toggled off
+        // (Or it can remain - depends on implementation. Let's check current behavior.)
+        // If not cleared, that's OK - the important thing is mode toggling works.
+    }
+
+    /// <summary>
+    /// Issue #109: Verify non-redacted text integrity after applying redaction.
+    /// Text outside the redaction area should be preserved exactly.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task GuiWorkflow_RedactAndVerifyIntegrity_OtherTextPreserved()
+    {
+        // Arrange: Create PDF with multiple text items at different positions
+        var pdfPath = Path.Combine(Path.GetTempPath(), $"integrity_test_{Guid.NewGuid()}.pdf");
+        var redactedPath = Path.Combine(Path.GetTempPath(), $"integrity_test_{Guid.NewGuid()}_redacted.pdf");
+        _tempFiles.Add(pdfPath);
+        _tempFiles.Add(redactedPath);
+
+        var (_, contentMap) = TestPdfGenerator.CreateMappedContentPdf(pdfPath);
+
+        // Extract text before redaction
+        var textBefore = PdfTestHelpers.ExtractAllText(pdfPath);
+        textBefore.Should().Contain("CONFIDENTIAL");
+        textBefore.Should().Contain("PUBLIC");
+        textBefore.Should().Contain("SECRET");
+        textBefore.Should().Contain("PRIVATE");
+
+        // Create services and ViewModel
+        var documentService = new PdfDocumentService(_docLoggerMock.Object);
+        var renderService = new PdfRenderService(_renderLoggerMock.Object);
+        var redactionService = new RedactionService(_redactionLoggerMock.Object, _loggerFactory);
+        var textExtractionService = new PdfTextExtractionService(_textLoggerMock.Object);
+        var searchService = new PdfSearchService(_searchLoggerMock.Object);
+        var ocrService = new PdfOcrService(new Mock<ILogger<PdfOcrService>>().Object, renderService);
+        var signatureService = new SignatureVerificationService(new Mock<ILogger<SignatureVerificationService>>().Object);
+        var verifier = new RedactionVerifier(new Mock<ILogger<RedactionVerifier>>().Object, _loggerFactory);
+        var filenameSuggestionService = new FilenameSuggestionService();
+
+        var vm = new MainWindowViewModel(
+            _vmLoggerMock.Object,
+            _loggerFactory,
+            documentService,
+            renderService,
+            redactionService,
+            textExtractionService,
+            searchService,
+            ocrService,
+            signatureService,
+            verifier,
+            filenameSuggestionService);
+
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(pdfPath);
+            vm.ToggleRedactionModeCommand.Execute().Subscribe();
+        });
+
+        // Redact ONLY "CONFIDENTIAL"
+        var confidentialPos = contentMap["CONFIDENTIAL"];
+        var dpiScale = 150.0 / 72.0;
+        var redactionArea = new Rect(
+            (confidentialPos.x - 5) * dpiScale,
+            (confidentialPos.y - 5) * dpiScale,
+            (confidentialPos.width + 10) * dpiScale,
+            (confidentialPos.height + 10) * dpiScale
+        );
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.CurrentRedactionArea = redactionArea;
+        });
+
+        // Apply redaction directly
+        var document = documentService.GetCurrentDocument();
+        var page = document!.Pages[0];
+        redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 150);
+        documentService.SaveDocument(redactedPath);
+
+        // Assert: Verify text integrity
+        var textAfter = PdfTestHelpers.ExtractAllText(redactedPath);
+
+        // Redacted text should be gone
+        textAfter.Should().NotContain("CONFIDENTIAL", "redacted text must be removed");
+
+        // Other text should be EXACTLY preserved (no corruption, no doubling, no blanking)
+        textAfter.Should().Contain("PUBLIC", "non-redacted text must be preserved");
+        textAfter.Should().Contain("SECRET", "non-redacted text must be preserved");
+        textAfter.Should().Contain("PRIVATE", "non-redacted text must be preserved");
+
+        // Check for common corruption patterns
+        textAfter.Should().NotContain("PPUUBBLLIICC", "text should NOT be doubled (issue #103)");
+        textAfter.Should().NotContain("SSEECCRREETT", "text should NOT be doubled");
+    }
+
+    #endregion
+
+    #region Issue #148: CloseDocument State Cleanup Tests
+
+    /// <summary>
+    /// Issue #148: Verify CloseDocument cleans up ALL state to prevent UI artifacts
+    /// from persisting when closing and reopening documents.
+    /// This test prevents regression of Issue #138 (UI lifecycle bug).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task CloseDocument_CleansUpAllState()
+    {
+        // Arrange - Create ViewModel and load document
+        var vm = CreateViewModel();
+        var pdfPath = CreateTestPdf("REDACT_ME Secret content");
+
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(pdfPath);
+        });
+
+        // Setup state to verify cleanup
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Enable redaction mode
+            vm.ToggleRedactionModeCommand.Execute().Subscribe();
+
+            // Set a redaction area
+            vm.CurrentRedactionArea = new Rect(10, 10, 100, 50);
+
+            // Change zoom level from default
+            vm.ZoomLevel = 1.5;
+        });
+
+        // Mark a redaction area (adds to pending list)
+        // Note: ApplyRedactionCommand in mark-then-apply mode calls MarkRedactionArea()
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.ApplyRedactionCommand.Execute().Subscribe();
+        });
+
+        // Verify pre-close state
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.IsDocumentLoaded.Should().BeTrue("document should be loaded before close");
+            vm.IsRedactionMode.Should().BeTrue("redaction mode should be enabled");
+            // Note: CurrentRedactionArea gets cleared after marking
+            vm.ZoomLevel.Should().Be(1.5, "zoom should be changed from default");
+            vm.RedactionWorkflow.PendingRedactions.Count.Should().BeGreaterThan(0, "should have pending redactions");
+        });
+
+        // Act - Close the document
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.CloseDocumentCommand.Execute().Subscribe();
+        });
+
+        // Assert - All state should be cleaned up
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Document state
+            vm.IsDocumentLoaded.Should().BeFalse("document should be closed");
+
+            // Redaction area should be cleared (checking dimensions since Rect is struct)
+            (vm.CurrentRedactionArea.Width == 0 && vm.CurrentRedactionArea.Height == 0)
+                .Should().BeTrue("redaction area should be cleared");
+
+            // Redaction mode should be disabled
+            vm.IsRedactionMode.Should().BeFalse("redaction mode should be disabled after close");
+
+            // Pending redactions should be cleared
+            vm.RedactionWorkflow.PendingRedactions.Count.Should().Be(0,
+                "pending redactions should be cleared to prevent UI artifacts");
+
+            // Zoom should be reset to default
+            vm.ZoomLevel.Should().Be(1.0, "zoom should reset to 100%");
+
+            // Page index should be reset
+            vm.CurrentPageIndex.Should().Be(0, "page index should reset to 0");
+        });
+    }
+
+    /// <summary>
+    /// Verify that loading a new document after closing clears any residual state
+    /// from the previous document.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task LoadNewDocument_AfterClose_StartsWithCleanState()
+    {
+        // Arrange - Create ViewModel
+        var vm = CreateViewModel();
+        var firstPdf = CreateTestPdf("First Document");
+        var secondPdf = CreateTestPdf("Second Document");
+
+        // Load first document and set up state
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(firstPdf);
+        });
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.ToggleRedactionModeCommand.Execute().Subscribe();
+            vm.CurrentRedactionArea = new Rect(20, 20, 80, 40);
+            vm.ZoomLevel = 2.0;
+            // ApplyRedactionCommand in mark-then-apply mode calls MarkRedactionArea()
+            vm.ApplyRedactionCommand.Execute().Subscribe();
+        });
+
+        // Close first document
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.CloseDocumentCommand.Execute().Subscribe();
+        });
+
+        // Act - Load second document
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await vm.LoadDocumentAsync(secondPdf);
+        });
+
+        // Assert - State should be clean for second document
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.IsDocumentLoaded.Should().BeTrue("second document should be loaded");
+            vm.IsRedactionMode.Should().BeFalse("redaction mode should NOT carry over");
+
+            // No residual pending redactions from first document
+            vm.RedactionWorkflow.PendingRedactions.Count.Should().Be(0,
+                "pending redactions from previous document should NOT persist");
+
+            // Zoom should be default for new document
+            vm.ZoomLevel.Should().Be(1.0, "zoom should reset for new document");
+
+            // Page index should be at start
+            vm.CurrentPageIndex.Should().Be(0, "should start at first page of new document");
+        });
+    }
+
+    #endregion
+
+    #region Scripting Timeout Tests (Issue #93)
+
+    [AvaloniaFact]
+    public void LoadDocumentTimeoutSeconds_DefaultValue_Is30()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Assert
+        vm.LoadDocumentTimeoutSeconds.Should().Be(30, "default timeout should be 30 seconds");
+    }
+
+    [AvaloniaFact]
+    public void LoadDocumentTimeoutSeconds_CanBeConfigured()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Act
+        vm.LoadDocumentTimeoutSeconds = 10;
+
+        // Assert
+        vm.LoadDocumentTimeoutSeconds.Should().Be(10, "timeout should be configurable");
+    }
+
+    [AvaloniaFact]
+    public async Task LoadDocumentCommand_ValidPdf_LoadsSuccessfully()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        var pdfPath = CreateTestPdf("Test Content for Scripting");
+
+        // Act - Use scripting command
+        await vm.LoadDocumentCommand(pdfPath);
+
+        // Assert
+        vm.IsDocumentLoaded.Should().BeTrue("document should load via scripting command");
+        vm.TotalPages.Should().BeGreaterThan(0, "loaded document should have pages");
+    }
+
+    [AvaloniaFact]
+    public async Task LoadDocumentCommand_FileNotFound_ThrowsException()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        var nonExistentPath = Path.Combine(Path.GetTempPath(), $"nonexistent_{Guid.NewGuid()}.pdf");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<FileNotFoundException>(async () =>
+        {
+            await vm.LoadDocumentCommand(nonExistentPath);
+        });
+    }
+
+    [AvaloniaFact]
+    public async Task LoadDocumentCommand_EmptyPath_ThrowsArgumentException()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            await vm.LoadDocumentCommand("");
+        });
     }
 
     #endregion

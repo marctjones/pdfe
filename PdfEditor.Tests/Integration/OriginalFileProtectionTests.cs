@@ -94,7 +94,7 @@ public class OriginalFileProtectionTests : IDisposable
 
         // Find text and redact it
         var redactionArea = GetWordBounds(originalPath, targetText);
-        _redactionService.RedactArea(document!.Pages[0], redactionArea, renderDpi: 150);
+        _redactionService.RedactArea(document!.Pages[0], redactionArea, originalPath, renderDpi: 150);
 
         // Save to DIFFERENT path
         var redactedPath = CreateTempPath("important_original_REDACTED.pdf");
@@ -143,7 +143,7 @@ public class OriginalFileProtectionTests : IDisposable
         var document = _documentService.GetCurrentDocument();
 
         var redactionArea = GetWordBounds(originalPath, "SECRET");
-        _redactionService.RedactArea(document!.Pages[0], redactionArea, renderDpi: 150);
+        _redactionService.RedactArea(document!.Pages[0], redactionArea, originalPath, renderDpi: 150);
 
         var redactedPath = CreateTempPath("document_REDACTED.pdf");
         _documentService.SaveDocument(redactedPath);
@@ -189,7 +189,7 @@ public class OriginalFileProtectionTests : IDisposable
         var document = _documentService.GetCurrentDocument();
 
         var redactionArea = GetWordBounds(originalPath, "PROTECTED");
-        _redactionService.RedactArea(document!.Pages[0], redactionArea, renderDpi: 150);
+        _redactionService.RedactArea(document!.Pages[0], redactionArea, originalPath, renderDpi: 150);
 
         // Save to different path first
         var redactedPath = CreateTempPath("protected_REDACTED.pdf");
@@ -351,9 +351,9 @@ public class OriginalFileProtectionTests : IDisposable
         var area2 = GetWordBounds(originalPath, "ALSO_REDACT");
         var area3 = GetWordBounds(originalPath, "AND_THIS_TOO");
 
-        _redactionService.RedactArea(document!.Pages[0], area1, renderDpi: 150);
-        _redactionService.RedactArea(document.Pages[0], area2, renderDpi: 150);
-        _redactionService.RedactArea(document.Pages[0], area3, renderDpi: 150);
+        _redactionService.RedactArea(document!.Pages[0], area1, originalPath, renderDpi: 150);
+        _redactionService.RedactArea(document.Pages[0], area2, originalPath, renderDpi: 150);
+        _redactionService.RedactArea(document.Pages[0], area3, originalPath, renderDpi: 150);
 
         var redactedPath = CreateTempPath("multi_redact_REDACTED.pdf");
         _documentService.SaveDocument(redactedPath);
@@ -401,7 +401,7 @@ public class OriginalFileProtectionTests : IDisposable
         var document = _documentService.GetCurrentDocument();
 
         var area1 = GetWordBounds(originalPath, "FIRST");
-        _redactionService.RedactArea(document!.Pages[0], area1, renderDpi: 150);
+        _redactionService.RedactArea(document!.Pages[0], area1, originalPath, renderDpi: 150);
 
         var firstSavePath = CreateTempPath("sequential_v1.pdf");
         _documentService.SaveDocument(firstSavePath);
@@ -426,7 +426,7 @@ public class OriginalFileProtectionTests : IDisposable
         var document2 = _documentService.GetCurrentDocument();
 
         var area2 = GetWordBounds(secondOriginal, "ANOTHER");
-        _redactionService.RedactArea(document2!.Pages[0], area2, renderDpi: 150);
+        _redactionService.RedactArea(document2!.Pages[0], area2, originalPath, renderDpi: 150);
 
         var secondSavePath = CreateTempPath("sequential2_v1.pdf");
         _documentService.SaveDocument(secondSavePath);

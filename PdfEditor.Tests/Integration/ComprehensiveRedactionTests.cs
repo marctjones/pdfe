@@ -69,7 +69,7 @@ public class ComprehensiveRedactionTests : IDisposable
             confidentialPos.height + 10
         );
         _output.WriteLine($"Redacting CONFIDENTIAL at: {redactionArea1}");
-        _redactionService.RedactArea(page, redactionArea1, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea1, testPdf, renderDpi: 72);
 
         // Redact SECRET
         var secretPos = contentMap["SECRET"];
@@ -80,7 +80,7 @@ public class ComprehensiveRedactionTests : IDisposable
             secretPos.height + 10
         );
         _output.WriteLine($"Redacting SECRET at: {redactionArea2}");
-        _redactionService.RedactArea(page, redactionArea2, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea2, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("mapped_content_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -143,7 +143,7 @@ public class ComprehensiveRedactionTests : IDisposable
         foreach (var area in redactionAreas)
         {
             _output.WriteLine($"Redacting random area: {area}");
-            _redactionService.RedactArea(page, area, renderDpi: 72);
+            _redactionService.RedactArea(page, area, testPdf, renderDpi: 72);
         }
 
         var redactedPdf = CreateTempPath("random_redaction_redacted.pdf");
@@ -200,7 +200,7 @@ public class ComprehensiveRedactionTests : IDisposable
         // Redact the sensitive data box (approximately x=50-550, y=240-360)
         var sensitiveDataArea = new Rect(50, 280, 500, 90);
         _output.WriteLine($"Redacting sensitive data area: {sensitiveDataArea}");
-        _redactionService.RedactArea(page, sensitiveDataArea, renderDpi: 72);
+        _redactionService.RedactArea(page, sensitiveDataArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("complex_doc_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -263,7 +263,7 @@ public class ComprehensiveRedactionTests : IDisposable
         foreach (var (area, i) in redactionAreas.Select((a, i) => (a, i)))
         {
             _output.WriteLine($"Redaction {i + 1}: ({area.X}, {area.Y}, {area.Width}x{area.Height})");
-            _redactionService.RedactArea(page, area, renderDpi: 72);
+            _redactionService.RedactArea(page, area, testPdf, renderDpi: 72);
         }
 
         var redactedPdf = CreateTempPath("multiple_random_redacted.pdf");
@@ -312,7 +312,7 @@ public class ComprehensiveRedactionTests : IDisposable
         // Large area covering entire page
         var fullPageArea = new Rect(0, 0, page.Width.Point, page.Height.Point);
         _output.WriteLine($"Redacting entire page: {fullPageArea}");
-        _redactionService.RedactArea(page, fullPageArea, renderDpi: 72);
+        _redactionService.RedactArea(page, fullPageArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("full_redaction_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -358,7 +358,7 @@ public class ComprehensiveRedactionTests : IDisposable
             var pos = contentMap[item];
             var area = new Rect(pos.x - 2, pos.y - 2, pos.width + 4, pos.height + 4);
             _output.WriteLine($"Precisely redacting '{item}' at {area}");
-            _redactionService.RedactArea(page, area, renderDpi: 72);
+            _redactionService.RedactArea(page, area, testPdf, renderDpi: 72);
         }
 
         var redactedPdf = CreateTempPath("precise_redaction_redacted.pdf");
@@ -404,7 +404,7 @@ public class ComprehensiveRedactionTests : IDisposable
         // Redact at specified DPI
         // Text at Y=100, use redaction at Y=90
         var redactionArea = new Rect(90, 90, 200, 30);
-        _redactionService.RedactArea(page, redactionArea, renderDpi: renderDpi);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: renderDpi);
 
         var redactedPdf = CreateTempPath($"dpi_test_{renderDpi}_redacted.pdf");
         _tempFiles.Add(redactedPdf);

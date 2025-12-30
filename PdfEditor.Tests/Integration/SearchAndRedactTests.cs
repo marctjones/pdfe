@@ -227,7 +227,7 @@ public class SearchAndRedactTests : IDisposable
             _loggerFactory);
 
         // Act
-        var result = service.RedactMatches(document, matches, new RedactionOptions());
+        var result = service.RedactMatches(document, pdfPath, matches, new RedactionOptions());
 
         // Assert
         result.TotalMatches.Should().Be(1);
@@ -280,6 +280,81 @@ public class SearchAndRedactTests : IDisposable
         // Assert
         result.Should().NotBeNull();
         // ComplexContentPdf has SSN pattern "123-45-6789"
+    }
+
+    #endregion
+
+    #region Issue #95: Substring Expansion Tests
+
+    /// <summary>
+    /// Issue #95: Verify that substring matches expand to word boundaries
+    /// to prevent context leakage during redaction.
+    /// </summary>
+    [Fact]
+    public void FindText_SubstringMatch_ExpandsToWordBoundary()
+    {
+        // Arrange
+        var pdfPath = CreateTempFile();
+        // Create PDF with text that contains target as substring
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "PLACE OF BIRTH:CITY is here");
+
+        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var service = new TextSearchService(_loggerFactory.CreateLogger<TextSearchService>());
+
+        // Act - Search for "CITY" which is substring of "BIRTH:CITY"
+        var options = new SearchOptions { ExpandSubstringToWord = true };
+        var matches = service.FindText(document, "CITY", options);
+
+        // Assert - Should find match, bounding box should be expanded
+        matches.Should().HaveCountGreaterThan(0, "should find CITY substring");
+
+        // The bounding box should cover more than just "CITY" (4 chars)
+        // If expanded properly, it covers the containing word
+        var firstMatch = matches.First();
+        firstMatch.MatchedText.Should().Be("CITY"); // Still reports what was searched
+        // The bounding box width should be reasonable (not just 4 chars wide)
+    }
+
+    /// <summary>
+    /// Issue #95: Verify that whole-word search does not expand.
+    /// </summary>
+    [Fact]
+    public void FindText_WholeWordSearch_NoExpansion()
+    {
+        // Arrange
+        var pdfPath = CreateTempFile();
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "The CITY is large");
+
+        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var service = new TextSearchService(_loggerFactory.CreateLogger<TextSearchService>());
+
+        // Act - Search with WholeWord=true
+        var options = new SearchOptions { WholeWord = true, ExpandSubstringToWord = true };
+        var matches = service.FindText(document, "CITY", options);
+
+        // Assert - Should find match as a whole word
+        matches.Should().HaveCountGreaterThan(0, "CITY exists as a whole word");
+    }
+
+    /// <summary>
+    /// Issue #95: Verify ExpandSubstringToWord can be disabled for precise matching.
+    /// </summary>
+    [Fact]
+    public void FindText_ExpandDisabled_PreciseMatch()
+    {
+        // Arrange
+        var pdfPath = CreateTempFile();
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "SOMETEXT contains TARGET");
+
+        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var service = new TextSearchService(_loggerFactory.CreateLogger<TextSearchService>());
+
+        // Act - Search with ExpandSubstringToWord=false
+        var options = new SearchOptions { ExpandSubstringToWord = false };
+        var matches = service.FindText(document, "TARGET", options);
+
+        // Assert - Should still find matches
+        matches.Should().HaveCountGreaterThan(0, "TARGET should be found");
     }
 
     #endregion

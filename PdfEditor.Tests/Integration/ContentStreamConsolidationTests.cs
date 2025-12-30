@@ -33,9 +33,17 @@ public class ContentStreamConsolidationTests
                 gfx.DrawString("Base text", new XFont("Arial", 12), XBrushes.Black, 20, 40);
             }
 
+            doc.Save(tempPath);
+        }
+
+        // Reopen and apply redactions (must save first for glyph-level redaction)
+        using (var doc = PdfReader.Open(tempPath, PdfDocumentOpenMode.Modify))
+        {
+            var page = doc.Pages[0];
+
             // Apply two redactions; overlays must end up in the primary stream.
-            service.RedactArea(page, new Rect(10, 10, 40, 20), renderDpi: 72);
-            service.RedactArea(page, new Rect(70, 10, 40, 20), renderDpi: 72);
+            service.RedactArea(page, new Rect(10, 10, 40, 20), tempPath, renderDpi: 72);
+            service.RedactArea(page, new Rect(70, 10, 40, 20), tempPath, renderDpi: 72);
 
             doc.Save(tempPath);
         }

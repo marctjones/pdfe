@@ -186,7 +186,7 @@ public class RedactionCoordinateSystemTests : IDisposable
             _loggerFactory.CreateLogger<RedactionService>(),
             _loggerFactory);
 
-        redactionService.RedactArea(page, imageSelectionPixels, renderDpi: 150);
+        redactionService.RedactArea(page, imageSelectionPixels, pdfPath, renderDpi: 150);
 
         // Save and verify
         var redactedPath = Path.GetTempFileName();

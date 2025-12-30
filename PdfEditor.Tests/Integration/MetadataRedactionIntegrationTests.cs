@@ -555,9 +555,9 @@ public class MetadataRedactionIntegrationTests : IDisposable
     #region RedactionOptions Tests
 
     [Fact]
-    public void RedactionOptions_DefaultDisabledMetadataSanitization()
+    public void RedactionOptions_DefaultEnabledMetadataSanitization()
     {
-        _output.WriteLine("=== TEST: RedactionOptions_DefaultDisabledMetadataSanitization ===");
+        _output.WriteLine("=== TEST: RedactionOptions_DefaultEnabledMetadataSanitization ===");
 
         // Arrange
         var testPdf = CreateTempPath("default_options.pdf");
@@ -575,11 +575,11 @@ public class MetadataRedactionIntegrationTests : IDisposable
         document.Dispose();
         _tempFiles.Add(testPdf);
 
-        // Act - Use default options (SanitizeMetadata = false)
+        // Act - Use default options (SanitizeMetadata = true as of issue #150)
         var doc = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
 
-        var options = new RedactionOptions(); // Default: SanitizeMetadata = false
+        var options = new RedactionOptions(); // Default: SanitizeMetadata = true (security best practice)
         // XGraphics uses top-left origin - text at Y=100
         var areas = new List<Rect> { new Rect(90, 90, 150, 20) };
 
@@ -590,16 +590,18 @@ public class MetadataRedactionIntegrationTests : IDisposable
         doc.Save(redactedPdf);
         doc.Dispose();
 
-        // Assert - Content is redacted but metadata remains
+        // Assert - Content is redacted AND metadata is sanitized (new default behavior)
         var extractedText = PdfTestHelpers.ExtractAllText(redactedPdf);
         extractedText.Should().NotContain("REDACT_ME");
 
-        // With default options, metadata is NOT sanitized
+        // With default options, metadata IS sanitized (see issue #150)
         var finalDoc = PdfReader.Open(redactedPdf, PdfDocumentOpenMode.Import);
-        // The title may still contain the text since sanitization wasn't requested
+        // The title should NOT contain the redacted text since sanitization is now default
+        finalDoc.Info.Title.Should().NotContain("REDACT_ME",
+            "Metadata sanitization is now enabled by default for security (issue #150)");
         finalDoc.Dispose();
 
-        _output.WriteLine("PASSED: Default options work as expected");
+        _output.WriteLine("PASSED: Default options now include metadata sanitization for security");
     }
 
     [Fact]

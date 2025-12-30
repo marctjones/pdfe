@@ -211,7 +211,8 @@ public class FormXObjectRedactionTests : IDisposable
         var act = () => redactionService.RedactArea(
             document.Pages[0],
             new Rect(150, 150, 100, 100),
-            72);
+            pdfPath,
+            renderDpi: 72);
 
         // Assert
         act.Should().NotThrow();

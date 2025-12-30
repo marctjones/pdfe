@@ -242,7 +242,7 @@ public class PdfConformanceTests : IDisposable
         );
 
         // Act
-        redactionService.RedactArea(page, redactArea, renderDpi: 72);
+        redactionService.RedactArea(page, redactArea, pdfPath, renderDpi: 72);
         _documentService.SaveDocument(savePath);
 
         // Assert - Text should be removed
@@ -356,6 +356,284 @@ public class PdfConformanceTests : IDisposable
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             _documentService.RemovePage(99));
+    }
+
+    #endregion
+
+    #region Mark-Then-Apply Conformance (Issue #30)
+
+    /// <summary>
+    /// Verifies mark-then-apply workflow produces valid PDF 1.7 documents.
+    /// </summary>
+    [Fact]
+    public void MarkThenApply_ProducesValidPdf17Document()
+    {
+        // Arrange
+        var pdfPath = Path.Combine(_testOutputDir, "mark_apply_17.pdf");
+        var savePath = Path.Combine(_testOutputDir, "mark_apply_17_result.pdf");
+
+        TestPdfGenerator.CreateTextOnlyPdf(pdfPath, new[]
+        {
+            "Line 1 SECRET",
+            "Line 2 PUBLIC",
+            "Line 3 SECRET"
+        });
+
+        var loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionService>.Instance;
+        var redactionService = new RedactionService(logger, loggerFactory);
+
+        // Act - Mark multiple areas then apply all
+        using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+        var page = pdfPigDoc.GetPage(1);
+        var secretWords = page.GetWords().Where(w => w.Text == "SECRET").ToList();
+
+        var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        foreach (var word in secretWords)
+        {
+            var pdfBounds = word.BoundingBox;
+            var scale = 150.0 / 72.0;
+            var imageY = (page.Height - pdfBounds.Top) * scale;
+
+            var screenRect = new Avalonia.Rect(
+                pdfBounds.Left * scale - 5,
+                imageY - 5,
+                (pdfBounds.Right - pdfBounds.Left) * scale + 10,
+                (pdfBounds.Top - pdfBounds.Bottom) * scale + 10
+            );
+
+            redactionService.RedactArea(document.Pages[0], screenRect, pdfPath, renderDpi: 150);
+        }
+        document.Save(savePath);
+        document.Dispose();
+        pdfPigDoc.Dispose();
+
+        // Assert - Document should be valid and openable
+        using var resultDoc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
+        resultDoc.PageCount.Should().Be(1);
+
+        // Verify PDF version is at least 1.4 (default)
+        resultDoc.Version.Should().BeGreaterOrEqualTo(14);
+
+        // Verify text content
+        var textAfter = _textService.ExtractTextFromPage(savePath, 0);
+        textAfter.Should().NotContain("SECRET", "Redacted text should be removed");
+        textAfter.Should().Contain("PUBLIC", "Non-redacted text should remain");
+    }
+
+    /// <summary>
+    /// Verifies multi-page mark-then-apply produces valid PDFs.
+    /// </summary>
+    [Fact]
+    public void MarkThenApply_MultiPage_ProducesValidPdf()
+    {
+        // Arrange
+        var pdfPath = Path.Combine(_testOutputDir, "mark_apply_multi.pdf");
+        var savePath = Path.Combine(_testOutputDir, "mark_apply_multi_result.pdf");
+
+        TestPdfGenerator.CreateMultiPagePdf(pdfPath, 3);
+
+        var loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionService>.Instance;
+        var redactionService = new RedactionService(logger, loggerFactory);
+
+        var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+
+        // Act - Redact on each page
+        for (int i = 0; i < 3; i++)
+        {
+            using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+            var pigPage = pdfPigDoc.GetPage(i + 1);
+            var secretWord = pigPage.GetWords().FirstOrDefault(w => w.Text == "Secret");
+
+            if (secretWord != null)
+            {
+                var pdfBounds = secretWord.BoundingBox;
+                var scale = 150.0 / 72.0;
+                var imageY = (pigPage.Height - pdfBounds.Top) * scale;
+
+                var screenRect = new Avalonia.Rect(
+                    pdfBounds.Left * scale - 5,
+                    imageY - 5,
+                    (pdfBounds.Right - pdfBounds.Left) * scale + 10,
+                    (pdfBounds.Top - pdfBounds.Bottom) * scale + 10
+                );
+
+                redactionService.RedactArea(document.Pages[i], screenRect, pdfPath, renderDpi: 150);
+            }
+        }
+
+        document.Save(savePath);
+        document.Dispose();
+
+        // Assert - Document structure should be valid
+        using var resultDoc = PdfReader.Open(savePath, PdfDocumentOpenMode.Import);
+        resultDoc.PageCount.Should().Be(3);
+
+        // All pages should be accessible
+        for (int i = 0; i < 3; i++)
+        {
+            var page = resultDoc.Pages[i];
+            page.Should().NotBeNull();
+        }
+
+        // Text extraction should work without errors
+        for (int i = 0; i < 3; i++)
+        {
+            var text = _textService.ExtractTextFromPage(savePath, i);
+            text.Should().NotBeNull();
+            text.Should().NotContain("Secret", $"Page {i + 1} should have Secret redacted");
+        }
+    }
+
+    /// <summary>
+    /// Verifies qpdf --check passes on redacted document.
+    /// </summary>
+    [SkippableFact]
+    public void MarkThenApply_QpdfCheckPasses()
+    {
+        // Skip if qpdf not available
+        var qpdfPath = FindExecutable("qpdf");
+        Skip.If(qpdfPath == null, "qpdf not installed (apt-get install qpdf)");
+
+        // Arrange
+        var pdfPath = Path.Combine(_testOutputDir, "qpdf_check.pdf");
+        var savePath = Path.Combine(_testOutputDir, "qpdf_check_result.pdf");
+
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "SECRET_DATA");
+
+        var loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionService>.Instance;
+        var redactionService = new RedactionService(logger, loggerFactory);
+
+        // Act
+        using (var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(pdfPath))
+        {
+            var page = pdfPigDoc.GetPage(1);
+            var word = page.GetWords().FirstOrDefault();
+
+            if (word != null)
+            {
+                var pdfBounds = word.BoundingBox;
+                var scale = 150.0 / 72.0;
+                var imageY = (page.Height - pdfBounds.Top) * scale;
+
+                var screenRect = new Avalonia.Rect(
+                    pdfBounds.Left * scale - 5,
+                    imageY - 5,
+                    (pdfBounds.Right - pdfBounds.Left) * scale + 50,
+                    (pdfBounds.Top - pdfBounds.Bottom) * scale + 10
+                );
+
+                var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+                redactionService.RedactArea(document.Pages[0], screenRect, pdfPath, renderDpi: 150);
+                document.Save(savePath);
+                document.Dispose();
+            }
+        }
+
+        // Assert - qpdf --check should pass
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = qpdfPath,
+            Arguments = $"--check \"{savePath}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        using var process = System.Diagnostics.Process.Start(psi);
+        process!.WaitForExit(10000);
+        var stderr = process.StandardError.ReadToEnd();
+
+        process.ExitCode.Should().Be(0, $"qpdf --check should pass. Error: {stderr}");
+    }
+
+    /// <summary>
+    /// Verifies mutool info works on redacted document (no errors).
+    /// </summary>
+    [SkippableFact]
+    public void MarkThenApply_MutoolInfoWorks()
+    {
+        // Skip if mutool not available
+        var mutoolPath = FindExecutable("mutool");
+        Skip.If(mutoolPath == null, "mutool not installed (apt-get install mupdf-tools)");
+
+        // Arrange
+        var pdfPath = Path.Combine(_testOutputDir, "mutool_info.pdf");
+        var savePath = Path.Combine(_testOutputDir, "mutool_info_result.pdf");
+
+        TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "TEST_CONTENT");
+
+        var loggerFactory = Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionService>.Instance;
+        var redactionService = new RedactionService(logger, loggerFactory);
+
+        // Act
+        using (var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(pdfPath))
+        {
+            var page = pdfPigDoc.GetPage(1);
+            var word = page.GetWords().FirstOrDefault();
+
+            if (word != null)
+            {
+                var pdfBounds = word.BoundingBox;
+                var scale = 150.0 / 72.0;
+                var imageY = (page.Height - pdfBounds.Top) * scale;
+
+                var screenRect = new Avalonia.Rect(
+                    pdfBounds.Left * scale - 5,
+                    imageY - 5,
+                    (pdfBounds.Right - pdfBounds.Left) * scale + 50,
+                    (pdfBounds.Top - pdfBounds.Bottom) * scale + 10
+                );
+
+                var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+                redactionService.RedactArea(document.Pages[0], screenRect, pdfPath, renderDpi: 150);
+                document.Save(savePath);
+                document.Dispose();
+            }
+        }
+
+        // Assert - mutool info should work without errors
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = mutoolPath,
+            Arguments = $"info \"{savePath}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        using var process = System.Diagnostics.Process.Start(psi);
+        process!.WaitForExit(10000);
+        var stdout = process.StandardOutput.ReadToEnd();
+
+        // mutool info should return page count info
+        stdout.Should().Contain("Pages:", "mutool info should show page count");
+        process.ExitCode.Should().Be(0, "mutool info should exit successfully");
+    }
+
+    private static string? FindExecutable(string name)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "which",
+                Arguments = name,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            using var process = System.Diagnostics.Process.Start(psi);
+            process!.WaitForExit(5000);
+            if (process.ExitCode == 0)
+            {
+                return process.StandardOutput.ReadToEnd().Trim();
+            }
+        }
+        catch { }
+        return null;
     }
 
     #endregion

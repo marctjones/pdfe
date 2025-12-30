@@ -46,7 +46,7 @@ public class DocumentStateManagerTests
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => manager.SetDocument(""));
-        Assert.Throws<ArgumentException>(() => manager.SetDocument(null));
+        Assert.Throws<ArgumentException>(() => manager.SetDocument(null!));
     }
 
     [Fact]

@@ -135,7 +135,7 @@ public class GuiRedactionSimulationTests : IDisposable
         var pdfPage = document.Pages[0];
 
         _output.WriteLine($"Calling RedactArea with renderDpi={RenderDpi}");
-        _redactionService.RedactArea(pdfPage, selectionInImagePixels, renderDpi: RenderDpi);
+        _redactionService.RedactArea(pdfPage, selectionInImagePixels, pdfPath, renderDpi: RenderDpi);
 
         var redactedPath = CreateTempPath("gui_test_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -202,7 +202,7 @@ public class GuiRedactionSimulationTests : IDisposable
 
         // Perform redaction
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
-        _redactionService.RedactArea(document.Pages[0], selectionInImagePixels, renderDpi: RenderDpi);
+        _redactionService.RedactArea(document.Pages[0], selectionInImagePixels, pdfPath, renderDpi: RenderDpi);
 
         var redactedPath = CreateTempPath($"position_{label}_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -262,7 +262,7 @@ public class GuiRedactionSimulationTests : IDisposable
 
         // Perform redaction
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
-        _redactionService.RedactArea(document.Pages[0], selectionInImagePixels, renderDpi: RenderDpi);
+        _redactionService.RedactArea(document.Pages[0], selectionInImagePixels, pdfPath, renderDpi: RenderDpi);
 
         var redactedPath = CreateTempPath("multiline_redacted.pdf");
         _tempFiles.Add(redactedPath);

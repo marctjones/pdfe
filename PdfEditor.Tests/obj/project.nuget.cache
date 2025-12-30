@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "WVjrzXr1F00=",
+  "dgSpecHash": "+z11PiKeBes=",
   "success": true,
   "projectFilePath": "/home/marc/pdfe/PdfEditor.Tests/PdfEditor.Tests.csproj",
   "expectedPackageFiles": [
@@ -158,6 +158,7 @@
     "/home/marc/.nuget/packages/system.security.cryptography.protecteddata/4.4.0/system.security.cryptography.protecteddata.4.4.0.nupkg.sha512",
     "/home/marc/.nuget/packages/system.security.cryptography.x509certificates/4.3.0/system.security.cryptography.x509certificates.4.3.0.nupkg.sha512",
     "/home/marc/.nuget/packages/system.text.encoding/4.3.0/system.text.encoding.4.3.0.nupkg.sha512",
+    "/home/marc/.nuget/packages/system.text.encoding.codepages/10.0.1/system.text.encoding.codepages.10.0.1.nupkg.sha512",
     "/home/marc/.nuget/packages/system.text.encoding.extensions/4.3.0/system.text.encoding.extensions.4.3.0.nupkg.sha512",
     "/home/marc/.nuget/packages/system.text.regularexpressions/4.3.0/system.text.regularexpressions.4.3.0.nupkg.sha512",
     "/home/marc/.nuget/packages/system.threading/4.3.0/system.threading.4.3.0.nupkg.sha512",

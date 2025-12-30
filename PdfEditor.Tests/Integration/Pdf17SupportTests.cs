@@ -187,7 +187,7 @@ public class Pdf17SupportTests : IDisposable
         var redactionArea = new Rect(90, 90, 200, 30);
         _output.WriteLine($"Redaction area: {redactionArea}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, pdf17Path, renderDpi: 72);
 
         var redactedPath = CreateTempPath("pdf17_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -229,7 +229,7 @@ public class Pdf17SupportTests : IDisposable
         var document = PdfReader.Open(pdf17Path, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), pdf17Path, renderDpi: 72);
 
         var redactedPath = CreateTempPath("pdf17_preserve_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -272,10 +272,10 @@ public class Pdf17SupportTests : IDisposable
         var page = document.Pages[0];
 
         _output.WriteLine("Redacting FIRST_TEXT area...");
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), pdf17Path, renderDpi: 72);
 
         _output.WriteLine("Redacting THIRD_TEXT area...");
-        _redactionService.RedactArea(page, new Rect(90, 290, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 290, 150, 30), pdf17Path, renderDpi: 72);
 
         var redactedPath = CreateTempPath("pdf17_multi_redact_result.pdf");
         _tempFiles.Add(redactedPath);
@@ -361,7 +361,7 @@ public class Pdf17SupportTests : IDisposable
         var document = PdfReader.Open(pdf17Path, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), pdf17Path, renderDpi: 72);
 
         // Preserve version
         document.Version = 17;
@@ -479,7 +479,7 @@ public class Pdf17SupportTests : IDisposable
         var document = PdfReader.Open(pdf17Path, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), pdf17Path, renderDpi: 72);
 
         var redactedPath = CreateTempPath("pdf17_mixed_content_redacted.pdf");
         _tempFiles.Add(redactedPath);

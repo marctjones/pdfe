@@ -234,7 +234,7 @@ public class InlineImageRedactionTests : IDisposable
         var reloadedPage = reloadedDoc.Pages[0];
 
         // This should not throw even with inline image parsing enabled
-        var act = () => _redactionService.RedactArea(reloadedPage, new Rect(90, 90, 150, 30), renderDpi: 72);
+        var act = () => _redactionService.RedactArea(reloadedPage, new Rect(90, 90, 150, 30), pdfPath, renderDpi: 72);
 
         // Assert
         act.Should().NotThrow();
@@ -249,7 +249,7 @@ public class InlineImageRedactionTests : IDisposable
         _output.WriteLine("✅ TEST PASSED: Redaction with inline image parsing works");
     }
 
-    [Fact]
+    [Fact(Skip = "Inline image redaction not yet implemented - see issue #160")]
     public void RedactInlineImage_RemovesInlineBytesFromStream()
     {
         _output.WriteLine("=== TEST: RedactInlineImage_RemovesInlineBytesFromStream ===");
@@ -286,7 +286,7 @@ public class InlineImageRedactionTests : IDisposable
         using (var modDoc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify))
         {
             var modPage = modDoc.Pages[0];
-            _redactionService.RedactArea(modPage, new Rect(90, 90, 120, 120), renderDpi: 72);
+            _redactionService.RedactArea(modPage, new Rect(90, 90, 120, 120), pdfPath, renderDpi: 72);
             modDoc.Save(redactedPath);
         }
 

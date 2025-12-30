@@ -104,7 +104,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("pdftotext_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -143,7 +143,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("pdftotext_layout_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -178,7 +178,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("pdftotext_raw_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -224,7 +224,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("qpdf_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -267,7 +267,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("qpdf_decompress_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -318,7 +318,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("strings_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -358,7 +358,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("strings_minlen_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -401,7 +401,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 250, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("mutool_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -441,7 +441,7 @@ public class ExternalToolRedactionValidationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 350, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 350, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("comprehensive_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -540,9 +540,9 @@ public class ExternalToolRedactionValidationTests : IDisposable
         var pg = doc.Pages[0];
 
         // XGraphics uses top-left origin - text at Y=100, 200, 300
-        _redactionService.RedactArea(pg, new Rect(90, 90, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(90, 190, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(90, 290, 200, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 90, 200, 20), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 190, 200, 20), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 290, 200, 20), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multi_secrets_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -624,11 +624,11 @@ public class ExternalToolRedactionValidationTests : IDisposable
 
         // XGraphics uses top-left origin - text at Y=120, 150, 180
         // Redact names
-        _redactionService.RedactArea(pg, new Rect(140, 110, 300, 15), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(140, 110, 300, 15), testPdf, renderDpi: 72);
         // Redact amount
-        _redactionService.RedactArea(pg, new Rect(200, 140, 100, 15), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(200, 140, 100, 15), testPdf, renderDpi: 72);
         // Redact account
-        _redactionService.RedactArea(pg, new Rect(200, 170, 150, 15), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(200, 170, 150, 15), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("legal_doc_redacted.pdf");
         _tempFiles.Add(redactedPdf);

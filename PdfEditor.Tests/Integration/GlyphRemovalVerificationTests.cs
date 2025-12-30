@@ -99,7 +99,7 @@ public class GlyphRemovalVerificationTests : IDisposable
         _output.WriteLine($"  Redaction area: X={redactionArea.X}, Y={redactionArea.Y}, " +
                          $"W={redactionArea.Width}, H={redactionArea.Height}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("glyph_removal_test_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -170,7 +170,7 @@ public class GlyphRemovalVerificationTests : IDisposable
         _output.WriteLine($"  Redaction area: X={redactionArea.X}, Y={redactionArea.Y}, " +
                          $"W={redactionArea.Width}, H={redactionArea.Height}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("preserve_text_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -230,7 +230,7 @@ public class GlyphRemovalVerificationTests : IDisposable
         _output.WriteLine("Step 2: Applying redaction...");
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("content_stream_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -300,13 +300,13 @@ public class GlyphRemovalVerificationTests : IDisposable
         var pos1 = contentMap["CONFIDENTIAL"];
         var area1 = new Rect(pos1.x - 5, pos1.y - 5, pos1.width + 10, pos1.height + 10);
         _output.WriteLine($"  Redacting CONFIDENTIAL at: {area1}");
-        _redactionService.RedactArea(page, area1, renderDpi: 72);
+        _redactionService.RedactArea(page, area1, testPdf, renderDpi: 72);
 
         // Redact SECRET
         var pos2 = contentMap["SECRET"];
         var area2 = new Rect(pos2.x - 5, pos2.y - 5, pos2.width + 10, pos2.height + 10);
         _output.WriteLine($"  Redacting SECRET at: {area2}");
-        _redactionService.RedactArea(page, area2, renderDpi: 72);
+        _redactionService.RedactArea(page, area2, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multi_redaction_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -388,7 +388,7 @@ public class GlyphRemovalVerificationTests : IDisposable
         _output.WriteLine($"Redaction area: X={redactionArea.X}, Y={redactionArea.Y}, " +
                          $"W={redactionArea.Width}, H={redactionArea.Height}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("diagnostic_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -486,7 +486,7 @@ public class GlyphRemovalVerificationTests : IDisposable
         var page = document.Pages[0];
 
         // Redact area with no content
-        _redactionService.RedactArea(page, new Rect(500, 500, 50, 50), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(500, 500, 50, 50), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("empty_area_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -517,10 +517,10 @@ public class GlyphRemovalVerificationTests : IDisposable
         var page = document.Pages[0];
 
         // Apply 4 sequential redactions
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
-        _redactionService.RedactArea(page, new Rect(90, 190, 200, 30), renderDpi: 72);
-        _redactionService.RedactArea(page, new Rect(90, 290, 150, 30), renderDpi: 72);
-        _redactionService.RedactArea(page, new Rect(90, 390, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 190, 200, 30), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 290, 150, 30), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 390, 150, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("sequential_redacted.pdf");
         _tempFiles.Add(redactedPdf);

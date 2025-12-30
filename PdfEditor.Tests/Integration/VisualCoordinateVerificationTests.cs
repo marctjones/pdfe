@@ -242,7 +242,7 @@ public class VisualCoordinateVerificationTests : IDisposable
             avaloniaRect.Width * scale,
             avaloniaRect.Height * scale);
 
-        _redactionService.RedactArea(page, renderRect, renderDpi);
+        _redactionService.RedactArea(page, renderRect, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath("visual_alignment_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -330,7 +330,7 @@ public class VisualCoordinateVerificationTests : IDisposable
             redactionArea.Width * scale,
             redactionArea.Height * scale);
 
-        _redactionService.RedactArea(page, renderRect, renderDpi);
+        _redactionService.RedactArea(page, renderRect, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath("visual_diff_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -415,7 +415,7 @@ public class VisualCoordinateVerificationTests : IDisposable
                 80 * scale,
                 30 * scale);
 
-            _redactionService.RedactArea(page, renderRect, renderDpi);
+            _redactionService.RedactArea(page, renderRect, pdfPath, renderDpi: renderDpi);
             _output.WriteLine($"Redacted {cell} at ({x}, {y})");
         }
 
@@ -510,7 +510,7 @@ public class VisualCoordinateVerificationTests : IDisposable
                 pdfPointsRect.Width * scale,
                 pdfPointsRect.Height * scale);
 
-            _redactionService.RedactArea(page, renderRect, dpi);
+            _redactionService.RedactArea(page, renderRect, pdfPath, renderDpi: dpi);
 
             var redactedPath = CreateTempPath($"visual_cross_dpi_{dpi}_redacted.pdf");
             _tempFiles.Add(redactedPath);
@@ -571,7 +571,7 @@ public class VisualCoordinateVerificationTests : IDisposable
             120 * scale,
             40 * scale);
 
-        _redactionService.RedactArea(page, renderRect, renderDpi);
+        _redactionService.RedactArea(page, renderRect, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath($"visual_edge_{position.Replace("-", "_")}_redacted.pdf");
         _tempFiles.Add(redactedPath);

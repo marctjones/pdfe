@@ -270,7 +270,7 @@ public class MouseEventSimulationTests : IDisposable
         var document = documentService.GetCurrentDocument();
         document.Should().NotBeNull("document should be loaded");
         var page = document!.Pages[0];
-        redactionService.RedactArea(page, vm.CurrentRedactionArea, renderDpi: 150);
+        redactionService.RedactArea(page, vm.CurrentRedactionArea, originalPdf, renderDpi: 150);
 
         // Save the redacted document using the SAME document service the ViewModel used
         documentService.SaveDocument(redactedPdf);
@@ -388,7 +388,7 @@ public class MouseEventSimulationTests : IDisposable
                 vm.CurrentRedactionArea = selectionArea;
             });
 
-            redactionService.RedactArea(page, selectionArea, renderDpi: 150);
+            redactionService.RedactArea(page, selectionArea, pdfPath, renderDpi: 150);
         }
 
         // Save the redacted document using the SAME document service the ViewModel used
@@ -566,7 +566,7 @@ public class MouseEventSimulationTests : IDisposable
         var document = documentService.GetCurrentDocument();
         document.Should().NotBeNull("document should be loaded");
         var page = document!.Pages[0];
-        redactionService.RedactArea(page, vm.CurrentRedactionArea, renderDpi: 150);
+        redactionService.RedactArea(page, vm.CurrentRedactionArea, originalPdf, renderDpi: 150);
 
         // Save the redacted document using the SAME document service the ViewModel used
         documentService.SaveDocument(redactedPdf);

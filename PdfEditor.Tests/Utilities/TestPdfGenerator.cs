@@ -625,4 +625,35 @@ public static class TestPdfGenerator
         document.Save(stream, false);
         return stream.ToArray();
     }
+
+    /// <summary>
+    /// Creates a PDF with custom page dimensions (for testing unusual page sizes).
+    /// </summary>
+    /// <param name="outputPath">Output file path</param>
+    /// <param name="widthPoints">Width in PDF points (72 DPI)</param>
+    /// <param name="heightPoints">Height in PDF points (72 DPI)</param>
+    /// <param name="text">Optional text to include on the page</param>
+    public static string CreateCustomSizePdf(string outputPath, double widthPoints, double heightPoints, string text = "Test Document")
+    {
+        EnsureFontResolverInitialized();
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(widthPoints);
+        page.Height = XUnit.FromPoint(heightPoints);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", 12);
+
+        // Draw text at center of page
+        var textSize = gfx.MeasureString(text, font);
+        var x = (widthPoints - textSize.Width) / 2;
+        var y = (heightPoints - textSize.Height) / 2;
+
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(x, y));
+
+        document.Save(outputPath);
+        document.Dispose();
+
+        return outputPath;
+    }
 }

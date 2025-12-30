@@ -75,7 +75,7 @@ public class PreciseRedactionTests : IDisposable
         var redactionArea = new Rect(90, 190, 300, 30);
         _output.WriteLine($"\nApplying redaction at: ({redactionArea.X}, {redactionArea.Y}, {redactionArea.Width}x{redactionArea.Height})");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("grid_test_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -128,7 +128,7 @@ public class PreciseRedactionTests : IDisposable
 
         // Very precise redaction in the center - text at Y=220, so use Y=210
         var redactionArea = new Rect(200, 210, 150, 30);
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("boundary_precision_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -175,7 +175,7 @@ public class PreciseRedactionTests : IDisposable
 
         // This area partially overlaps with "PARTIALLY_COVERED" at Y=100
         var redactionArea = new Rect(150, 90, 100, 30);
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("partial_overlap_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -218,7 +218,7 @@ public class PreciseRedactionTests : IDisposable
         // Act - Redact only on page 2 - text at Y=100
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page2 = document.Pages[1];
-        _redactionService.RedactArea(page2, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page2, new Rect(90, 90, 200, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("multipage_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -258,7 +258,7 @@ public class PreciseRedactionTests : IDisposable
         // Act - Redact area with no content
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(400, 400, 100, 50));
+        _redactionService.RedactArea(page, new Rect(400, 400, 100, 50), testPdf);
 
         var redactedPdf = CreateTempPath("empty_area_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -287,7 +287,7 @@ public class PreciseRedactionTests : IDisposable
         // Text at Y=100, use redaction at Y=90
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(95, 90, 60, 25), renderDpi: 72); // Small area covering text body
+        _redactionService.RedactArea(page, new Rect(95, 90, 60, 25), testPdf, renderDpi: 72); // Small area covering text body
 
         var redactedPdf = CreateTempPath("small_area_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -314,7 +314,7 @@ public class PreciseRedactionTests : IDisposable
         // Act - Large redaction covering most of page
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(0, 0, 600, 500), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(0, 0, 600, 500), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("large_area_redacted.pdf");
         _tempFiles.Add(redactedPdf);
