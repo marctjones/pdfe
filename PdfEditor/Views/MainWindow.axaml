@@ -71,7 +71,8 @@
                 <MenuItem Header="Rotate _Right 90°" Command="{Binding RotatePageRightCommand}" InputGesture="Ctrl+R"/>
                 <MenuItem Header="Rotate _180°" Command="{Binding RotatePage180Command}"/>
                 <Separator/>
-                <MenuItem Header="_Export Pages as Images..." Command="{Binding ExportPagesCommand}"/>
+                <MenuItem Header="_Export Current Page..." Command="{Binding ExportCurrentPageCommand}" InputGesture="Ctrl+E"/>
+                <MenuItem Header="Export _All Pages as Images..." Command="{Binding ExportPagesCommand}"/>
                 <MenuItem Header="_Print..." Command="{Binding PrintCommand}" InputGesture="Ctrl+P"/>
             </MenuItem>
 
@@ -178,10 +179,14 @@
                     <!-- File Group -->
                     <Button Content="📁 Open" Command="{Binding OpenFileCommand}"
                             Classes="modern-button" Padding="12,6"
-                            ToolTip.Tip="Open PDF (Ctrl+O)"/>
+                            ToolTip.Tip="Open PDF (Ctrl+O)"
+                            AutomationProperties.Name="Open PDF File"
+                            AutomationProperties.HelpText="Opens a file dialog to select a PDF document"/>
                     <Button Content="{Binding SaveButtonText, StringFormat='💾 {0}'}" Command="{Binding SaveFileCommand}"
                             Classes="modern-button" Padding="12,6"
-                            ToolTip.Tip="Save (Ctrl+S)"/>
+                            ToolTip.Tip="Save (Ctrl+S)"
+                            AutomationProperties.Name="Save Document"
+                            AutomationProperties.HelpText="Saves the current PDF document"/>
 
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
@@ -191,20 +196,26 @@
                             Classes="modern-button toggle"
                             Classes.active="{Binding IsTextSelectionMode}"
                             Padding="12,6"
-                            ToolTip.Tip="Text Selection Mode (T)"/>
+                            ToolTip.Tip="Text Selection Mode (T)"
+                            AutomationProperties.Name="Text Selection Mode"
+                            AutomationProperties.HelpText="Toggle text selection mode to select and copy text"/>
 
                     <Button Content="⬛ Redact" Command="{Binding ToggleRedactionModeCommand}"
                             Classes="modern-button toggle"
                             Classes.active="{Binding IsRedactionMode}"
                             Padding="12,6"
-                            ToolTip.Tip="Redaction Mode (R)"/>
+                            ToolTip.Tip="Redaction Mode (R)"
+                            AutomationProperties.Name="Redaction Mode"
+                            AutomationProperties.HelpText="Toggle redaction mode to mark areas for removal"/>
 
                     <Button Content="✓ Apply" Command="{Binding ApplyRedactionCommand}"
                             Classes="modern-button primary"
                             Padding="12,6"
                             IsEnabled="{Binding IsRedactionMode}"
                             IsVisible="{Binding IsRedactionMode}"
-                            ToolTip.Tip="Apply Redaction (Enter)"/>
+                            ToolTip.Tip="Apply Redaction (Enter)"
+                            AutomationProperties.Name="Apply Redaction"
+                            AutomationProperties.HelpText="Apply the current redaction selection"/>
 
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
@@ -212,12 +223,16 @@
                     <!-- Tools Group -->
                     <Button Content="🔍 Find" Command="{Binding ToggleSearchCommand}"
                             Classes="modern-button" Padding="12,6"
-                            ToolTip.Tip="Find Text (Ctrl+F)"/>
+                            ToolTip.Tip="Find Text (Ctrl+F)"
+                            AutomationProperties.Name="Find Text"
+                            AutomationProperties.HelpText="Opens the search bar to find text in the document"/>
 
                     <Button Content="📝 OCR" Command="{Binding RunOcrCommand}"
                             Classes="modern-button" Padding="12,6"
                             IsEnabled="{Binding IsDocumentLoaded}"
-                            ToolTip.Tip="Run OCR on Current Page"/>
+                            ToolTip.Tip="Run OCR on Current Page"
+                            AutomationProperties.Name="Run OCR"
+                            AutomationProperties.HelpText="Extract text from scanned images using OCR"/>
 
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
@@ -225,28 +240,39 @@
                     <!-- Page Rotation -->
                     <Button Content="↺" Command="{Binding RotatePageLeftCommand}"
                             Classes="modern-button" Padding="10,6" FontSize="16"
-                            ToolTip.Tip="Rotate Left (Ctrl+L)"/>
+                            ToolTip.Tip="Rotate Left (Ctrl+L)"
+                            AutomationProperties.Name="Rotate Page Left"
+                            AutomationProperties.HelpText="Rotate the current page 90 degrees counter-clockwise"/>
                     <Button Content="↻" Command="{Binding RotatePageRightCommand}"
                             Classes="modern-button" Padding="10,6" FontSize="16"
-                            ToolTip.Tip="Rotate Right (Ctrl+R)"/>
+                            ToolTip.Tip="Rotate Right (Ctrl+R)"
+                            AutomationProperties.Name="Rotate Page Right"
+                            AutomationProperties.HelpText="Rotate the current page 90 degrees clockwise"/>
                 </StackPanel>
 
                 <!-- Right: Zoom Controls -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
                     <Button Content="−" Command="{Binding ZoomOutCommand}"
                             Classes="modern-button" Padding="10,6" FontWeight="Bold"
-                            ToolTip.Tip="Zoom Out (Ctrl+-)"/>
+                            ToolTip.Tip="Zoom Out (Ctrl+-)"
+                            AutomationProperties.Name="Zoom Out"
+                            AutomationProperties.HelpText="Decrease zoom level"/>
                     <TextBlock Text="{Binding ZoomLevel, StringFormat='{}{0:P0}'}"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"
                                MinWidth="45" TextAlignment="Center"
-                               FontSize="12" FontWeight="Medium"/>
+                               FontSize="12" FontWeight="Medium"
+                               AutomationProperties.Name="Zoom Level"/>
                     <Button Content="+" Command="{Binding ZoomInCommand}"
                             Classes="modern-button" Padding="10,6" FontWeight="Bold"
-                            ToolTip.Tip="Zoom In (Ctrl++)"/>
+                            ToolTip.Tip="Zoom In (Ctrl++)"
+                            AutomationProperties.Name="Zoom In"
+                            AutomationProperties.HelpText="Increase zoom level"/>
                     <Button Content="Fit" Command="{Binding ZoomFitWidthCommand}"
                             Classes="modern-button" Padding="10,6" FontSize="11"
-                            ToolTip.Tip="Fit Width (Ctrl+1)"/>
+                            ToolTip.Tip="Fit Width (Ctrl+1)"
+                            AutomationProperties.Name="Fit to Width"
+                            AutomationProperties.HelpText="Fit page to window width"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -271,7 +297,9 @@
                          Text="{Binding SearchText}"
                          Watermark="Search text..."
                          MinWidth="300"
-                         Margin="0,0,8,0"/>
+                         Margin="0,0,8,0"
+                         AutomationProperties.Name="Search Text"
+                         AutomationProperties.HelpText="Enter text to search for in the document"/>
 
                 <!-- Case Sensitive Checkbox -->
                 <CheckBox Grid.Column="2"
@@ -292,7 +320,9 @@
                         Classes="modern-button compact"
                         Padding="8,4"
                         Margin="0,0,4,0"
-                        ToolTip.Tip="Previous (Shift+F3)"/>
+                        ToolTip.Tip="Previous (Shift+F3)"
+                        AutomationProperties.Name="Find Previous"
+                        AutomationProperties.HelpText="Navigate to previous search result"/>
 
                 <!-- Next Button -->
                 <Button Grid.Column="5"
@@ -301,7 +331,9 @@
                         Classes="modern-button compact"
                         Padding="8,4"
                         Margin="0,0,8,0"
-                        ToolTip.Tip="Next (F3)"/>
+                        ToolTip.Tip="Next (F3)"
+                        AutomationProperties.Name="Find Next"
+                        AutomationProperties.HelpText="Navigate to next search result"/>
 
                 <!-- Result Counter -->
                 <TextBlock Grid.Column="6"
@@ -376,103 +408,144 @@
 
             <!-- PDF Viewer -->
             <Border Grid.Column="1"
-                    Background="{DynamicResource TertiaryBackgroundBrush}"
-                    Classes.redactionMode="{Binding IsRedactionMode}">
-                <Border.Styles>
-                    <Style Selector="Border.redactionMode">
-                        <Setter Property="BorderBrush" Value="#E53935"/>
-                        <Setter Property="BorderThickness" Value="3"/>
-                    </Style>
-                </Border.Styles>
+                    Background="#E8E8E8">
+                <Grid>
+                    <!-- Empty State (shown when no document is loaded) -->
+                    <Grid IsVisible="{Binding !IsDocumentLoaded}"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center">
+                        <StackPanel Spacing="16" HorizontalAlignment="Center">
+                            <TextBlock Text="📄"
+                                       FontSize="64"
+                                       HorizontalAlignment="Center"
+                                       Opacity="0.3"/>
+                            <TextBlock Text="No document open"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBlock Text="Open a PDF file to get started"
+                                       FontSize="13"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            <Button Content="📁 Open File"
+                                    Command="{Binding OpenFileCommand}"
+                                    HorizontalAlignment="Center"
+                                    Padding="20,10"
+                                    FontSize="14"
+                                    Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Document Viewer (shown when document is loaded) -->
                 <ScrollViewer x:Name="PdfScrollViewer"
+                              IsVisible="{Binding IsDocumentLoaded}"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               SizeChanged="PdfScrollViewer_SizeChanged">
                     <!-- Container that sizes to the image content, preventing centering offset issues -->
-                    <Grid HorizontalAlignment="Left" VerticalAlignment="Top">
-                        <!-- PDF Page Image -->
-                        <Image x:Name="PdfImage"
-                               Source="{Binding CurrentPageImage}"
-                               Stretch="None"
-                               RenderOptions.BitmapInterpolationMode="HighQuality">
-                            <Image.RenderTransform>
-                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                            </Image.RenderTransform>
-                        </Image>
+                    <Grid HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20">
+                        <!-- Document Border with Shadow Effect -->
+                        <Border Background="White"
+                                BorderBrush="#AAAAAA"
+                                BorderThickness="1"
+                                CornerRadius="2"
+                                BoxShadow="0 4 12 0 #40000000"
+                                Padding="0"
+                                Classes.redactionModeHighlight="{Binding IsRedactionMode}">
+                            <Border.Styles>
+                                <Style Selector="Border.redactionModeHighlight">
+                                    <Setter Property="BorderBrush" Value="#E53935"/>
+                                    <Setter Property="BorderThickness" Value="2"/>
+                                </Style>
+                            </Border.Styles>
+                            <Grid>
+                                <!-- PDF Page Image -->
+                                <Image x:Name="PdfImage"
+                                       Source="{Binding CurrentPageImage}"
+                                       Stretch="None"
+                                       RenderOptions.BitmapInterpolationMode="HighQuality">
+                                    <Image.RenderTransform>
+                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                                    </Image.RenderTransform>
+                                </Image>
 
-                        <!-- Search Highlights Overlay -->
-                        <Canvas x:Name="SearchHighlightsCanvas"
-                                IsHitTestVisible="False">
-                            <Canvas.RenderTransform>
-                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                            </Canvas.RenderTransform>
-                        </Canvas>
+                                <!-- Search Highlights Overlay -->
+                                <Canvas x:Name="SearchHighlightsCanvas"
+                                        IsHitTestVisible="False">
+                                    <Canvas.RenderTransform>
+                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                                    </Canvas.RenderTransform>
+                                </Canvas>
 
-                        <!-- Applied Redactions Overlay - Shows redactions that have been saved to PDF -->
-                        <Canvas x:Name="AppliedRedactionsCanvas"
-                                IsHitTestVisible="False">
-                            <Canvas.RenderTransform>
-                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                            </Canvas.RenderTransform>
-                        </Canvas>
+                                <!-- Applied Redactions Overlay - Shows redactions that have been saved to PDF -->
+                                <Canvas x:Name="AppliedRedactionsCanvas"
+                                        IsHitTestVisible="False">
+                                    <Canvas.RenderTransform>
+                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                                    </Canvas.RenderTransform>
+                                </Canvas>
 
-                        <!-- Pending Redactions Overlay - Shows all marked redactions -->
-                        <Canvas x:Name="PendingRedactionsCanvas"
-                                IsHitTestVisible="False">
-                            <Canvas.RenderTransform>
-                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                            </Canvas.RenderTransform>
-                        </Canvas>
+                                <!-- Pending Redactions Overlay - Shows all marked redactions -->
+                                <Canvas x:Name="PendingRedactionsCanvas"
+                                        IsHitTestVisible="False">
+                                    <Canvas.RenderTransform>
+                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                                    </Canvas.RenderTransform>
+                                </Canvas>
 
-                        <!-- Redaction Selection Overlay (shown when in redaction mode)
-                             COORDINATE SYSTEM: Canvas coordinates are in rendered image pixels (150 DPI).
-                             The ScaleTransform ensures the selection rectangle visually aligns with the
-                             zoomed image. Mouse events via GetPosition() return coordinates that are
-                             automatically inverse-transformed, giving us image-space coordinates. -->
-                        <Canvas IsVisible="{Binding IsRedactionMode}"
-                                Background="Transparent"
-                                Cursor="Cross"
-                                PointerPressed="Canvas_PointerPressed"
-                                PointerMoved="Canvas_PointerMoved"
-                                PointerReleased="Canvas_PointerReleased">
-                            <Canvas.RenderTransform>
-                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                            </Canvas.RenderTransform>
-                            <!-- Selection Rectangle - semi-transparent black with red dashed border -->
-                            <Rectangle x:Name="SelectionRectangle"
-                                       Fill="#40000000"
-                                       Stroke="Red"
-                                       StrokeThickness="2"
-                                       StrokeDashArray="5,5"
-                                       Canvas.Left="{Binding CurrentRedactionArea.X}"
-                                       Canvas.Top="{Binding CurrentRedactionArea.Y}"
-                                       Width="{Binding CurrentRedactionArea.Width}"
-                                       Height="{Binding CurrentRedactionArea.Height}"/>
-                        </Canvas>
+                                <!-- Redaction Selection Overlay (shown when in redaction mode)
+                                     COORDINATE SYSTEM: Canvas coordinates are in rendered image pixels (150 DPI).
+                                     The ScaleTransform ensures the selection rectangle visually aligns with the
+                                     zoomed image. Mouse events via GetPosition() return coordinates that are
+                                     automatically inverse-transformed, giving us image-space coordinates. -->
+                                <Canvas IsVisible="{Binding IsRedactionMode}"
+                                        Background="Transparent"
+                                        Cursor="Cross"
+                                        PointerPressed="Canvas_PointerPressed"
+                                        PointerMoved="Canvas_PointerMoved"
+                                        PointerReleased="Canvas_PointerReleased">
+                                    <Canvas.RenderTransform>
+                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                                    </Canvas.RenderTransform>
+                                    <!-- Selection Rectangle - semi-transparent black with red dashed border -->
+                                    <Rectangle x:Name="SelectionRectangle"
+                                               Fill="#40000000"
+                                               Stroke="Red"
+                                               StrokeThickness="2"
+                                               StrokeDashArray="5,5"
+                                               Canvas.Left="{Binding CurrentRedactionArea.X}"
+                                               Canvas.Top="{Binding CurrentRedactionArea.Y}"
+                                               Width="{Binding CurrentRedactionArea.Width}"
+                                               Height="{Binding CurrentRedactionArea.Height}"/>
+                                </Canvas>
 
-                        <!-- Text Selection Overlay (shown when in text selection mode)
-                             COORDINATE SYSTEM: Same as Redaction Canvas - image pixels with zoom transform. -->
-                        <Canvas IsVisible="{Binding IsTextSelectionMode}"
-                                Background="Transparent"
-                                PointerPressed="TextCanvas_PointerPressed"
-                                PointerMoved="TextCanvas_PointerMoved"
-                                PointerReleased="TextCanvas_PointerReleased">
-                            <Canvas.RenderTransform>
-                                <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                            </Canvas.RenderTransform>
-                            <!-- Selection Rectangle - semi-transparent green with green dashed border -->
-                            <Rectangle x:Name="TextSelectionRectangle"
-                                       Fill="#404CAF50"
-                                       Stroke="#4CAF50"
-                                       StrokeThickness="2"
-                                       StrokeDashArray="5,5"
-                                       Canvas.Left="{Binding CurrentTextSelectionArea.X}"
-                                       Canvas.Top="{Binding CurrentTextSelectionArea.Y}"
-                                       Width="{Binding CurrentTextSelectionArea.Width}"
-                                       Height="{Binding CurrentTextSelectionArea.Height}"/>
-                        </Canvas>
+                                <!-- Text Selection Overlay (shown when in text selection mode)
+                                     COORDINATE SYSTEM: Same as Redaction Canvas - image pixels with zoom transform. -->
+                                <Canvas IsVisible="{Binding IsTextSelectionMode}"
+                                        Background="Transparent"
+                                        PointerPressed="TextCanvas_PointerPressed"
+                                        PointerMoved="TextCanvas_PointerMoved"
+                                        PointerReleased="TextCanvas_PointerReleased">
+                                    <Canvas.RenderTransform>
+                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                                    </Canvas.RenderTransform>
+                                    <!-- Selection Rectangle - semi-transparent green with green dashed border -->
+                                    <Rectangle x:Name="TextSelectionRectangle"
+                                               Fill="#404CAF50"
+                                               Stroke="#4CAF50"
+                                               StrokeThickness="2"
+                                               StrokeDashArray="5,5"
+                                               Canvas.Left="{Binding CurrentTextSelectionArea.X}"
+                                               Canvas.Top="{Binding CurrentTextSelectionArea.Y}"
+                                               Width="{Binding CurrentTextSelectionArea.Width}"
+                                               Height="{Binding CurrentTextSelectionArea.Height}"/>
+                                </Canvas>
+                            </Grid>
+                        </Border>
                     </Grid>
                 </ScrollViewer>
+                </Grid>
             </Border>
 
             <!-- Clipboard History Sidebar -->
@@ -575,10 +648,11 @@
                                     BorderBrush="{DynamicResource BorderBrush}"
                                     BorderThickness="1"/>
 
-                            <!-- Apply All Button -->
+                            <!-- Apply All Button (issue #19) -->
                             <Button Grid.Column="2"
                                     Content="Apply All"
                                     Command="{Binding ApplyAllRedactionsCommand}"
+                                    IsEnabled="{Binding RedactionWorkflow.HasPendingRedactions}"
                                     HorizontalAlignment="Stretch"
                                     Classes="primary"
                                     Padding="12,8"
@@ -673,15 +747,36 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <!-- Mode Indicator -->
                 <Border Grid.Column="0"
-                        Background="{DynamicResource CardBrush}"
                         CornerRadius="4"
                         Padding="8,4"
-                        Margin="0,0,12,0">
+                        Margin="0,0,12,0"
+                        Classes.redactionActive="{Binding IsRedactionMode}">
+                    <Border.Styles>
+                        <!-- Normal mode style -->
+                        <Style Selector="Border">
+                            <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
+                        </Style>
+                        <!-- Redaction mode active style -->
+                        <Style Selector="Border.redactionActive">
+                            <Setter Property="Background" Value="#E53935"/>
+                        </Style>
+                    </Border.Styles>
                     <TextBlock Text="{Binding CurrentModeText}"
                                VerticalAlignment="Center"
                                FontSize="11"
                                FontWeight="Medium"
-                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                               Classes.redactionActive="{Binding IsRedactionMode}">
+                        <TextBlock.Styles>
+                            <!-- Normal mode text color -->
+                            <Style Selector="TextBlock">
+                                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                            </Style>
+                            <!-- Redaction mode text color (white for contrast) -->
+                            <Style Selector="TextBlock.redactionActive">
+                                <Setter Property="Foreground" Value="White"/>
+                            </Style>
+                        </TextBlock.Styles>
+                    </TextBlock>
                 </Border>
 
                 <!-- Status Text / Operation Status -->
@@ -706,17 +801,22 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Content="◀" Command="{Binding PreviousPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
-                            ToolTip.Tip="Previous Page"/>
+                            ToolTip.Tip="Previous Page"
+                            AutomationProperties.Name="Previous Page"
+                            AutomationProperties.HelpText="Navigate to the previous page"/>
                     <TextBlock Text="{Binding DisplayPageNumber, StringFormat='Page {0}'}"
                                VerticalAlignment="Center"
                                FontSize="12"
                                FontWeight="Medium"
                                Foreground="{DynamicResource TextPrimaryBrush}"
                                MinWidth="80"
-                               TextAlignment="Center"/>
+                               TextAlignment="Center"
+                               AutomationProperties.Name="Current Page Number"/>
                     <Button Content="▶" Command="{Binding NextPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
-                            ToolTip.Tip="Next Page"/>
+                            ToolTip.Tip="Next Page"
+                            AutomationProperties.Name="Next Page"
+                            AutomationProperties.HelpText="Navigate to the next page"/>
                 </StackPanel>
             </Grid>
         </Border>

@@ -247,33 +247,55 @@ public class PdfSearchService
     }
 
     /// <summary>
-    /// Find words at a specific text position
+    /// Find words at a specific text position.
+    ///
+    /// FIX for issue #96: The previous implementation used IndexOf to find word positions,
+    /// which was unreliable when the same word appeared multiple times on a page.
+    ///
+    /// New approach: Build a character index map by iterating through words in order,
+    /// tracking cumulative text positions. This ensures correct bounding box mapping
+    /// even when duplicate words exist.
     /// </summary>
     private List<Word> FindWordsAtPosition(List<Word> words, string pageText, int startIndex, int length)
     {
         var matchedWords = new List<Word>();
-        int currentPos = 0;
+
+        // Build character index map from words
+        // This maps character index in pageText to the corresponding Word
+        var wordAtIndex = new Dictionary<int, Word>();
+        int charIndex = 0;
 
         foreach (var word in words)
         {
-            int wordStart = pageText.IndexOf(word.Text, currentPos, StringComparison.Ordinal);
+            // Find next occurrence of this word's text starting from current position
+            // This handles duplicates correctly by advancing position after each match
+            int wordPos = pageText.IndexOf(word.Text, charIndex, StringComparison.Ordinal);
 
-            if (wordStart == -1)
-                continue;
-
-            int wordEnd = wordStart + word.Text.Length;
-
-            // Check if this word overlaps with the match
-            if (wordStart < startIndex + length && wordEnd > startIndex)
+            if (wordPos != -1)
             {
-                matchedWords.Add(word);
+                // Map each character index to this word
+                for (int i = 0; i < word.Text.Length; i++)
+                {
+                    wordAtIndex[wordPos + i] = word;
+                }
+
+                // Advance past this word (+ any whitespace/separator)
+                charIndex = wordPos + word.Text.Length;
             }
+        }
 
-            currentPos = wordEnd;
+        // Now find all words that overlap with the search range [startIndex, startIndex+length)
+        var matchEndIndex = startIndex + length;
 
-            // Stop if we've passed the match
-            if (wordStart > startIndex + length)
-                break;
+        for (int i = startIndex; i < matchEndIndex && i < pageText.Length; i++)
+        {
+            if (wordAtIndex.TryGetValue(i, out var word))
+            {
+                if (!matchedWords.Contains(word))
+                {
+                    matchedWords.Add(word);
+                }
+            }
         }
 
         return matchedWords;

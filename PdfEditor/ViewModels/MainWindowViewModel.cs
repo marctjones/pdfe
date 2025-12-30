@@ -41,6 +41,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private Bitmap? _currentPageImage;
     private int _currentPageIndex;
     private double _zoomLevel = 1.0;
+    private bool _skipZoomSave; // Flag to skip zoom save during auto-reset
     private bool _isRedactionMode;
     private Rect _currentRedactionArea;
     private bool _isTextSelectionMode;
@@ -131,6 +132,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ExitCommand = ReactiveCommand.Create(Exit);
         LoadRecentFileCommand = ReactiveCommand.CreateFromTask<string>(LoadRecentFileAsync);
 
+        ExportCurrentPageCommand = ReactiveCommand.CreateFromTask(ExportCurrentPageAsync);
         ExportPagesCommand = ReactiveCommand.CreateFromTask(ExportPagesAsync);
         PrintCommand = ReactiveCommand.CreateFromTask(PrintAsync);
 
@@ -154,6 +156,7 @@ public partial class MainWindowViewModel : ViewModelBase
         InitializeScriptingCommands();
 
         LoadRecentFiles();
+        LoadZoomPreference(); // Issue #32: Persist zoom level
 
         _logger.LogDebug("MainWindowViewModel initialization complete (test mode)");
     }
@@ -233,6 +236,7 @@ public partial class MainWindowViewModel : ViewModelBase
         LoadRecentFileCommand = ReactiveCommand.CreateFromTask<string>(LoadRecentFileAsync);
 
         // Tools menu commands
+        ExportCurrentPageCommand = ReactiveCommand.CreateFromTask(ExportCurrentPageAsync);
         ExportPagesCommand = ReactiveCommand.CreateFromTask(ExportPagesAsync);
         PrintCommand = ReactiveCommand.CreateFromTask(PrintAsync);
 
@@ -260,8 +264,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // Initialize scripting commands (for Roslyn automation)
         InitializeScriptingCommands();
 
-        // Load recent files
+        // Load recent files and preferences
         LoadRecentFiles();
+        LoadZoomPreference(); // Issue #32: Persist zoom level
 
         _logger.LogDebug("MainWindowViewModel initialization complete");
     }
@@ -318,7 +323,16 @@ public partial class MainWindowViewModel : ViewModelBase
     public double ZoomLevel
     {
         get => _zoomLevel;
-        set => this.RaiseAndSetIfChanged(ref _zoomLevel, value);
+        set
+        {
+            var oldValue = _zoomLevel;
+            this.RaiseAndSetIfChanged(ref _zoomLevel, value);
+            // Issue #32: Save zoom preference on user change (skip during auto-reset)
+            if (!_skipZoomSave && Math.Abs(oldValue - value) > 0.001)
+            {
+                SaveZoomPreference();
+            }
+        }
     }
 
     public string DocumentName => string.IsNullOrEmpty(_currentFilePath)
@@ -527,6 +541,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<string, Unit> LoadRecentFileCommand { get; } = null!;
 
     // Tools Menu Commands
+    public ReactiveCommand<Unit, Unit> ExportCurrentPageCommand { get; }
     public ReactiveCommand<Unit, Unit> ExportPagesCommand { get; }
     public ReactiveCommand<Unit, Unit> PrintCommand { get; }
     public ReactiveCommand<Unit, Unit> RunOcrCommand { get; }
@@ -589,42 +604,56 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            _logger.LogInformation(">>> STEP 2: Setting _currentFilePath and FileState");
+            _logger.LogInformation(">>> STEP 2: Clearing previous document state");
+            // Clear ALL state from previous document before loading new one
+            CurrentRedactionArea = new Rect();
+            CurrentTextSelectionArea = new Rect();
+            RedactionWorkflow.Reset();
+            ClipboardHistory.Clear();
+            PageThumbnails.Clear();
+            _renderService.ClearCache();
+
+            // Exit redaction mode if active
+            if (IsRedactionMode)
+            {
+                IsRedactionMode = false;
+            }
+
+            _logger.LogInformation(">>> STEP 3: Setting _currentFilePath and FileState");
             _currentFilePath = filePath;
             FileState.SetDocument(filePath);
-            RedactionWorkflow.Reset(); // Clear any pending redactions from previous document
 
-            _logger.LogInformation(">>> STEP 3: RaisePropertyChanged(DocumentName)");
+            _logger.LogInformation(">>> STEP 4: RaisePropertyChanged(DocumentName)");
             this.RaisePropertyChanged(nameof(DocumentName));
             this.RaisePropertyChanged(nameof(StatusBarText));
 
-            _logger.LogInformation(">>> STEP 4: Calling _documentService.LoadDocument");
+            _logger.LogInformation(">>> STEP 5: Calling _documentService.LoadDocument");
             _documentService.LoadDocument(filePath);
 
-            _logger.LogInformation(">>> STEP 5: Setting CurrentPageIndex = 0");
+            _logger.LogInformation(">>> STEP 6: Setting CurrentPageIndex = 0");
             CurrentPageIndex = 0;
 
-            _logger.LogInformation(">>> STEP 6: Loading page thumbnails");
+            _logger.LogInformation(">>> STEP 7: Loading page thumbnails");
             await LoadPageThumbnailsAsync();
-            _logger.LogInformation(">>> STEP 6: Page thumbnails loaded successfully");
+            _logger.LogInformation(">>> STEP 7: Page thumbnails loaded successfully");
 
-            _logger.LogInformation(">>> STEP 7: Rendering current page");
+            _logger.LogInformation(">>> STEP 8: Rendering current page");
             await RenderCurrentPageAsync();
-            _logger.LogInformation(">>> STEP 7: Current page rendered successfully");
+            _logger.LogInformation(">>> STEP 8: Current page rendered successfully");
 
-            _logger.LogInformation(">>> STEP 8: RaisePropertyChanged(TotalPages)");
+            _logger.LogInformation(">>> STEP 9: RaisePropertyChanged(TotalPages)");
             this.RaisePropertyChanged(nameof(TotalPages));
 
-            _logger.LogInformation(">>> STEP 9: RaisePropertyChanged(StatusText)");
+            _logger.LogInformation(">>> STEP 10: RaisePropertyChanged(StatusText)");
             this.RaisePropertyChanged(nameof(StatusText));
 
-            _logger.LogInformation(">>> STEP 10: RaisePropertyChanged(IsDocumentLoaded)");
+            _logger.LogInformation(">>> STEP 11: RaisePropertyChanged(IsDocumentLoaded)");
             this.RaisePropertyChanged(nameof(IsDocumentLoaded));
 
-            _logger.LogInformation(">>> STEP 11: Adding to recent files");
+            _logger.LogInformation(">>> STEP 12: Adding to recent files");
             AddToRecentFiles(filePath);
 
-            _logger.LogInformation(">>> STEP 12: LoadDocumentAsync COMPLETE. Total pages: {PageCount}", TotalPages);
+            _logger.LogInformation(">>> STEP 13: LoadDocumentAsync COMPLETE. Total pages: {PageCount}", TotalPages);
         }
         catch (Exception ex)
         {
@@ -1024,7 +1053,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 var page = document.Pages[pageIndex];
 
                 // pending.Area is in 150 DPI image pixels (screen coordinates)
-                _redactionService.RedactArea(page, pending.Area, renderDpi: 150);
+                _redactionService.RedactArea(page, pending.Area, _currentFilePath, renderDpi: 150);
             }
 
             // Save the redacted document
@@ -1109,7 +1138,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             var page = document.Pages[CurrentPageIndex];
             // UI selections are in rendered image pixels at the render DPI (150)
-            _redactionService.RedactArea(page, areaToRedact, CoordinateConverter.DefaultRenderDpi);
+            _redactionService.RedactArea(page, areaToRedact, _currentFilePath, CoordinateConverter.DefaultRenderDpi);
 
             // Add redacted text to clipboard history (so user can see what was removed)
             if (!string.IsNullOrWhiteSpace(redactedText))
@@ -1767,16 +1796,49 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
+            // Close the PDF document
             _documentService.CloseDocument();
+
+            // Clear file path
             _currentFilePath = string.Empty;
+
+            // Clear visual state
             CurrentPageImage = null;
             PageThumbnails.Clear();
             _renderService.ClearCache();
+
+            // Clear redaction state (FIX: These were persisting!)
+            CurrentRedactionArea = new Rect();
+            CurrentTextSelectionArea = new Rect();
+            RedactionWorkflow.Reset();
+            ClipboardHistory.Clear();
+
+            // Exit redaction mode if active
+            if (IsRedactionMode)
+            {
+                IsRedactionMode = false;
+            }
+
+            // Reset navigation state
+            CurrentPageIndex = 0;
+
+            // Reset zoom to default (skip saving - user's preference should persist)
+            _skipZoomSave = true;
+            ZoomLevel = 1.0;
+            _skipZoomSave = false;
+
+            // Notify UI of all state changes
             this.RaisePropertyChanged(nameof(DocumentName));
             this.RaisePropertyChanged(nameof(TotalPages));
             this.RaisePropertyChanged(nameof(StatusText));
+            this.RaisePropertyChanged(nameof(StatusBarText));
             this.RaisePropertyChanged(nameof(IsDocumentLoaded));
-            _logger.LogInformation("Document closed successfully");
+            this.RaisePropertyChanged(nameof(CurrentRedactionArea));
+            this.RaisePropertyChanged(nameof(CurrentTextSelectionArea));
+            this.RaisePropertyChanged(nameof(IsRedactionMode));
+            this.RaisePropertyChanged(nameof(SaveButtonText));
+
+            _logger.LogInformation("Document closed successfully - all state cleared");
         }
         catch (Exception ex)
         {
@@ -1808,7 +1870,8 @@ public partial class MainWindowViewModel : ViewModelBase
         if (!System.IO.File.Exists(filePath))
         {
             _logger.LogWarning("Recent file not found: {FilePath}", filePath);
-            // See issue #25: Show message dialog and remove from recent files list
+            // Issue #25: Remove deleted file from recent files list
+            RemoveFromRecentFiles(filePath);
             return;
         }
 
@@ -1816,6 +1879,91 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     // Tools Menu Commands
+
+    private async Task ExportCurrentPageAsync()
+    {
+        _logger.LogInformation("Export current page command triggered (page {PageNumber})", CurrentPageIndex + 1);
+
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogWarning("Cannot export: No document loaded");
+            return;
+        }
+
+        var storageProvider = GetStorageProvider();
+        if (storageProvider == null)
+        {
+            _logger.LogWarning("Storage provider unavailable, cannot show Save dialog");
+            return;
+        }
+
+        var suggestedFileName = System.IO.Path.GetFileNameWithoutExtension(_currentFilePath) +
+                                $"_page{CurrentPageIndex + 1}.png";
+
+        var file = await storageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export Current Page",
+            SuggestedFileName = suggestedFileName,
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("PNG Image") { Patterns = new[] { "*.png" } },
+                new FilePickerFileType("JPEG Image") { Patterns = new[] { "*.jpg", "*.jpeg" } }
+            },
+            DefaultExtension = "png"
+        });
+
+        if (file == null)
+        {
+            _logger.LogInformation("Export dialog cancelled");
+            return;
+        }
+
+        var filePath = file.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _logger.LogWarning("Export target file has no local path");
+            return;
+        }
+
+        await ExportCurrentPageToImageAsync(filePath);
+    }
+
+    public async Task ExportCurrentPageToImageAsync(string outputPath, int dpi = 150)
+    {
+        _logger.LogInformation("Exporting current page {PageNumber} to: {Path}, DPI: {DPI}",
+            CurrentPageIndex + 1, outputPath, dpi);
+
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
+        {
+            _logger.LogError("Cannot export: No document loaded");
+            return;
+        }
+
+        try
+        {
+            var bitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex, dpi);
+            if (bitmap != null)
+            {
+                var extension = System.IO.Path.GetExtension(outputPath).ToLowerInvariant();
+                SKEncodedImageFormat imageFormat = extension switch
+                {
+                    ".jpg" or ".jpeg" => SKEncodedImageFormat.Jpeg,
+                    _ => SKEncodedImageFormat.Png
+                };
+
+                using var image = SKImage.FromBitmap(bitmap);
+                using var encodedData = image.Encode(imageFormat, 90);
+                using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
+                encodedData.SaveTo(fileStream);
+
+                _logger.LogInformation("Page {PageNumber} exported to: {FilePath}", CurrentPageIndex + 1, outputPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error exporting current page");
+        }
+    }
 
     private async Task ExportPagesAsync()
     {
@@ -2151,6 +2299,79 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error saving recent files");
+        }
+    }
+
+    /// <summary>
+    /// Removes a file from the recent files list (Issue #25: handles deleted files).
+    /// </summary>
+    private void RemoveFromRecentFiles(string filePath)
+    {
+        try
+        {
+            if (RecentFiles.Contains(filePath))
+            {
+                RecentFiles.Remove(filePath);
+                this.RaisePropertyChanged(nameof(HasRecentFiles));
+                SaveRecentFiles();
+                _logger.LogInformation("Removed deleted file from recent files: {FilePath}", filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error removing from recent files");
+        }
+    }
+
+    // Zoom Level Persistence (Issue #32)
+
+    private void LoadZoomPreference()
+    {
+        try
+        {
+            var zoomFilePath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "PdfEditor",
+                "zoom.txt");
+
+            if (System.IO.File.Exists(zoomFilePath))
+            {
+                var zoomStr = System.IO.File.ReadAllText(zoomFilePath).Trim();
+                if (double.TryParse(zoomStr, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var savedZoom))
+                {
+                    // Validate range (25% to 500%)
+                    if (savedZoom >= 0.25 && savedZoom <= 5.0)
+                    {
+                        _zoomLevel = savedZoom;
+                        _logger.LogInformation("Loaded zoom preference: {Zoom:P0}", savedZoom);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error loading zoom preference");
+        }
+    }
+
+    private void SaveZoomPreference()
+    {
+        try
+        {
+            var appDataPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "PdfEditor");
+
+            System.IO.Directory.CreateDirectory(appDataPath);
+
+            var zoomFilePath = System.IO.Path.Combine(appDataPath, "zoom.txt");
+            System.IO.File.WriteAllText(zoomFilePath,
+                ZoomLevel.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error saving zoom preference");
         }
     }
 

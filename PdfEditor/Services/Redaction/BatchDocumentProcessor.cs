@@ -207,7 +207,7 @@ public class BatchDocumentProcessor
                 _loggerFactory.CreateLogger<BatchRedactService>(),
                 _loggerFactory);
 
-            var redactionResult = batchRedactService.RedactMatches(document, allMatches, rules.Options);
+            var redactionResult = batchRedactService.RedactMatches(document, filePath, allMatches, rules.Options);
 
             // Save the document
             document.Save(result.OutputPath);

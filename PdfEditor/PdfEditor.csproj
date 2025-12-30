@@ -54,4 +54,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\PdfEditor.Redaction\PdfEditor.Redaction.csproj" />
+  </ItemGroup>
+
 </Project>

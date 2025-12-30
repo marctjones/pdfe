@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Media;
+using PdfEditor.Models;
 using PdfEditor.ViewModels;
 using System;
 using System.Collections.Specialized;
@@ -20,10 +21,22 @@ public partial class MainWindow : Window
     private Canvas? _searchHighlightsCanvas;
     private Canvas? _pendingRedactionsCanvas;
     private Canvas? _appliedRedactionsCanvas;
+    private readonly WindowSettings _windowSettings;
 
     public MainWindow()
     {
         InitializeComponent();
+
+        // Load and apply window settings (Issue #23)
+        _windowSettings = WindowSettings.Load();
+        _windowSettings.ApplyTo(this);
+
+        // Save settings on close
+        this.Closing += (s, e) =>
+        {
+            _windowSettings.CaptureFrom(this);
+            _windowSettings.Save();
+        };
 
         // Add keyboard handler for Ctrl+C
         this.KeyDown += MainWindow_KeyDown;
@@ -486,15 +499,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Add menu items for each recent file
+        // Add menu items for each recent file (Issue #22: show basename, tooltip shows full path)
         foreach (var filePath in viewModel.RecentFiles)
         {
             var item = new MenuItem
             {
-                Header = filePath,
+                Header = System.IO.Path.GetFileName(filePath),
                 Command = viewModel.LoadRecentFileCommand,
                 CommandParameter = filePath
             };
+            Avalonia.Controls.ToolTip.SetTip(item, filePath);
             menuItem.Items.Add(item);
         }
     }
