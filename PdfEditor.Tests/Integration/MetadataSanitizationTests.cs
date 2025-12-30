@@ -366,7 +366,7 @@ public class MetadataSanitizationTests : IDisposable
         var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
         _redactionService.ClearRedactedTerms();
-        _redactionService.RedactArea(pg, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 90, 150, 30), pdfPath, renderDpi: 72);
 
         // Assert
         _output.WriteLine($"Redacted terms count: {_redactionService.RedactedTerms.Count}");

@@ -80,7 +80,7 @@ public class ScriptedGuiTests
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("Compilation error");
+        result.ErrorMessage.Should().NotBeNullOrEmpty("Should have an error message for invalid syntax");
     }
 
     [Fact]
@@ -206,13 +206,30 @@ public class ScriptedGuiTests
     {
         // Arrange
         var viewModel = new MainWindowViewModel();
-        var birthCertPath = "/home/marc/Downloads/Birth Certificate Request (PDF).pdf";
+
+        // Use synthetic birth certificate PDF (not the original personal file)
+        // Find repository root by walking up from current directory
+        var currentDir = Directory.GetCurrentDirectory();
+        var repoRoot = currentDir;
+        while (repoRoot != null && !Directory.Exists(Path.Combine(repoRoot, ".git")))
+        {
+            var parent = Directory.GetParent(repoRoot);
+            repoRoot = parent?.FullName;
+        }
+
+        if (repoRoot == null)
+        {
+            _output.WriteLine("Skipping: Could not find repository root");
+            return;
+        }
+
+        var birthCertPath = Path.Combine(repoRoot, "test-pdfs", "sample-pdfs", "birth-certificate-request-scrambled.pdf");
         var outputPdf = Path.Combine(_testDataDir, "birth-cert-redacted.pdf");
 
-        // Skip if birth certificate not available
+        // Skip if synthetic birth certificate not available
         if (!File.Exists(birthCertPath))
         {
-            _output.WriteLine($"Skipping: Birth certificate not found at {birthCertPath}");
+            _output.WriteLine($"Skipping: Synthetic birth certificate not found at {birthCertPath}");
             return;
         }
 

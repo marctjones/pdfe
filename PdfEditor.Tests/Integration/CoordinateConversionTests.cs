@@ -228,7 +228,7 @@ public class CoordinateConversionTests : IDisposable
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        _redactionService.RedactArea(page, uiSelectionArea, renderDpi);
+        _redactionService.RedactArea(page, uiSelectionArea, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath("coord_default_dpi_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -296,7 +296,7 @@ public class CoordinateConversionTests : IDisposable
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        _redactionService.RedactArea(page, uiSelectionArea, renderDpi);
+        _redactionService.RedactArea(page, uiSelectionArea, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath($"coord_dpi{renderDpi}_zoom{zoomLevel}_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -352,7 +352,7 @@ public class CoordinateConversionTests : IDisposable
         // Act
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, uiSelectionArea, renderDpi);
+        _redactionService.RedactArea(page, uiSelectionArea, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath("coord_tight_bounds_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -421,7 +421,7 @@ public class CoordinateConversionTests : IDisposable
         // Act
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, uiSelectionArea, renderDpi);
+        _redactionService.RedactArea(page, uiSelectionArea, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath("coord_adjacent_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -504,7 +504,7 @@ public class CoordinateConversionTests : IDisposable
         // Act
         var doc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var pg = doc.Pages[0];
-        _redactionService.RedactArea(pg, uiSelectionArea, renderDpi);
+        _redactionService.RedactArea(pg, uiSelectionArea, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath("coord_edges_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -577,7 +577,7 @@ public class CoordinateConversionTests : IDisposable
         // Act
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, uiSelectionArea, renderDpi);
+        _redactionService.RedactArea(page, uiSelectionArea, pdfPath, renderDpi: renderDpi);
 
         var redactedPath = CreateTempPath($"coord_dpi_precision_{renderDpi}_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -666,7 +666,7 @@ public class CoordinateConversionTests : IDisposable
             // Act
             var document = PdfReader.Open(testPdfPath, PdfDocumentOpenMode.Modify);
             var page = document.Pages[0];
-            _redactionService.RedactArea(page, uiSelectionArea, dpi);
+            _redactionService.RedactArea(page, uiSelectionArea, testPdfPath, renderDpi: dpi);
 
             var redactedPath = CreateTempPath($"coord_pipeline_{name}_redacted.pdf");
             _tempFiles.Add(redactedPath);

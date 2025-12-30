@@ -18,9 +18,9 @@ public class RenderIntegrationTest
     public RenderIntegrationTest(ITestOutputHelper output)
     {
         _output = output;
-        
+
         // Ensure Avalonia is initialized for PDFtoImage/SkiaSharp which might need it
-        PdfEditor.Tests.UI.TestAppBuilder.BuildAvaloniaApp().SetupWithoutStarting();
+        PdfEditor.Tests.UI.TestAppBuilder.EnsureInitialized();
     }
 
     [AvaloniaFact(Timeout = 15000)] // Use AvaloniaFact and add a timeout

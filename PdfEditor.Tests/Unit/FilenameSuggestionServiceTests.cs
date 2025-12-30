@@ -70,7 +70,7 @@ public class FilenameSuggestionServiceTests
         Action act = () => _service.SuggestRedactedFilename("");
         act.Should().Throw<ArgumentException>();
 
-        Action actNull = () => _service.SuggestRedactedFilename(null);
+        Action actNull = () => _service.SuggestRedactedFilename(null!);
         actNull.Should().Throw<ArgumentException>();
     }
 
@@ -107,7 +107,7 @@ public class FilenameSuggestionServiceTests
         Action act = () => _service.SuggestPageSubsetFilename("/test.pdf", "");
         act.Should().Throw<ArgumentException>();
 
-        Action actNull = () => _service.SuggestPageSubsetFilename("/test.pdf", null);
+        Action actNull = () => _service.SuggestPageSubsetFilename("/test.pdf", null!);
         actNull.Should().Throw<ArgumentException>();
     }
 

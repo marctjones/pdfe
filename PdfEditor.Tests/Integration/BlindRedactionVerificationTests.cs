@@ -97,7 +97,7 @@ public class BlindRedactionVerificationTests : IDisposable
         {
             var redactionArea = GetCellBounds(cell.Row, cell.Col);
             _output.WriteLine($"Applying redaction at: ({redactionArea.X:F0}, {redactionArea.Y:F0}, {redactionArea.Width:F0}x{redactionArea.Height:F0})");
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
         }
 
         // Step 4: Save and close - FORGET what we redacted
@@ -182,7 +182,7 @@ public class BlindRedactionVerificationTests : IDisposable
         // Apply redaction
         var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), pdfPath, renderDpi: 72);
 
         var redactedPath = CreateTempPath("single_redact_output.pdf");
         _tempFiles.Add(redactedPath);
@@ -242,7 +242,7 @@ public class BlindRedactionVerificationTests : IDisposable
         var page = document.Pages[0];
 
         var redactionArea = GetCellBounds(0, 0); // Only redact top-left cell
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
 
         var redactedPath = CreateTempPath("preserve_test_output.pdf");
         _tempFiles.Add(redactedPath);
@@ -295,7 +295,7 @@ public class BlindRedactionVerificationTests : IDisposable
             for (int col = 0; col < 2; col++)
             {
                 var area = GetCellBounds(row, col);
-                _redactionService.RedactArea(page, area, renderDpi: 72);
+                _redactionService.RedactArea(page, area, pdfPath, renderDpi: 72);
             }
         }
 

@@ -75,7 +75,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("forensic_binary_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -123,7 +123,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("forensic_streams_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -159,7 +159,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 350, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 350, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("forensic_multi_extract_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -209,7 +209,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("forensic_partial_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -265,11 +265,13 @@ public class ForensicRedactionVerificationTests : IDisposable
         var pg = doc.Pages[0];
 
         // XGraphics uses top-left origin - text at Y=100 needs redaction at Y=90
-        // Redact "KONSTANTIN_KILIMNIK"
-        _redactionService.RedactArea(pg, new Rect(300, 90, 200, 20), renderDpi: 72);
+        // Redact "KONSTANTIN_KILIMNIK" (at end of first line, approximately X=280-450)
+        _redactionService.RedactArea(pg, new Rect(280, 90, 220, 20), testPdf, renderDpi: 72);
 
         // Redact "$75_MILLION" - text at Y=120 needs redaction at Y=110
-        _redactionService.RedactArea(pg, new Rect(400, 110, 100, 20), renderDpi: 72);
+        // Text starts at X=72 and "$75_MILLION" is the last ~11 chars of a 51-char string
+        // At ~6pt/char, text is ~306pt wide, so "$75_MILLION" starts around X=72+240=312
+        _redactionService.RedactArea(pg, new Rect(300, 110, 120, 20), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("manafort_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -326,8 +328,8 @@ public class ForensicRedactionVerificationTests : IDisposable
         var pg = doc.Pages[0];
 
         // XGraphics uses top-left origin - text at Y=100 and Y=120
-        _redactionService.RedactArea(pg, new Rect(110, 90, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(100, 110, 100, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(110, 90, 200, 20), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(100, 110, 100, 20), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("hipaa_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -379,9 +381,9 @@ public class ForensicRedactionVerificationTests : IDisposable
         var pg = doc.Pages[0];
 
         // XGraphics uses top-left origin - text at Y=100, 120, 140
-        _redactionService.RedactArea(pg, new Rect(110, 90, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(95, 110, 50, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(110, 130, 60, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(110, 90, 200, 20), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(95, 110, 50, 20), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(110, 130, 60, 20), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("financial_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -421,7 +423,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath($"encoding_{text.Replace("!", "").Replace("@", "").Replace("#", "")}_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -452,7 +454,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("validation_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -500,7 +502,7 @@ public class ForensicRedactionVerificationTests : IDisposable
         // Act
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 300, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("object_stream_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -553,7 +555,7 @@ public class ForensicRedactionVerificationTests : IDisposable
             // Text body extends upward from baseline, so subtract font height
             var textY = round * 100;
             var redactY = textY - 12; // 12pt font
-            _redactionService.RedactArea(pg, new Rect(90, redactY, 150, 25), renderDpi: 72);
+            _redactionService.RedactArea(pg, new Rect(90, redactY, 150, 25), testPdf, renderDpi: 72);
 
             var nextPdf = CreateTempPath($"repeated_round_{round}.pdf");
             _tempFiles.Add(nextPdf);
@@ -616,8 +618,8 @@ public class ForensicRedactionVerificationTests : IDisposable
         var redactedTerms = new List<string> { "SECRET_DATA", "CONFIDENTIAL_INFO" };
 
         // XGraphics uses top-left origin - text at Y=100 and Y=200
-        _redactionService.RedactArea(pg, new Rect(90, 90, 200, 20), renderDpi: 72);
-        _redactionService.RedactArea(pg, new Rect(90, 190, 200, 20), renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 90, 200, 20), testPdf, renderDpi: 72);
+        _redactionService.RedactArea(pg, new Rect(90, 190, 200, 20), testPdf, renderDpi: 72);
 
         // Sanitize metadata (using the service's built-in method)
         var sanitizer = new MetadataSanitizer(NullLogger<MetadataSanitizer>.Instance);

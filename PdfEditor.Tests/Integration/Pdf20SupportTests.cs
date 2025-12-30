@@ -164,7 +164,7 @@ public class Pdf20SupportTests : IDisposable
         var redactionArea = new Rect(90, 90, 200, 30);
         _output.WriteLine($"Redaction area: {redactionArea}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, pdf20Path, renderDpi: 72);
 
         var redactedPath = CreateTempPath("pdf20_redacted.pdf");
         _tempFiles.Add(redactedPath);
@@ -207,7 +207,7 @@ public class Pdf20SupportTests : IDisposable
         var document = PdfReader.Open(pdf20Path, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
 
-        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 150, 30), pdf20Path, renderDpi: 72);
 
         var redactedPath = CreateTempPath("pdf20_preserve_redacted.pdf");
         _tempFiles.Add(redactedPath);

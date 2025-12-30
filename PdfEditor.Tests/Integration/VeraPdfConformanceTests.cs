@@ -33,12 +33,35 @@ public class VeraPdfConformanceTests : IDisposable
     private static readonly bool _veraPdfAvailable;
     private static readonly bool _qpdfAvailable;
     private static readonly bool _mutoolAvailable;
+    private static readonly string _veraPdfPath;
 
     static VeraPdfConformanceTests()
     {
-        _veraPdfAvailable = IsToolAvailable("verapdf", "--version");
+        // Check for veraPDF in known installation locations
+        _veraPdfPath = FindVeraPdf();
+        _veraPdfAvailable = !string.IsNullOrEmpty(_veraPdfPath);
         _qpdfAvailable = IsToolAvailable("qpdf", "--version");
         _mutoolAvailable = IsToolAvailable("mutool", "-v");
+    }
+
+    private static string FindVeraPdf()
+    {
+        // Check common installation paths
+        var possiblePaths = new[]
+        {
+            "/home/marc/verapdf/verapdf",  // User installation
+            "/usr/local/bin/verapdf",
+            "/usr/bin/verapdf",
+            "verapdf"  // In PATH
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            if (IsToolAvailable(path, "--version"))
+                return path;
+        }
+
+        return string.Empty;
     }
 
     public VeraPdfConformanceTests(ITestOutputHelper output)
@@ -97,7 +120,7 @@ public class VeraPdfConformanceTests : IDisposable
         _redactionService.RedactArea(page, new Avalonia.Rect(
             targetPos.x - 5, targetPos.y - 5,
             targetPos.width + 10, targetPos.height + 10
-        ), renderDpi: 72);
+        ), originalPath, renderDpi: 72);
 
         _documentService.SaveDocument(redactedPath);
 
@@ -107,8 +130,10 @@ public class VeraPdfConformanceTests : IDisposable
         // Assert
         _output.WriteLine($"veraPDF output:\n{output}");
         File.Exists(redactedPath).Should().BeTrue();
-        // The file should be parseable by veraPDF
-        output.Should().NotContain("Exception", "veraPDF should parse without exceptions");
+        // The file should be parseable by veraPDF - check for actual exceptions
+        // Note: veraExceptions="0" is expected in XML output - we're checking for exception elements
+        output.Should().Contain("veraExceptions=\"0\"", "veraPDF should report 0 exceptions");
+        output.Should().NotContain("<exception>", "veraPDF should not report any exception elements");
     }
 
     #endregion
@@ -154,7 +179,7 @@ public class VeraPdfConformanceTests : IDisposable
         _redactionService.RedactArea(page, new Avalonia.Rect(
             targetPos.x - 5, targetPos.y - 5,
             targetPos.width + 10, targetPos.height + 10
-        ), renderDpi: 72);
+        ), originalPath, renderDpi: 72);
 
         _documentService.SaveDocument(redactedPath);
 
@@ -181,7 +206,7 @@ public class VeraPdfConformanceTests : IDisposable
         _documentService.LoadDocument(originalPath);
 
         var doc = _documentService.GetCurrentDocument()!;
-        _redactionService.RedactArea(doc.Pages[0], new Avalonia.Rect(90, 90, 150, 30), renderDpi: 72);
+        _redactionService.RedactArea(doc.Pages[0], new Avalonia.Rect(90, 90, 150, 30), originalPath, renderDpi: 72);
         _documentService.SaveDocument(redactedPath);
 
         // Act - Check with JSON output for detailed analysis
@@ -216,7 +241,7 @@ public class VeraPdfConformanceTests : IDisposable
         _redactionService.RedactArea(doc.Pages[0], new Avalonia.Rect(
             targetPos.x - 5, targetPos.y - 5,
             targetPos.width + 10, targetPos.height + 10
-        ), renderDpi: 72);
+        ), originalPath, renderDpi: 72);
 
         _documentService.SaveDocument(redactedPath);
 
@@ -253,7 +278,7 @@ public class VeraPdfConformanceTests : IDisposable
         _redactionService.RedactArea(doc.Pages[0], new Avalonia.Rect(
             targetPos.x - 5, targetPos.y - 5,
             targetPos.width + 10, targetPos.height + 10
-        ), renderDpi: 72);
+        ), originalPath, renderDpi: 72);
 
         _documentService.SaveDocument(redactedPath);
 
@@ -362,7 +387,7 @@ public class VeraPdfConformanceTests : IDisposable
 
         args.Add($"\"{pdfPath}\"");
 
-        return RunCommand("verapdf", string.Join(" ", args));
+        return RunCommand(_veraPdfPath, string.Join(" ", args));
     }
 
     #endregion

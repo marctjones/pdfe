@@ -94,7 +94,7 @@ public class BlackBoxRedactionTests : IDisposable
 
             // STEP 4: Remove content underneath the black box
             _output.WriteLine($"  Removing content under black box for '{item}'");
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
         }
 
         // Save the redacted PDF
@@ -184,7 +184,7 @@ public class BlackBoxRedactionTests : IDisposable
             _output.WriteLine($"Black box {i + 1}: X={x}, Y={y}, W={width}, H={height}");
 
             // Apply redaction (removes content + draws black box)
-            _redactionService.RedactArea(page, blackBox, renderDpi: 72);
+            _redactionService.RedactArea(page, blackBox, testPdf, renderDpi: 72);
         }
 
         var redactedPdf = CreateTempPath("multi_blackbox_redacted.pdf");
@@ -245,15 +245,15 @@ public class BlackBoxRedactionTests : IDisposable
 
         // Black box over account number area (y ≈ 280-320)
         _output.WriteLine("  Black box 1: Over account number");
-        _redactionService.RedactArea(page, new Rect(50, 285, 300, 25), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(50, 285, 300, 25), testPdf, renderDpi: 72);
 
         // Black box over SSN area (y ≈ 315-335)
         _output.WriteLine("  Black box 2: Over SSN");
-        _redactionService.RedactArea(page, new Rect(50, 315, 200, 25), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(50, 315, 200, 25), testPdf, renderDpi: 72);
 
         // Black box over password area (y ≈ 345-365)
         _output.WriteLine("  Black box 3: Over password");
-        _redactionService.RedactArea(page, new Rect(50, 345, 250, 25), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(50, 345, 250, 25), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("complex_blackbox_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -309,7 +309,7 @@ public class BlackBoxRedactionTests : IDisposable
 
         _output.WriteLine($"Applying single black box at: {blackBox}");
         _output.WriteLine($"  This should cover ONLY 'CONFIDENTIAL'");
-        _redactionService.RedactArea(page, blackBox, renderDpi: 72);
+        _redactionService.RedactArea(page, blackBox, testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("integrity_test_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -346,7 +346,7 @@ public class BlackBoxRedactionTests : IDisposable
         // Apply black box
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
         var page = document.Pages[0];
-        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), renderDpi: 72);
+        _redactionService.RedactArea(page, new Rect(90, 90, 200, 30), testPdf, renderDpi: 72);
 
         var redactedPdf = CreateTempPath("permanent_test_redacted.pdf");
         _tempFiles.Add(redactedPdf);

@@ -106,7 +106,7 @@ public class SelectiveInstanceRedactionTests : IDisposable
             _output.WriteLine($"Redacting area: ({redactionArea.X}, {redactionArea.Y}, {redactionArea.Width}x{redactionArea.Height})");
             _output.WriteLine("This should cover ONLY the first 'SECRET' (at top), NOT the second one (at middle)");
 
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
 
             var redactedPath = CreateTempPath("duplicate_text_redacted.pdf");
             _tempFiles.Add(redactedPath);
@@ -205,7 +205,7 @@ public class SelectiveInstanceRedactionTests : IDisposable
         {
             var redactionArea = new Rect(90, 385, 110, 20);  // Covers Y=385-405
             _output.WriteLine($"Redacting middle instance at Y~400");
-            _redactionService.RedactArea(doc.Pages[0], redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(doc.Pages[0], redactionArea, pdfPath, renderDpi: 72);
 
             var redactedPath = CreateTempPath("three_instances_redacted.pdf");
             _tempFiles.Add(redactedPath);
@@ -285,7 +285,7 @@ public class SelectiveInstanceRedactionTests : IDisposable
         {
             var redactionArea = new Rect(90, 85, 150, 20);
             _output.WriteLine("Redacting CONFIDENTIAL on PAGE 2 ONLY");
-            _redactionService.RedactArea(doc.Pages[1], redactionArea, renderDpi: 72);  // Page 2 (index 1)
+            _redactionService.RedactArea(doc.Pages[1], redactionArea, pdfPath, renderDpi: 72);  // Page 2 (index 1)
 
             var redactedPath = CreateTempPath("multipage_duplicate_redacted.pdf");
             _tempFiles.Add(redactedPath);

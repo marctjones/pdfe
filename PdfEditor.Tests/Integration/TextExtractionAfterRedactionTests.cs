@@ -78,7 +78,7 @@ public class TextExtractionAfterRedactionTests : IDisposable
 
         // Apply redaction
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
-        _redactionService.RedactArea(document.Pages[0], redactionArea, renderDpi: 150);
+        _redactionService.RedactArea(document.Pages[0], redactionArea, testPdf, renderDpi: 150);
 
         var redactedPath = CreateTempPath("extraction_test_redacted.pdf");
         document.Save(redactedPath);
@@ -110,7 +110,7 @@ public class TextExtractionAfterRedactionTests : IDisposable
         // Redact and save
         Rect redactionArea = GetWordBounds(testPdf, targetText);
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
-        _redactionService.RedactArea(document.Pages[0], redactionArea, renderDpi: 150);
+        _redactionService.RedactArea(document.Pages[0], redactionArea, testPdf, renderDpi: 150);
 
         var redactedPath = CreateTempPath("save_reload_test_redacted.pdf");
         document.Save(redactedPath);
@@ -141,7 +141,7 @@ public class TextExtractionAfterRedactionTests : IDisposable
 
         // Redact entire page content area
         var document = PdfReader.Open(testPdf, PdfDocumentOpenMode.Modify);
-        _redactionService.RedactArea(document.Pages[0], new Rect(0, 0, 1000, 1000), renderDpi: 150);
+        _redactionService.RedactArea(document.Pages[0], new Rect(0, 0, 1000, 1000), testPdf, renderDpi: 150);
 
         var redactedPath = CreateTempPath("complete_redaction_test_redacted.pdf");
         document.Save(redactedPath);

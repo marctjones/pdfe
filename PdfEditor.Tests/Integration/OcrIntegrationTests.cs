@@ -26,7 +26,7 @@ public class OcrIntegrationTests : IDisposable
 
         // Initialize Avalonia Platform for PDFtoImage/SkiaSharp which might need it
         // This is done once per test class by the TestAppBuilder and Collection
-        PdfEditor.Tests.UI.TestAppBuilder.BuildAvaloniaApp().SetupWithoutStarting();
+        PdfEditor.Tests.UI.TestAppBuilder.EnsureInitialized();
 
         // Locate tessdata in the main project
         var baseDir = AppDomain.CurrentDomain.BaseDirectory;

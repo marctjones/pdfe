@@ -1,5 +1,3 @@
-using System;
-using System.Linq;
 using Avalonia;
 using FluentAssertions;
 using PdfEditor.ViewModels;
@@ -7,148 +5,478 @@ using Xunit;
 
 namespace PdfEditor.Tests.Unit;
 
+/// <summary>
+/// Unit tests for RedactionWorkflowManager.
+/// Tests the mark-then-apply workflow state management.
+///
+/// See Issue #27: Add unit tests for RedactionWorkflowManager
+/// </summary>
 public class RedactionWorkflowManagerTests
 {
-    [Fact]
-    public void Constructor_InitializesEmptyCollections()
-    {
-        // Act
-        var manager = new RedactionWorkflowManager();
+    private readonly RedactionWorkflowManager _manager;
 
-        // Assert
-        manager.PendingRedactions.Should().BeEmpty();
-        manager.AppliedRedactions.Should().BeEmpty();
-        manager.PendingCount.Should().Be(0);
-        manager.AppliedCount.Should().Be(0);
+    public RedactionWorkflowManagerTests()
+    {
+        _manager = new RedactionWorkflowManager();
     }
 
+    #region MarkArea Tests
+
     [Fact]
-    public void MarkArea_AddsToCollection()
+    public void MarkArea_AddsToPendingList()
     {
         // Arrange
-        var manager = new RedactionWorkflowManager();
+        var area = new Rect(100, 100, 200, 50);
 
         // Act
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Test text");
+        _manager.MarkArea(1, area, "Test text");
 
         // Assert
-        manager.PendingCount.Should().Be(1);
-        var pending = manager.PendingRedactions.First();
-        pending.PageNumber.Should().Be(1);
-        pending.Area.Should().Be(new Rect(10, 10, 100, 50));
-        pending.PreviewText.Should().Be("Test text");
+        _manager.PendingRedactions.Should().HaveCount(1);
+        _manager.PendingCount.Should().Be(1);
+        _manager.HasPendingRedactions.Should().BeTrue();
     }
 
     [Fact]
-    public void MarkArea_GeneratesUniqueIds()
+    public void MarkArea_SetsCorrectProperties()
     {
         // Arrange
-        var manager = new RedactionWorkflowManager();
+        var area = new Rect(100, 100, 200, 50);
+        var previewText = "Secret data";
 
         // Act
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Text 1");
-        manager.MarkArea(1, new Rect(20, 20, 100, 50), "Text 2");
+        _manager.MarkArea(2, area, previewText);
 
         // Assert
-        var ids = manager.PendingRedactions.Select(p => p.Id).ToList();
-        ids.Should().HaveCount(2);
-        ids[0].Should().NotBe(ids[1]);
+        var pending = _manager.PendingRedactions.First();
+        pending.PageNumber.Should().Be(2);
+        pending.Area.Should().Be(area);
+        pending.PreviewText.Should().Be(previewText);
+        pending.Id.Should().NotBe(Guid.Empty);
+        pending.MarkedTime.Should().BeCloseTo(DateTime.Now, TimeSpan.FromSeconds(1));
     }
 
     [Fact]
-    public void RemovePending_RemovesById()
+    public void MarkArea_MultipleAreas_AllAdded()
     {
-        // Arrange
-        var manager = new RedactionWorkflowManager();
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Test");
-        var id = manager.PendingRedactions.First().Id;
-
-        // Act
-        var removed = manager.RemovePending(id);
+        // Arrange & Act
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Text 1");
+        _manager.MarkArea(1, new Rect(0, 100, 100, 50), "Text 2");
+        _manager.MarkArea(2, new Rect(0, 0, 100, 50), "Text 3");
 
         // Assert
-        removed.Should().BeTrue();
-        manager.PendingCount.Should().Be(0);
+        _manager.PendingRedactions.Should().HaveCount(3);
+        _manager.PendingCount.Should().Be(3);
     }
 
     [Fact]
-    public void RemovePending_WithInvalidId_ReturnsFalse()
+    public void MarkArea_RaisesPropertyChanged()
     {
         // Arrange
-        var manager = new RedactionWorkflowManager();
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Test");
+        var changedProperties = new List<string>();
+        _manager.PropertyChanged += (s, e) => changedProperties.Add(e.PropertyName!);
 
         // Act
-        var removed = manager.RemovePending(Guid.NewGuid());
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
 
         // Assert
-        removed.Should().BeFalse();
-        manager.PendingCount.Should().Be(1);
+        changedProperties.Should().Contain("PendingCount");
+        changedProperties.Should().Contain("HasPendingRedactions");
+        changedProperties.Should().Contain("PendingRedactions");
+    }
+
+    #endregion
+
+    #region RemovePending Tests
+
+    [Fact]
+    public void RemovePending_ExistingId_ReturnsTrue()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+        var id = _manager.PendingRedactions.First().Id;
+
+        // Act
+        var result = _manager.RemovePending(id);
+
+        // Assert
+        result.Should().BeTrue();
+        _manager.PendingRedactions.Should().BeEmpty();
+        _manager.PendingCount.Should().Be(0);
+        _manager.HasPendingRedactions.Should().BeFalse();
     }
 
     [Fact]
-    public void ClearPending_RemovesAll()
+    public void RemovePending_NonExistingId_ReturnsFalse()
     {
         // Arrange
-        var manager = new RedactionWorkflowManager();
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Text 1");
-        manager.MarkArea(2, new Rect(20, 20, 100, 50), "Text 2");
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+        var nonExistingId = Guid.NewGuid();
 
         // Act
-        manager.ClearPending();
+        var result = _manager.RemovePending(nonExistingId);
 
         // Assert
-        manager.PendingCount.Should().Be(0);
+        result.Should().BeFalse();
+        _manager.PendingRedactions.Should().HaveCount(1);
     }
 
     [Fact]
-    public void MoveToApplied_TransfersItems()
+    public void RemovePending_EmptyList_ReturnsFalse()
     {
-        // Arrange
-        var manager = new RedactionWorkflowManager();
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Text 1");
-        manager.MarkArea(2, new Rect(20, 20, 100, 50), "Text 2");
-
         // Act
-        manager.MoveToApplied();
+        var result = _manager.RemovePending(Guid.NewGuid());
 
         // Assert
-        manager.PendingCount.Should().Be(0);
-        manager.AppliedCount.Should().Be(2);
-        manager.AppliedRedactions.Select(a => a.PreviewText).Should().Contain(new[] { "Text 1", "Text 2" });
+        result.Should().BeFalse();
     }
 
     [Fact]
-    public void GetPendingForPage_FiltersByPage()
+    public void RemovePending_RaisesPropertyChanged()
     {
         // Arrange
-        var manager = new RedactionWorkflowManager();
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Page 1 Text");
-        manager.MarkArea(2, new Rect(20, 20, 100, 50), "Page 2 Text");
-        manager.MarkArea(1, new Rect(30, 30, 100, 50), "Page 1 Text 2");
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+        var id = _manager.PendingRedactions.First().Id;
+
+        var changedProperties = new List<string>();
+        _manager.PropertyChanged += (s, e) => changedProperties.Add(e.PropertyName!);
 
         // Act
-        var page1Pending = manager.GetPendingForPage(1).ToList();
+        _manager.RemovePending(id);
 
         // Assert
-        page1Pending.Should().HaveCount(2);
-        page1Pending.All(p => p.PageNumber == 1).Should().BeTrue();
+        changedProperties.Should().Contain("PendingCount");
+        changedProperties.Should().Contain("HasPendingRedactions");
     }
+
+    #endregion
+
+    #region ClearPending Tests
+
+    [Fact]
+    public void ClearPending_RemovesAllPending()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Text 1");
+        _manager.MarkArea(2, new Rect(0, 0, 100, 50), "Text 2");
+
+        // Act
+        _manager.ClearPending();
+
+        // Assert
+        _manager.PendingRedactions.Should().BeEmpty();
+        _manager.PendingCount.Should().Be(0);
+        _manager.HasPendingRedactions.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ClearPending_EmptyList_NoException()
+    {
+        // Act
+        Action act = () => _manager.ClearPending();
+
+        // Assert
+        act.Should().NotThrow();
+        _manager.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void ClearPending_RaisesPropertyChanged()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+
+        var changedProperties = new List<string>();
+        _manager.PropertyChanged += (s, e) => changedProperties.Add(e.PropertyName!);
+
+        // Act
+        _manager.ClearPending();
+
+        // Assert
+        changedProperties.Should().Contain("PendingCount");
+        changedProperties.Should().Contain("HasPendingRedactions");
+    }
+
+    #endregion
+
+    #region MoveToApplied Tests
+
+    [Fact]
+    public void MoveToApplied_MovesPendingToApplied()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Text 1");
+        _manager.MarkArea(2, new Rect(0, 0, 100, 50), "Text 2");
+        var originalIds = _manager.PendingRedactions.Select(p => p.Id).ToList();
+
+        // Act
+        _manager.MoveToApplied();
+
+        // Assert
+        _manager.PendingRedactions.Should().BeEmpty();
+        _manager.PendingCount.Should().Be(0);
+        _manager.HasPendingRedactions.Should().BeFalse();
+
+        _manager.AppliedRedactions.Should().HaveCount(2);
+        _manager.AppliedCount.Should().Be(2);
+        _manager.AppliedRedactions.Select(a => a.Id).Should().BeEquivalentTo(originalIds);
+    }
+
+    [Fact]
+    public void MoveToApplied_EmptyPending_NoException()
+    {
+        // Act
+        Action act = () => _manager.MoveToApplied();
+
+        // Assert
+        act.Should().NotThrow();
+        _manager.AppliedCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void MoveToApplied_RaisesPropertyChanged()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+
+        var changedProperties = new List<string>();
+        _manager.PropertyChanged += (s, e) => changedProperties.Add(e.PropertyName!);
+
+        // Act
+        _manager.MoveToApplied();
+
+        // Assert
+        changedProperties.Should().Contain("PendingCount");
+        changedProperties.Should().Contain("HasPendingRedactions");
+        changedProperties.Should().Contain("AppliedCount");
+    }
+
+    #endregion
+
+    #region GetPendingForPage Tests
+
+    [Fact]
+    public void GetPendingForPage_ReturnsCorrectItems()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Page 1 Text 1");
+        _manager.MarkArea(1, new Rect(0, 100, 100, 50), "Page 1 Text 2");
+        _manager.MarkArea(2, new Rect(0, 0, 100, 50), "Page 2 Text");
+        _manager.MarkArea(3, new Rect(0, 0, 100, 50), "Page 3 Text");
+
+        // Act
+        var page1Items = _manager.GetPendingForPage(1).ToList();
+        var page2Items = _manager.GetPendingForPage(2).ToList();
+        var page4Items = _manager.GetPendingForPage(4).ToList();
+
+        // Assert
+        page1Items.Should().HaveCount(2);
+        page1Items.All(p => p.PageNumber == 1).Should().BeTrue();
+
+        page2Items.Should().HaveCount(1);
+        page2Items.First().PreviewText.Should().Be("Page 2 Text");
+
+        page4Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetPendingForPage_EmptyList_ReturnsEmpty()
+    {
+        // Act
+        var result = _manager.GetPendingForPage(1);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region GetAppliedForPage Tests
+
+    [Fact]
+    public void GetAppliedForPage_ReturnsCorrectItems()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Page 1 Text");
+        _manager.MarkArea(2, new Rect(0, 0, 100, 50), "Page 2 Text");
+        _manager.MoveToApplied();
+
+        // Act
+        var page1Items = _manager.GetAppliedForPage(1).ToList();
+        var page2Items = _manager.GetAppliedForPage(2).ToList();
+
+        // Assert
+        page1Items.Should().HaveCount(1);
+        page1Items.First().PageNumber.Should().Be(1);
+
+        page2Items.Should().HaveCount(1);
+        page2Items.First().PageNumber.Should().Be(2);
+    }
+
+    [Fact]
+    public void GetAppliedForPage_EmptyList_ReturnsEmpty()
+    {
+        // Act
+        var result = _manager.GetAppliedForPage(1);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Reset Tests
 
     [Fact]
     public void Reset_ClearsAllState()
     {
         // Arrange
-        var manager = new RedactionWorkflowManager();
-        manager.MarkArea(1, new Rect(10, 10, 100, 50), "Pending");
-        manager.MoveToApplied();
-        manager.MarkArea(2, new Rect(20, 20, 100, 50), "New Pending");
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Pending");
+        _manager.MarkArea(2, new Rect(0, 0, 100, 50), "To be applied");
+        _manager.MoveToApplied();
+        _manager.MarkArea(3, new Rect(0, 0, 100, 50), "New pending");
+
+        // Pre-condition check
+        _manager.AppliedCount.Should().Be(2);
+        _manager.PendingCount.Should().Be(1);
 
         // Act
-        manager.Reset();
+        _manager.Reset();
 
         // Assert
-        manager.PendingCount.Should().Be(0);
-        manager.AppliedCount.Should().Be(0);
+        _manager.PendingRedactions.Should().BeEmpty();
+        _manager.AppliedRedactions.Should().BeEmpty();
+        _manager.PendingCount.Should().Be(0);
+        _manager.AppliedCount.Should().Be(0);
+        _manager.HasPendingRedactions.Should().BeFalse();
     }
+
+    [Fact]
+    public void Reset_EmptyState_NoException()
+    {
+        // Act
+        Action act = () => _manager.Reset();
+
+        // Assert
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Reset_RaisesPropertyChanged()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+
+        var changedProperties = new List<string>();
+        _manager.PropertyChanged += (s, e) => changedProperties.Add(e.PropertyName!);
+
+        // Act
+        _manager.Reset();
+
+        // Assert
+        changedProperties.Should().Contain("PendingCount");
+        changedProperties.Should().Contain("HasPendingRedactions");
+        changedProperties.Should().Contain("AppliedCount");
+    }
+
+    #endregion
+
+    #region HasPendingRedactions Tests
+
+    [Fact]
+    public void HasPendingRedactions_InitiallyFalse()
+    {
+        // Assert
+        _manager.HasPendingRedactions.Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasPendingRedactions_TrueAfterMark()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+
+        // Assert
+        _manager.HasPendingRedactions.Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasPendingRedactions_FalseAfterRemove()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+        var id = _manager.PendingRedactions.First().Id;
+
+        // Act
+        _manager.RemovePending(id);
+
+        // Assert
+        _manager.HasPendingRedactions.Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasPendingRedactions_FalseAfterMoveToApplied()
+    {
+        // Arrange
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "Test");
+
+        // Act
+        _manager.MoveToApplied();
+
+        // Assert
+        _manager.HasPendingRedactions.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region Edge Cases
+
+    [Fact]
+    public void MarkArea_ZeroSizeArea_StillAdded()
+    {
+        // Arrange
+        var zeroArea = new Rect(100, 100, 0, 0);
+
+        // Act
+        _manager.MarkArea(1, zeroArea, "Zero size");
+
+        // Assert
+        _manager.PendingCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void MarkArea_NegativeCoordinates_StillAdded()
+    {
+        // Arrange
+        var negativeArea = new Rect(-100, -50, 200, 100);
+
+        // Act
+        _manager.MarkArea(1, negativeArea, "Negative coords");
+
+        // Assert
+        _manager.PendingCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void MarkArea_EmptyPreviewText_StillAdded()
+    {
+        // Act
+        _manager.MarkArea(1, new Rect(0, 0, 100, 50), "");
+
+        // Assert
+        _manager.PendingCount.Should().Be(1);
+        _manager.PendingRedactions.First().PreviewText.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MarkArea_PageZero_StillAdded()
+    {
+        // Act (page 0 is unusual but should not crash)
+        _manager.MarkArea(0, new Rect(0, 0, 100, 50), "Page 0");
+
+        // Assert
+        _manager.PendingCount.Should().Be(1);
+    }
+
+    #endregion
 }

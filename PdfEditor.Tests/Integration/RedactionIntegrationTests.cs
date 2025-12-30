@@ -64,7 +64,7 @@ public class RedactionIntegrationTests : IDisposable
         var redactionArea = new Rect(90, 90, 150, 30);
         _output.WriteLine($"Redacting area: X={redactionArea.X}, Y={redactionArea.Y}, W={redactionArea.Width}, H={redactionArea.Height}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("simple_text_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -114,7 +114,7 @@ public class RedactionIntegrationTests : IDisposable
         var redactionArea = new Rect(90, 90, 150, 30);
         _output.WriteLine($"Redacting area around 'CONFIDENTIAL': {redactionArea}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("multi_text_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -153,7 +153,7 @@ public class RedactionIntegrationTests : IDisposable
         var redactionArea = new Rect(400, 400, 100, 50);
         _output.WriteLine($"Redacting empty area: {redactionArea}");
 
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("empty_area_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -190,10 +190,10 @@ public class RedactionIntegrationTests : IDisposable
         var area2 = new Rect(90, 290, 150, 30);  // Secret Data at y=300
 
         _output.WriteLine($"Redacting area 1: {area1}");
-        _redactionService.RedactArea(page, area1, renderDpi: 72);
+        _redactionService.RedactArea(page, area1, testPdf, renderDpi: 72);
 
         _output.WriteLine($"Redacting area 2: {area2}");
-        _redactionService.RedactArea(page, area2, renderDpi: 72);
+        _redactionService.RedactArea(page, area2, testPdf, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("multiple_areas_redacted.pdf");
         _tempFiles.Add(redactedPdf);
@@ -231,7 +231,7 @@ public class RedactionIntegrationTests : IDisposable
 
         var redactionArea = new Rect(90, 190, 200, 30);
         _output.WriteLine("Redacting content on page 2...");
-        _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+        _redactionService.RedactArea(page, redactionArea, testPdf, renderDpi: 72);
         
         var redactedPdf = CreateTempPath("structure_redacted.pdf");
         _tempFiles.Add(redactedPdf);

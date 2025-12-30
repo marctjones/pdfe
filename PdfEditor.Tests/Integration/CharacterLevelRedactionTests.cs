@@ -128,7 +128,7 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 
@@ -179,7 +179,7 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 
@@ -222,7 +222,7 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 
@@ -271,7 +271,7 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 
@@ -318,7 +318,7 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 
@@ -365,7 +365,7 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, redactionArea, renderDpi: 72);
+            _redactionService.RedactArea(page, redactionArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 
@@ -420,8 +420,8 @@ public class CharacterLevelRedactionTests : IDisposable
         using (var pdfDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
         {
             var page = pdfDoc.Pages[0];
-            _redactionService.RedactArea(page, aaaArea, renderDpi: 72);
-            _redactionService.RedactArea(page, cccArea, renderDpi: 72);
+            _redactionService.RedactArea(page, aaaArea, pdfPath, renderDpi: 72);
+            _redactionService.RedactArea(page, cccArea, pdfPath, renderDpi: 72);
             pdfDoc.Save(outputPath);
         }
 

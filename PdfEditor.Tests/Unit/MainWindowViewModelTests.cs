@@ -483,6 +483,49 @@ public class MainWindowViewModelTests
         vm.HasRecentFiles.Should().BeFalse();
     }
 
+    [Fact]
+    public void HasRecentFiles_WhenHasFiles_ReturnsTrue()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.RecentFiles.Clear();
+        vm.RecentFiles.Add("/path/to/file.pdf");
+
+        // Assert
+        vm.HasRecentFiles.Should().BeTrue();
+    }
+
+    [Fact]
+    public void RecentFiles_IsObservableCollection()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+
+        // Assert - verify it's an ObservableCollection that can be modified
+        vm.RecentFiles.Should().BeOfType<System.Collections.ObjectModel.ObservableCollection<string>>();
+    }
+
+    [Fact]
+    public void RecentFiles_CanAddAndRemove()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        var initialCount = vm.RecentFiles.Count;
+
+        // Act - Add a file
+        vm.RecentFiles.Add("/test/new-file.pdf");
+
+        // Assert
+        vm.RecentFiles.Should().HaveCount(initialCount + 1);
+        vm.RecentFiles.Should().Contain("/test/new-file.pdf");
+
+        // Act - Remove the file
+        vm.RecentFiles.Remove("/test/new-file.pdf");
+
+        // Assert
+        vm.RecentFiles.Should().HaveCount(initialCount);
+    }
+
     #endregion
 
     #region Command Existence Tests
