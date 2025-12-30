@@ -32,7 +32,7 @@ This library follows [Semantic Versioning 2.0.0](https://semver.org/):
 - [ ] Improved logging and diagnostics
 
 ### v0.3.0 (Future)
-- [ ] CID/CJK font support
+- [x] CID/CJK font support (Issue #63)
 - [ ] Type 3 font handling
 - [ ] Invisible text (Tr=3) handling
 

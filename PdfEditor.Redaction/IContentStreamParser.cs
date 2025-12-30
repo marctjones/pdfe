@@ -1,3 +1,5 @@
+using PdfSharp.Pdf;
+
 namespace PdfEditor.Redaction;
 
 /// <summary>
@@ -13,6 +15,23 @@ public interface IContentStreamParser
     /// <param name="pageHeight">Page height in points (for coordinate conversion).</param>
     /// <returns>List of parsed operations with position information.</returns>
     IReadOnlyList<PdfOperation> Parse(byte[] contentBytes, double pageHeight);
+
+    /// <summary>
+    /// Parse a content stream with access to page resources for Form XObject resolution.
+    /// </summary>
+    /// <param name="contentBytes">Raw content stream bytes (decompressed).</param>
+    /// <param name="pageHeight">Page height in points (for coordinate conversion).</param>
+    /// <param name="resources">Page resources dictionary (for XObject lookup).</param>
+    /// <returns>List of parsed operations, including nested Form XObject operations.</returns>
+    IReadOnlyList<PdfOperation> ParseWithResources(byte[] contentBytes, double pageHeight, PdfDictionary? resources);
+
+    /// <summary>
+    /// Parse a PDF page's content stream with full font awareness.
+    /// Extracts fonts from page resources for proper CID/CJK encoding support.
+    /// </summary>
+    /// <param name="page">The PDF page to parse.</param>
+    /// <returns>List of parsed operations with proper text encoding.</returns>
+    IReadOnlyList<PdfOperation> ParsePage(PdfPage page);
 }
 
 /// <summary>
@@ -79,6 +98,48 @@ public class TextOperation : PdfOperation
     /// Font size in points.
     /// </summary>
     public double FontSize { get; init; }
+
+    #region Text State Parameters (Issue #122)
+    // These parameters must be preserved during glyph-level redaction reconstruction
+
+    /// <summary>
+    /// Character spacing (Tc operator).
+    /// Default: 0.0
+    /// </summary>
+    public double CharacterSpacing { get; init; }
+
+    /// <summary>
+    /// Word spacing (Tw operator).
+    /// Default: 0.0
+    /// </summary>
+    public double WordSpacing { get; init; }
+
+    /// <summary>
+    /// Horizontal scaling as percentage (Tz operator).
+    /// Default: 100.0
+    /// </summary>
+    public double HorizontalScaling { get; init; } = 100.0;
+
+    /// <summary>
+    /// Text rendering mode (Tr operator).
+    /// 0=fill, 1=stroke, 2=fill+stroke, 3=invisible, etc.
+    /// Default: 0 (fill)
+    /// </summary>
+    public int TextRenderingMode { get; init; }
+
+    /// <summary>
+    /// Text rise (Ts operator) for superscript/subscript.
+    /// Default: 0.0
+    /// </summary>
+    public double TextRise { get; init; }
+
+    /// <summary>
+    /// Text leading (TL operator).
+    /// Default: 0.0
+    /// </summary>
+    public double TextLeading { get; init; }
+
+    #endregion
 }
 
 /// <summary>
@@ -166,4 +227,37 @@ public class ImageOperation : PdfOperation
     /// Name of the XObject resource.
     /// </summary>
     public required string XObjectName { get; init; }
+}
+
+/// <summary>
+/// Form XObject invocation (Do operator with /Subtype /Form).
+/// Contains nested operations parsed from the Form XObject's content stream.
+/// </summary>
+public class FormXObjectOperation : PdfOperation
+{
+    /// <summary>
+    /// Name of the XObject resource (e.g., "/Fm1").
+    /// </summary>
+    public required string XObjectName { get; init; }
+
+    /// <summary>
+    /// Operations parsed from the Form XObject's nested content stream.
+    /// </summary>
+    public List<PdfOperation> NestedOperations { get; init; } = new();
+
+    /// <summary>
+    /// The Form XObject's BBox (bounding box in form coordinate space).
+    /// </summary>
+    public PdfRectangle FormBBox { get; init; } = new PdfRectangle(0, 0, 0, 0);
+
+    /// <summary>
+    /// The Form XObject's transformation matrix (6 values: a, b, c, d, e, f).
+    /// Applied when rendering the form: [a b c d e f] means x' = ax + cy + e, y' = bx + dy + f.
+    /// </summary>
+    public double[] FormMatrix { get; init; } = new double[] { 1, 0, 0, 1, 0, 0 };
+
+    /// <summary>
+    /// Reference to the Form XObject's content stream bytes (for modification).
+    /// </summary>
+    public byte[]? ContentStreamBytes { get; set; }
 }

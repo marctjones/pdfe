@@ -4,29 +4,46 @@ using PdfEditor.Redaction.Fonts;
 namespace PdfEditor.Redaction.Operators.TextShowing;
 
 /// <summary>
-/// Handler for Tj (show text) operator.
-/// Produces a TextOperation with glyph positions for redaction.
-/// Supports CID/CJK fonts with proper encoding detection.
+/// Handler for " (double quote / set spacing, move to next line, and show text) operator.
+/// Syntax: aw ac (string) "
+/// Equivalent to: aw Tw, ac Tc, T* (string) Tj
+/// 1. Set word spacing to aw
+/// 2. Set character spacing to ac
+/// 3. Move to start of next line (using current text leading)
+/// 4. Show the text string
 /// </summary>
-public class TjOperatorHandler : IOperatorHandler
+public class DoubleQuoteOperatorHandler : IOperatorHandler
 {
-    public string OperatorName => "Tj";
+    public string OperatorName => "\"";
 
     public PdfOperation? Handle(IReadOnlyList<object> operands, PdfParserState state)
     {
-        // Tj: (string) Tj  or <hexstring> Tj
-        if (operands.Count == 0)
+        // ": aw ac (string) "
+        if (operands.Count < 3)
             return null;
 
-        // Get the string content
-        var stringOperand = operands[0];
+        // Step 1: Set word spacing (Tw)
+        var wordSpacing = GetNumber(operands[0]);
+        state.WordSpacing = wordSpacing;
+
+        // Step 2: Set character spacing (Tc)
+        var charSpacing = GetNumber(operands[1]);
+        state.CharacterSpacing = charSpacing;
+
+        // Step 3: Move to next line (T* behavior)
+        var tx = 0.0;
+        var ty = -state.TextLeading;
+
+        var translateMatrix = PdfMatrix.Translate(tx, ty);
+        state.TextLineMatrix = translateMatrix.Multiply(state.TextLineMatrix);
+        state.TextMatrix = state.TextLineMatrix;
+
+        // Step 4: Show text (Tj behavior)
+        var stringOperand = operands[2];
         string text;
-        byte[]? rawBytes = null;
 
         if (stringOperand is byte[] bytes)
         {
-            rawBytes = bytes;
-            // Use font-aware decoding for CID/CJK support
             var fontInfo = state.GetCurrentFontInfo();
             text = TextDecoder.Decode(bytes, fontInfo);
         }
@@ -42,7 +59,7 @@ public class TjOperatorHandler : IOperatorHandler
         if (string.IsNullOrEmpty(text))
             return null;
 
-        // Calculate glyph positions with CJK-aware widths
+        // Calculate glyph positions
         var glyphs = CalculateGlyphPositions(text, state);
 
         // Calculate bounding box from all glyphs
@@ -62,7 +79,6 @@ public class TjOperatorHandler : IOperatorHandler
             FontName = state.FontName,
             FontSize = state.FontSize,
             BoundingBox = boundingBox,
-            // Copy text state parameters for reconstruction (issue #122)
             CharacterSpacing = state.CharacterSpacing,
             WordSpacing = state.WordSpacing,
             HorizontalScaling = state.HorizontalScaling,
@@ -72,17 +88,28 @@ public class TjOperatorHandler : IOperatorHandler
         };
     }
 
+    private static double GetNumber(object obj)
+    {
+        return obj switch
+        {
+            double d => d,
+            float f => f,
+            int i => i,
+            long l => l,
+            decimal m => (double)m,
+            string s when double.TryParse(s, out var result) => result,
+            _ => 0.0
+        };
+    }
+
     private List<GlyphPosition> CalculateGlyphPositions(string text, PdfParserState state)
     {
         var glyphs = new List<GlyphPosition>();
 
-        // Get starting position from text matrix
         var (startX, startY) = state.GetCurrentTextPosition();
 
-        // Extract effective font size from text matrix
-        // Text matrix [a b c d e f] has scaling in 'a' (X) and 'd' (Y)
         var textMatrix = state.TextMatrix;
-        var effectiveFontSize = state.FontSize * textMatrix.D;  // Y-scale from matrix
+        var effectiveFontSize = state.FontSize * textMatrix.D;
         var charHeight = effectiveFontSize;
 
         double currentX = startX;
@@ -91,9 +118,6 @@ public class TjOperatorHandler : IOperatorHandler
         {
             var ch = text[i];
 
-            // Calculate character width based on character type
-            // CJK characters are full-width (width ≈ height)
-            // Latin characters are approximately 0.6 × height
             double widthFactor = TextDecoder.IsFullWidthCharacter(ch) ? 1.0 : 0.6;
             var charWidth = effectiveFontSize * widthFactor * (state.HorizontalScaling / 100.0);
 
@@ -119,7 +143,6 @@ public class TjOperatorHandler : IOperatorHandler
                 StringIndex = i
             });
 
-            // Advance position
             currentX += glyphWidth + state.CharacterSpacing;
         }
 
@@ -149,7 +172,6 @@ public class TjOperatorHandler : IOperatorHandler
 
     private void AdvanceTextMatrix(string text, List<GlyphPosition> glyphs, PdfParserState state)
     {
-        // Calculate total width from actual glyph positions
         double totalWidth = 0;
         if (glyphs.Count > 0)
         {
@@ -157,7 +179,6 @@ public class TjOperatorHandler : IOperatorHandler
         }
         else
         {
-            // Fallback: estimate based on character count
             var textMatrix = state.TextMatrix;
             var effectiveFontSize = state.FontSize * textMatrix.D;
             var charWidth = effectiveFontSize * 0.6 * (state.HorizontalScaling / 100.0);

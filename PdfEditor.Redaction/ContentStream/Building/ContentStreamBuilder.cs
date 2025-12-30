@@ -16,19 +16,125 @@ public class ContentStreamBuilder : IContentStreamBuilder
 
     /// <summary>
     /// Build a content stream from a list of operations.
+    /// This method ensures font state is properly maintained across BT/ET blocks.
+    /// Issue #167: Each BT block that contains Tj must have a Tf operator.
     /// </summary>
     public byte[] Build(IEnumerable<PdfOperation> operations)
     {
         var sb = new StringBuilder();
+        var operationList = operations.OrderBy(op => op.StreamPosition).ToList();
 
-        foreach (var operation in operations.OrderBy(op => op.StreamPosition))
+        // Track font state for injection into BT blocks
+        string? lastFontName = null;
+        double lastFontSize = 12.0;
+
+        // First pass: collect font info from all Tf operators and TextOperations
+        foreach (var op in operationList)
         {
+            if (op is TextStateOperation tso && tso.Operator == "Tf" && tso.Operands.Count >= 2)
+            {
+                lastFontName = tso.Operands[0]?.ToString();
+                if (tso.Operands[1] is double d) lastFontSize = d;
+                else if (tso.Operands[1] is int i) lastFontSize = i;
+                else if (tso.Operands[1] is float f) lastFontSize = f;
+            }
+            else if (op is TextOperation textOp)
+            {
+                // TextOperations from parsing have font info - use as fallback
+                if (!string.IsNullOrEmpty(textOp.FontName))
+                {
+                    lastFontName = textOp.FontName;
+                    if (textOp.FontSize > 0) lastFontSize = textOp.FontSize;
+                }
+            }
+        }
+
+        // Now we have the font info. Second pass: serialize with Tf injection
+        string? currentBlockFontName = null;
+        double currentBlockFontSize = 12.0;
+        bool inTextBlock = false;
+        bool needTfInjection = false;
+
+        foreach (var operation in operationList)
+        {
+            // Track font state from Tf operators
+            if (operation is TextStateOperation tso && tso.Operator == "Tf" && tso.Operands.Count >= 2)
+            {
+                currentBlockFontName = tso.Operands[0]?.ToString();
+                if (tso.Operands[1] is double d) currentBlockFontSize = d;
+                else if (tso.Operands[1] is int i) currentBlockFontSize = i;
+                else if (tso.Operands[1] is float f) currentBlockFontSize = f;
+                needTfInjection = false; // We have a Tf now
+            }
+
+            // Detect BT (begin text block)
+            if (operation.Operator == "BT")
+            {
+                inTextBlock = true;
+                needTfInjection = true; // Assume we need Tf until we see one
+                SerializeOperation(operation, sb);
+                sb.Append('\n');
+                continue;
+            }
+
+            // Detect ET (end text block)
+            if (operation.Operator == "ET")
+            {
+                inTextBlock = false;
+                needTfInjection = false;
+                SerializeOperation(operation, sb);
+                sb.Append('\n');
+                continue;
+            }
+
+            // If we're about to emit a Tj and haven't seen Tf in this BT block, inject one
+            if (inTextBlock && needTfInjection && IsTextShowingOperator(operation.Operator))
+            {
+                // Get font from the TextOperation if available
+                string? fontToUse = null;
+                double sizeToUse = 12.0;
+
+                if (operation is TextOperation textOp && !string.IsNullOrEmpty(textOp.FontName))
+                {
+                    fontToUse = textOp.FontName;
+                    sizeToUse = textOp.FontSize > 0 ? textOp.FontSize : 12.0;
+                }
+                else if (!string.IsNullOrEmpty(currentBlockFontName))
+                {
+                    fontToUse = currentBlockFontName;
+                    sizeToUse = currentBlockFontSize;
+                }
+                else if (!string.IsNullOrEmpty(lastFontName))
+                {
+                    fontToUse = lastFontName;
+                    sizeToUse = lastFontSize;
+                }
+
+                if (!string.IsNullOrEmpty(fontToUse))
+                {
+                    // Inject Tf operator before the text showing operator
+                    sb.Append(fontToUse);
+                    sb.Append(' ');
+                    SerializeNumber(sizeToUse, sb);
+                    sb.Append(" Tf\n");
+                    needTfInjection = false;
+                }
+            }
+
             SerializeOperation(operation, sb);
             sb.Append('\n');
         }
 
         var result = sb.ToString();
         return Encoding.ASCII.GetBytes(result);
+    }
+
+    /// <summary>
+    /// Check if an operator is a text showing operator (Tj, TJ, ', ")
+    /// </summary>
+    private static bool IsTextShowingOperator(string op)
+    {
+        return op == "Tj" || op == "TJ" || op == "'" || op == "\"";
     }
 
     /// <summary>

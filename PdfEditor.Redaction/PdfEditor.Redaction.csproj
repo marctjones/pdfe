@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="PdfEditor.Redaction.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- PDF Reading - for accurate letter positions -->
     <PackageReference Include="PdfPig" Version="0.1.11" />
 

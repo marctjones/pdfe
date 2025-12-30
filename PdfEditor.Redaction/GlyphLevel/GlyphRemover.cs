@@ -45,7 +45,8 @@ public class GlyphRemover
             operations.Count, redactionArea.Left, redactionArea.Bottom, redactionArea.Right, redactionArea.Top);
 
         // PHASE 1: Identify text blocks and mark those with reconstructed text
-        var textBlocks = IdentifyTextBlocks(operations, redactionArea);
+        // Pass letters for accurate intersection testing using actual PdfPig positions
+        var textBlocks = IdentifyTextBlocks(operations, redactionArea, letters);
         _logger.LogInformation("Identified {Count} text blocks, {ReconstructedCount} will be reconstructed",
             textBlocks.Count, textBlocks.Count(b => b.HasReconstructedText));
 
@@ -127,13 +128,37 @@ public class GlyphRemover
         _logger.LogInformation("Total operations in output: {Output} (vs {Input} input)",
             modifiedOperations.Count, operations.Count);
 
+        // Validate reconstructed content stream (issue #126)
+        var validator = new ContentStreamValidator();
+        var validationResult = validator.Validate(modifiedOperations);
+
+        if (!validationResult.IsValid)
+        {
+            _logger.LogError("Content stream validation failed after reconstruction:");
+            foreach (var error in validationResult.Errors)
+            {
+                _logger.LogError("  - {Error}", error);
+            }
+            // Log errors but don't throw - let the PDF be saved and fail at render time if necessary
+            // This allows partial success and helps with debugging
+        }
+
+        foreach (var warning in validationResult.Warnings)
+        {
+            _logger.LogWarning("Content stream validation warning: {Warning}", warning);
+        }
+
         return modifiedOperations;
     }
 
     /// <summary>
     /// Identify text blocks (BT...ET ranges) and mark those containing intersecting text.
+    /// Uses actual letter positions from PdfPig (not parsed bounding boxes) for accurate intersection.
     /// </summary>
-    private List<TextBlockInfo> IdentifyTextBlocks(List<PdfOperation> operations, PdfRectangle redactionArea)
+    private List<TextBlockInfo> IdentifyTextBlocks(
+        List<PdfOperation> operations,
+        PdfRectangle redactionArea,
+        IReadOnlyList<Letter> letters)
     {
         var blocks = new List<TextBlockInfo>();
         var btStack = new Stack<int>();  // Track BT positions (handles nested BT in malformed PDFs)
@@ -152,11 +177,39 @@ public class GlyphRemover
                 {
                     var btPos = btStack.Pop();
 
-                    // Check if any TextOperation in this range intersects
-                    var hasReconstructedText = operations
+                    // Get all TextOperations in this block
+                    var textOpsInBlock = operations
                         .Where(o => o.StreamPosition >= btPos && o.StreamPosition <= op.StreamPosition)
                         .OfType<TextOperation>()
-                        .Any(to => to.IntersectsWith(redactionArea));
+                        .ToList();
+
+                    // Check if any TextOperation has letters intersecting the redaction area
+                    // Use actual letter positions from PdfPig, not the parsed bounding boxes
+                    bool hasReconstructedText = false;
+                    foreach (var textOp in textOpsInBlock)
+                    {
+                        // Find matching letters for this operation
+                        var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
+
+                        // Check if any matched letter's center is in the redaction area
+                        foreach (var match in letterMatches)
+                        {
+                            var rect = match.Letter.GlyphRectangle;
+                            double centerX = (rect.Left + rect.Right) / 2.0;
+                            double centerY = (rect.Bottom + rect.Top) / 2.0;
+
+                            if (redactionArea.Contains(centerX, centerY))
+                            {
+                                hasReconstructedText = true;
+                                _logger.LogDebug("Letter '{Letter}' at ({X:F2},{Y:F2}) intersects redaction area",
+                                    match.Letter.Value, centerX, centerY);
+                                break;
+                            }
+                        }
+
+                        if (hasReconstructedText)
+                            break;
+                    }
 
                     blocks.Add(new TextBlockInfo
                     {

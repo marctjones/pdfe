@@ -1,4 +1,5 @@
 using System.Text;
+using PdfEditor.Redaction.Fonts;
 
 namespace PdfEditor.Redaction.Operators.TextShowing;
 
@@ -7,15 +8,10 @@ namespace PdfEditor.Redaction.Operators.TextShowing;
 /// TJ takes an array containing strings and numbers.
 /// Numbers adjust horizontal position (in thousandths of text space units).
 /// Example: [(H) -10 (ello)] TJ shows "Hello" with -10/1000 em adjustment.
+/// Supports CID/CJK fonts with proper encoding detection.
 /// </summary>
 public class TjUpperOperatorHandler : IOperatorHandler
 {
-    private static readonly Lazy<Encoding> Windows1252Encoding = new(() =>
-    {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        return Encoding.GetEncoding("Windows-1252");
-    });
-
     public string OperatorName => "TJ";
 
     public PdfOperation? Handle(IReadOnlyList<object> operands, PdfParserState state)
@@ -48,7 +44,14 @@ public class TjUpperOperatorHandler : IOperatorHandler
             Glyphs = glyphs,
             FontName = state.FontName,
             FontSize = state.FontSize,
-            BoundingBox = boundingBox
+            BoundingBox = boundingBox,
+            // Copy text state parameters for reconstruction (issue #122)
+            CharacterSpacing = state.CharacterSpacing,
+            WordSpacing = state.WordSpacing,
+            HorizontalScaling = state.HorizontalScaling,
+            TextRenderingMode = state.TextRenderingMode,
+            TextRise = state.TextRise,
+            TextLeading = state.TextLeading
         };
     }
 
@@ -77,11 +80,10 @@ public class TjUpperOperatorHandler : IOperatorHandler
         // Text matrix [a b c d e f] has scaling in 'a' (X) and 'd' (Y)
         var textMatrix = state.TextMatrix;
         var effectiveFontSize = state.FontSize * textMatrix.D;  // Y-scale from matrix
-        var xScale = textMatrix.A;  // X-scale from matrix
-
-        // Character dimensions (using effective font size from matrix)
-        var charWidth = effectiveFontSize * 0.6 * (state.HorizontalScaling / 100.0);
         var charHeight = effectiveFontSize;
+
+        // Get font info for encoding
+        var fontInfo = state.GetCurrentFontInfo();
 
         int arrayIndex = 0;
         int globalStringIndex = 0;
@@ -118,11 +120,11 @@ public class TjUpperOperatorHandler : IOperatorHandler
             }
             else
             {
-                // String element
+                // String element - decode using font-aware encoding
                 string text;
                 if (element is byte[] bytes)
                 {
-                    text = Windows1252Encoding.Value.GetString(bytes);
+                    text = TextDecoder.Decode(bytes, fontInfo);
                 }
                 else if (element is string s)
                 {
@@ -139,6 +141,12 @@ public class TjUpperOperatorHandler : IOperatorHandler
                 {
                     var ch = text[charIndex];
                     textBuilder.Append(ch);
+
+                    // Calculate character width based on character type
+                    // CJK characters are full-width (width ≈ height)
+                    // Latin characters are approximately 0.6 × height
+                    double widthFactor = TextDecoder.IsFullWidthCharacter(ch) ? 1.0 : 0.6;
+                    var charWidth = effectiveFontSize * widthFactor * (state.HorizontalScaling / 100.0);
 
                     var glyphWidth = charWidth;
                     if (ch == ' ')

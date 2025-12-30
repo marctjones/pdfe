@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using PdfEditor.Redaction.ContentStream;
 using PdfEditor.Redaction.ContentStream.Building;
 using PdfEditor.Redaction.ContentStream.Parsing;
 using PdfEditor.Redaction.GlyphLevel;
@@ -20,6 +21,8 @@ public class TextRedactor : ITextRedactor
     private readonly IContentStreamParser _parser;
     private readonly IContentStreamBuilder _builder;
     private readonly GlyphRemover? _glyphRemover;
+    private readonly ContentStreamRedactor _contentStreamRedactor;
+    private readonly AnnotationRedactor _annotationRedactor;
     private readonly ILogger<TextRedactor> _logger;
 
     /// <summary>
@@ -54,6 +57,8 @@ public class TextRedactor : ITextRedactor
         _builder = builder;
         _glyphRemover = new GlyphRemover(builder);
         _logger = logger;
+        _contentStreamRedactor = new ContentStreamRedactor(parser, builder, _glyphRemover, logger);
+        _annotationRedactor = new AnnotationRedactor();
     }
 
     /// <summary>
@@ -77,6 +82,8 @@ public class TextRedactor : ITextRedactor
             textSegmenterLogger,
             operationReconstructorLogger);
         _logger = logger;
+        _contentStreamRedactor = new ContentStreamRedactor(parser, builder, _glyphRemover, logger);
+        _annotationRedactor = new AnnotationRedactor();
     }
 
     /// <inheritdoc />
@@ -154,7 +161,7 @@ public class TextRedactor : ITextRedactor
                 var page = pdfDoc.Pages[pageNumber - 1]; // 0-based index
                 var redactionAreas = pageLocations.Select(l => l.BoundingBox).ToList();
 
-                // Process this page
+                // Process this page (content stream)
                 var pageDetails = RedactPageContent(inputPath, pageNumber, page, redactionAreas, options);
                 details.AddRange(pageDetails.Select(d => new RedactionDetail
                 {
@@ -163,9 +170,30 @@ public class TextRedactor : ITextRedactor
                     Location = d.box
                 }));
 
+                // Redact annotations in the redaction areas
+                if (options.RedactAnnotations)
+                {
+                    var annotationsRemoved = _annotationRedactor.RedactAnnotations(page, redactionAreas);
+                    if (annotationsRemoved > 0)
+                    {
+                        _logger.LogDebug("Removed {Count} annotations from page {Page}", annotationsRemoved, pageNumber);
+                    }
+                }
+
                 if (pageDetails.Count > 0)
                 {
                     affectedPages.Add(pageNumber);
+                }
+            }
+
+            // Detect PDF/A level before saving (for post-save metadata injection and transparency removal)
+            PdfALevel pdfALevel = PdfALevel.None;
+            if (options.PreservePdfAMetadata || options.RemovePdfATransparency)
+            {
+                pdfALevel = PdfADetector.Detect(inputPath);
+                if (pdfALevel != PdfALevel.None)
+                {
+                    _logger.LogDebug("Detected PDF/A level {Level}, will preserve after save", PdfADetector.GetDisplayName(pdfALevel));
                 }
             }
 
@@ -175,8 +203,31 @@ public class TextRedactor : ITextRedactor
                 SanitizeMetadata(pdfDoc);
             }
 
+            // Set modification date before save (required for PDF/A compliance)
+            pdfDoc.Info.ModificationDate = DateTime.Now;
+
             // Save the modified PDF
             pdfDoc.Save(outputPath);
+
+            // Post-save: Inject PDF/A metadata (PDFsharp overwrites XMP on save)
+            if (pdfALevel != PdfALevel.None)
+            {
+                var preserved = PdfAMetadataPreserver.PreserveMetadataInFile(outputPath, pdfALevel);
+                if (preserved)
+                {
+                    _logger.LogDebug("Successfully preserved PDF/A metadata");
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to preserve PDF/A metadata");
+                }
+            }
+
+            // Post-save: Remove transparency for PDF/A-1 compliance (if detected and requested)
+            if (options.RemovePdfATransparency && pdfALevel != PdfALevel.None && IsPdfA1(pdfALevel))
+            {
+                RemoveTransparencyFromFile(outputPath);
+            }
 
             var result = RedactionResult.Succeeded(details.Count, affectedPages, details);
             RedactionLogger.LogRedactionResult(_logger, result);
@@ -283,8 +334,6 @@ public class TextRedactor : ITextRedactor
         var normalizedSearchText = NormalizeText(searchText);
         _logger.LogInformation("FindTextMatches: After normalization, searching for '{NormalizedText}'", normalizedSearchText);
 
-        int searchIndex = 0;
-
         // Search character by character, building up normalized strings to compare
         int i = 0;
         while (i <= fullText.Length - normalizedSearchText.Length)
@@ -370,8 +419,6 @@ public class TextRedactor : ITextRedactor
         List<PdfRectangle> redactionAreas,
         RedactionOptions options)
     {
-        var redactedItems = new List<(string text, PdfRectangle box)>();
-
         // Get page dimensions
         var mediaBox = page.MediaBox;
         var pageHeight = mediaBox.Height;
@@ -381,97 +428,36 @@ public class TextRedactor : ITextRedactor
         if (contentBytes == null || contentBytes.Length == 0)
         {
             _logger.LogDebug("Page has no content stream");
-            return redactedItems;
+            return new List<(string text, PdfRectangle box)>();
         }
 
-        RedactionLogger.LogParseStart(_logger, contentBytes.Length, pageHeight);
-
-        // Parse content stream
-        var operations = _parser.Parse(contentBytes, pageHeight);
-
-        // Log redaction areas
-        foreach (var area in redactionAreas)
-        {
-            RedactionLogger.LogRedactionArea(_logger, area, 0);
-        }
-
-        // Choose redaction strategy based on options
-        byte[] newContentBytes;
-
+        // Extract letters if needed for glyph-level redaction
+        IReadOnlyList<Letter>? letters = null;
         if (options.UseGlyphLevelRedaction && _glyphRemover != null)
         {
-            _logger.LogInformation("Using glyph-level redaction for page {Page}", pageNumber);
-
-            // Use glyph-level redaction for each area
-            var modifiedOps = new List<PdfOperation>(operations);
-
-            foreach (var area in redactionAreas)
-            {
-                // Get PdfPig letters for this page
-                using var doc = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
-                var pigPage = doc.GetPage(pageNumber);
-                var letters = pigPage.Letters;
-
-                // Process operations with glyph-level redaction
-                modifiedOps = _glyphRemover.ProcessOperations(modifiedOps, letters, area);
-
-                // Track redacted text (approximate - we don't have exact text anymore)
-                var textOps = operations.OfType<TextOperation>()
-                    .Where(op => op.IntersectsWith(area))
-                    .ToList();
-
-                foreach (var textOp in textOps)
-                {
-                    redactedItems.Add((textOp.Text, textOp.BoundingBox));
-                }
-            }
-
-            // Build new content stream from modified operations
-            newContentBytes = _builder.Build(modifiedOps);
+            letters = PdfPig.PdfPigHelper.ExtractLettersFromFile(pdfPath, pageNumber, _logger);
         }
-        else
-        {
-            _logger.LogInformation("Using whole-operation redaction for page {Page}", pageNumber);
 
-            // Original whole-operation removal logic
-            var textOps = operations.OfType<TextOperation>().ToList();
-            var opsToRemove = new HashSet<int>();
+        // Get page resources for Form XObject support
+        var resources = page.Elements.GetDictionary("/Resources");
 
-            for (int i = 0; i < textOps.Count; i++)
-            {
-                var textOp = textOps[i];
-                RedactionLogger.LogTextOperation(_logger, textOp, i);
-
-                foreach (var area in redactionAreas)
-                {
-                    var intersects = textOp.IntersectsWith(area);
-                    RedactionLogger.LogIntersection(_logger, textOp, area, intersects);
-
-                    if (intersects)
-                    {
-                        opsToRemove.Add(textOp.StreamPosition);
-                        redactedItems.Add((textOp.Text, textOp.BoundingBox));
-                        break;
-                    }
-                }
-            }
-
-            RedactionLogger.LogParseComplete(_logger, operations.Count, textOps.Count);
-
-            if (opsToRemove.Count == 0)
-            {
-                _logger.LogDebug("No operations to redact on this page");
-                return redactedItems;
-            }
-
-            _logger.LogDebug("Removing {Count} operations from content stream", opsToRemove.Count);
-
-            // Build new content stream with redacted operations
-            newContentBytes = _builder.BuildWithRedactions(operations, redactionAreas);
-        }
+        // Delegate to ContentStreamRedactor for core redaction logic (with Form XObject support)
+        var (newContentBytes, details, formXObjectResults) = _contentStreamRedactor.RedactContentStreamWithFormXObjects(
+            contentBytes,
+            pageHeight,
+            redactionAreas,
+            letters,
+            options,
+            resources);
 
         // Replace page content
         ReplacePageContent(page, newContentBytes);
+
+        // Update any modified Form XObjects
+        if (formXObjectResults.Count > 0 && resources != null)
+        {
+            UpdateFormXObjects(resources, formXObjectResults);
+        }
 
         // Draw visual markers
         if (options.DrawVisualMarker)
@@ -479,7 +465,72 @@ public class TextRedactor : ITextRedactor
             DrawRedactionMarkers(page, redactionAreas, options.MarkerColor);
         }
 
-        return redactedItems;
+        // Convert details to return format
+        return details.Select(d => (d.RedactedText, d.Location)).ToList();
+    }
+
+    /// <summary>
+    /// Update Form XObject content streams with redacted content.
+    /// </summary>
+    private void UpdateFormXObjects(PdfDictionary resources, List<ContentStream.FormXObjectRedactionResult> formXObjectResults)
+    {
+        var xObjects = resources.Elements.GetDictionary("/XObject");
+        if (xObjects == null)
+            return;
+
+        foreach (var result in formXObjectResults)
+        {
+            try
+            {
+                // Get the name without leading slash
+                var name = result.XObjectName;
+                if (name.StartsWith("/"))
+                    name = name.Substring(1);
+
+                // Try with and without leading slash
+                var key = "/" + name;
+                if (!xObjects.Elements.ContainsKey(key))
+                {
+                    key = name;
+                    if (!xObjects.Elements.ContainsKey(key))
+                    {
+                        _logger.LogWarning("Could not find Form XObject to update: {Name}", result.XObjectName);
+                        continue;
+                    }
+                }
+
+                // Get the XObject
+                PdfDictionary? xObject = null;
+                var element = xObjects.Elements[key];
+                if (element is PdfSharp.Pdf.Advanced.PdfReference pdfRef)
+                {
+                    xObject = pdfRef.Value as PdfDictionary;
+                }
+                else if (element is PdfDictionary dict)
+                {
+                    xObject = dict;
+                }
+
+                if (xObject == null)
+                {
+                    _logger.LogWarning("Could not resolve Form XObject: {Name}", result.XObjectName);
+                    continue;
+                }
+
+                // Replace the Form XObject's content stream
+                if (xObject.Stream != null)
+                {
+                    // Replace stream content
+                    xObject.Stream.Value = result.ModifiedContentBytes;
+                    _logger.LogInformation("Updated Form XObject {Name} with redacted content ({Bytes} bytes)",
+                        result.XObjectName, result.ModifiedContentBytes.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update Form XObject: {Name}", result.XObjectName);
+            }
+        }
     }
 
     /// <summary>
@@ -539,6 +590,12 @@ public class TextRedactor : ITextRedactor
     {
         try
         {
+            var oldSize = GetContentStreamBytes(page)?.Length ?? 0;
+
+            // DIAGNOSTIC LOGGING
+            _logger.LogWarning("[REPLACE-CONTENT] Replacing page content: {OldSize} → {NewSize} bytes (change: {Delta})",
+                oldSize, newContent.Length, newContent.Length - oldSize);
+
             // Clear existing content
             page.Contents.Elements.Clear();
 
@@ -550,10 +607,13 @@ public class TextRedactor : ITextRedactor
             page.Owner.Internals.AddObject(newStream);
 
             // Set as page content
-            if (newStream.Reference != null)
+            if (newStream.Reference == null)
             {
-                page.Contents.Elements.Add(newStream.Reference);
+                _logger.LogError("[REPLACE-CONTENT] ❌ ERROR: newStream.Reference is NULL!");
+                throw new InvalidOperationException("Failed to create PDF reference for new content stream");
             }
+            page.Contents.Elements.Add(newStream.Reference);
+            _logger.LogWarning("[REPLACE-CONTENT] ✅ Successfully added new stream reference");
         }
         catch (Exception ex)
         {
@@ -621,6 +681,166 @@ public class TextRedactor : ITextRedactor
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to sanitize metadata");
+        }
+    }
+
+    // ======================================================================
+    // PUBLIC API: In-Memory PdfPage Operations
+    // ======================================================================
+
+    /// <summary>
+    /// Redact specific areas on a PdfPage in-place.
+    /// See ITextRedactor.RedactPage() for full documentation.
+    /// </summary>
+    public PageRedactionResult RedactPage(
+        PdfPage page,
+        IEnumerable<PdfRectangle> areas,
+        RedactionOptions? options = null,
+        IReadOnlyList<UglyToad.PdfPig.Content.Letter>? pageLetters = null)
+    {
+        try
+        {
+            options ??= new RedactionOptions();
+            var redactionAreas = areas.ToList();
+
+            if (redactionAreas.Count == 0)
+            {
+                return PageRedactionResult.Succeeded(Array.Empty<RedactionDetail>());
+            }
+
+            // Get page dimensions
+            var mediaBox = page.MediaBox;
+            var pageHeight = mediaBox.Height;
+
+            // Get content stream bytes
+            var contentBytes = GetContentStreamBytes(page);
+            if (contentBytes == null || contentBytes.Length == 0)
+            {
+                _logger.LogDebug("Page has no content stream");
+                return PageRedactionResult.Succeeded(Array.Empty<RedactionDetail>());
+            }
+
+            // Determine page number for detail reporting
+            int pageNumber = PdfPig.PdfPigHelper.GetPageNumber(page);
+
+            // IMPORTANT: For glyph-level redaction, letters must be provided by caller
+            // We cannot auto-extract because page.Owner.Save() marks document as "already saved"
+            // If UseGlyphLevelRedaction=true but pageLetters=null, we log a warning and fall back
+            IReadOnlyList<UglyToad.PdfPig.Content.Letter>? lettersToUse = pageLetters;
+            if (options.UseGlyphLevelRedaction && lettersToUse == null)
+            {
+                _logger.LogWarning(
+                    "Glyph-level redaction requested but no letters provided. " +
+                    "Falling back to whole-operation redaction. " +
+                    "For TRUE glyph-level redaction, use file-based API or provide letters via ExtractLettersFromPage().");
+            }
+
+            // Delegate to ContentStreamRedactor for core redaction logic
+            var (newContentBytes, details) = _contentStreamRedactor.RedactContentStream(
+                contentBytes,
+                pageHeight,
+                redactionAreas,
+                lettersToUse,
+                options);
+
+            // Update page number in details
+            var updatedDetails = details.Select(d => d with { PageNumber = pageNumber }).ToList();
+
+            // Replace page content
+            ReplacePageContent(page, newContentBytes);
+
+            // Redact annotations in the redaction areas
+            if (options.RedactAnnotations)
+            {
+                var annotationsRemoved = _annotationRedactor.RedactAnnotations(page, redactionAreas);
+                if (annotationsRemoved > 0)
+                {
+                    _logger.LogDebug("Removed {Count} annotations from page", annotationsRemoved);
+                }
+            }
+
+            // Draw visual markers
+            if (options.DrawVisualMarker)
+            {
+                DrawRedactionMarkers(page, redactionAreas, options.MarkerColor);
+            }
+
+            return PageRedactionResult.Succeeded(updatedDetails);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to redact page");
+            return PageRedactionResult.Failed($"Redaction failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Extract PdfPig letters from a PdfPage for glyph-level redaction.
+    /// See ITextRedactor.ExtractLettersFromPage() for full documentation.
+    /// </summary>
+    public IReadOnlyList<UglyToad.PdfPig.Content.Letter> ExtractLettersFromPage(PdfPage page)
+    {
+        try
+        {
+            int pageNumber = PdfPig.PdfPigHelper.GetPageNumber(page);
+
+            // Save document to MemoryStream and extract letters
+            using var memoryStream = new MemoryStream();
+            page.Owner.Save(memoryStream, closeStream: false);
+            memoryStream.Position = 0;
+
+            // Open with PdfPig and extract letters
+            using var pigDocument = UglyToad.PdfPig.PdfDocument.Open(memoryStream);
+            var pigPage = pigDocument.GetPage(pageNumber);
+
+            return pigPage.Letters;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract letters from page");
+            throw new InvalidOperationException(
+                $"Failed to extract letters from page: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Sanitize document metadata after redactions.
+    /// See ITextRedactor.SanitizeDocumentMetadata() for full documentation.
+    /// </summary>
+    public void SanitizeDocumentMetadata(PdfSharp.Pdf.PdfDocument document)
+    {
+        SanitizeMetadata(document);
+    }
+
+    /// <summary>
+    /// Check if a PDF/A level is PDF/A-1 (which forbids transparency).
+    /// </summary>
+    private static bool IsPdfA1(PdfALevel level)
+    {
+        return level == PdfALevel.PdfA_1a || level == PdfALevel.PdfA_1b;
+    }
+
+    /// <summary>
+    /// Remove transparency features from a saved PDF file for PDF/A-1 compliance.
+    /// </summary>
+    private void RemoveTransparencyFromFile(string filePath)
+    {
+        try
+        {
+            // Open, modify, and save
+            using var doc = PdfReader.Open(filePath, PdfDocumentOpenMode.Modify);
+            var remover = new PdfATransparencyRemover();
+            var removed = remover.RemoveTransparency(doc);
+
+            if (removed > 0)
+            {
+                doc.Save(filePath);
+                _logger.LogDebug("Removed {Count} transparency features for PDF/A-1 compliance", removed);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove transparency from PDF/A-1 file");
         }
     }
 }

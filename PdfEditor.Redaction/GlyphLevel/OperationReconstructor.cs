@@ -130,6 +130,24 @@ public class OperationReconstructor
         var fontName = originalOperation.FontName;
         var fontSize = originalOperation.FontSize;
 
+        // DIAGNOSTIC: Log font information
+        _logger.LogDebug("[FONT-DEBUG] Reconstructing with Font='{FontName}', Size={FontSize}",
+            fontName ?? "NULL", fontSize);
+
+        // If font info is missing, use defaults to prevent PDF corruption
+        // This can happen if the original Tf operator wasn't captured during parsing
+        if (string.IsNullOrEmpty(fontName))
+        {
+            _logger.LogWarning("[FONT-FIX] FontName is NULL/empty, using default /F1");
+            fontName = "/F1";  // Default font reference - may not work in all PDFs
+        }
+
+        if (fontSize <= 0 || fontSize > 1000)
+        {
+            _logger.LogWarning("[FONT-FIX] FontSize={FontSize} is invalid, using default 12", fontSize);
+            fontSize = 12.0;  // Default 12pt
+        }
+
         var tfOperation = new TextStateOperation
         {
             Operator = "Tf",
@@ -139,6 +157,87 @@ public class OperationReconstructor
         };
 
         operations.Add(tfOperation);
+
+        // Emit text state operators if non-default values (issue #122)
+        // This ensures reconstructed text matches original appearance
+
+        // Character spacing (Tc) - default is 0
+        if (Math.Abs(originalOperation.CharacterSpacing) > 0.001)
+        {
+            operations.Add(new TextStateOperation
+            {
+                Operator = "Tc",
+                Operands = new List<object> { originalOperation.CharacterSpacing },
+                StreamPosition = 0,
+                InsideTextBlock = false
+            });
+            _logger.LogDebug("[TEXT-STATE] Emitting Tc={CharacterSpacing}", originalOperation.CharacterSpacing);
+        }
+
+        // Word spacing (Tw) - default is 0
+        if (Math.Abs(originalOperation.WordSpacing) > 0.001)
+        {
+            operations.Add(new TextStateOperation
+            {
+                Operator = "Tw",
+                Operands = new List<object> { originalOperation.WordSpacing },
+                StreamPosition = 0,
+                InsideTextBlock = false
+            });
+            _logger.LogDebug("[TEXT-STATE] Emitting Tw={WordSpacing}", originalOperation.WordSpacing);
+        }
+
+        // Horizontal scaling (Tz) - default is 100
+        if (Math.Abs(originalOperation.HorizontalScaling - 100.0) > 0.001)
+        {
+            operations.Add(new TextStateOperation
+            {
+                Operator = "Tz",
+                Operands = new List<object> { originalOperation.HorizontalScaling },
+                StreamPosition = 0,
+                InsideTextBlock = false
+            });
+            _logger.LogDebug("[TEXT-STATE] Emitting Tz={HorizontalScaling}", originalOperation.HorizontalScaling);
+        }
+
+        // Text rendering mode (Tr) - default is 0 (fill)
+        if (originalOperation.TextRenderingMode != 0)
+        {
+            operations.Add(new TextStateOperation
+            {
+                Operator = "Tr",
+                Operands = new List<object> { originalOperation.TextRenderingMode },
+                StreamPosition = 0,
+                InsideTextBlock = false
+            });
+            _logger.LogDebug("[TEXT-STATE] Emitting Tr={TextRenderingMode}", originalOperation.TextRenderingMode);
+        }
+
+        // Text rise (Ts) - default is 0
+        if (Math.Abs(originalOperation.TextRise) > 0.001)
+        {
+            operations.Add(new TextStateOperation
+            {
+                Operator = "Ts",
+                Operands = new List<object> { originalOperation.TextRise },
+                StreamPosition = 0,
+                InsideTextBlock = false
+            });
+            _logger.LogDebug("[TEXT-STATE] Emitting Ts={TextRise}", originalOperation.TextRise);
+        }
+
+        // Text leading (TL) - default is 0
+        if (Math.Abs(originalOperation.TextLeading) > 0.001)
+        {
+            operations.Add(new TextStateOperation
+            {
+                Operator = "TL",
+                Operands = new List<object> { originalOperation.TextLeading },
+                StreamPosition = 0,
+                InsideTextBlock = false
+            });
+            _logger.LogDebug("[TEXT-STATE] Emitting TL={TextLeading}", originalOperation.TextLeading);
+        }
 
         foreach (var segment in segments)
         {

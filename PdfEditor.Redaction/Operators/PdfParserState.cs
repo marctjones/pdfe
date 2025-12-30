@@ -1,3 +1,5 @@
+using PdfEditor.Redaction.Fonts;
+
 namespace PdfEditor.Redaction.Operators;
 
 /// <summary>
@@ -10,6 +12,12 @@ public class PdfParserState
     /// Page height in points (for coordinate conversion).
     /// </summary>
     public double PageHeight { get; }
+
+    /// <summary>
+    /// Font registry containing information about fonts defined in page resources.
+    /// Used to determine encoding for CID/CJK fonts.
+    /// </summary>
+    public Dictionary<string, FontInfo> FontRegistry { get; set; } = new();
 
     /// <summary>
     /// Current stream position (for ordering operations).
@@ -150,6 +158,37 @@ public class PdfParserState
         var combined = TextMatrix.Multiply(TransformationMatrix);
         return (combined.E, combined.F);
     }
+
+    /// <summary>
+    /// Get information about the current font, if available.
+    /// </summary>
+    public FontInfo? GetCurrentFontInfo()
+    {
+        if (string.IsNullOrEmpty(FontName))
+            return null;
+
+        // Try with and without leading slash
+        var nameWithSlash = FontName.StartsWith("/") ? FontName : "/" + FontName;
+        var nameWithoutSlash = FontName.StartsWith("/") ? FontName.Substring(1) : FontName;
+
+        if (FontRegistry.TryGetValue(nameWithSlash, out var fontInfo))
+            return fontInfo;
+
+        if (FontRegistry.TryGetValue(nameWithoutSlash, out fontInfo))
+            return fontInfo;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the current font is a CID/CJK font.
+    /// </summary>
+    public bool IsCurrentFontCid => GetCurrentFontInfo()?.IsCidFont ?? false;
+
+    /// <summary>
+    /// Whether the current font is likely a CJK font (CID or CJK-named).
+    /// </summary>
+    public bool IsCurrentFontCjk => GetCurrentFontInfo()?.IsCjkFont ?? false;
 
     /// <summary>
     /// Snapshot of graphics state for save/restore.
