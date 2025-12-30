@@ -117,4 +117,70 @@ public static class TestPdfGenerator
         // For TJ testing, we'll need actual PDF samples
         CreateSimpleTextPdf(outputPath, text);
     }
+
+    /// <summary>
+    /// Create a PDF with multiple pages, each containing text.
+    /// </summary>
+    public static void CreateMultiPagePdf(string outputPath, string[] pageTexts)
+    {
+        using var document = new PdfDocument();
+
+        foreach (var text in pageTexts)
+        {
+            var page = document.AddPage();
+            page.Width = XUnit.FromPoint(612);  // US Letter
+            page.Height = XUnit.FromPoint(792);
+
+            using var gfx = XGraphics.FromPdfPage(page);
+            var font = new XFont("Helvetica", 12);
+
+            // Draw at known position
+            gfx.DrawString(text, font, XBrushes.Black, new XPoint(100, 92));
+        }
+
+        document.Save(outputPath);
+    }
+
+    /// <summary>
+    /// Create an empty PDF with one blank page (no content).
+    /// </summary>
+    public static void CreateEmptyPdf(string outputPath)
+    {
+        using var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(612);  // US Letter
+        page.Height = XUnit.FromPoint(792);
+
+        // Don't draw anything - just save empty page
+        document.Save(outputPath);
+    }
+
+    /// <summary>
+    /// Create a PDF with custom page dimensions (for testing unusual page sizes).
+    /// </summary>
+    /// <param name="outputPath">Output file path</param>
+    /// <param name="widthPoints">Width in PDF points (72 DPI)</param>
+    /// <param name="heightPoints">Height in PDF points (72 DPI)</param>
+    /// <param name="text">Optional text to include on the page</param>
+    public static void CreateCustomSizePdf(string outputPath, double widthPoints, double heightPoints, string text = "Test Document")
+    {
+        using var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(widthPoints);
+        page.Height = XUnit.FromPoint(heightPoints);
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Helvetica", 12);
+
+        // Draw text at center of page
+        var textSize = gfx.MeasureString(text, font);
+        var x = (widthPoints - textSize.Width) / 2;
+        var y = (heightPoints - textSize.Height) / 2;
+
+        // Convert PDF Y to graphics Y
+        var graphicsY = heightPoints - y;
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(x, graphicsY));
+
+        document.Save(outputPath);
+    }
 }

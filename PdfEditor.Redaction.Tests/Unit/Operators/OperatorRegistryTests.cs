@@ -29,14 +29,14 @@ public class OperatorRegistryTests
     }
 
     [Fact]
-    public void CreateDefault_DoesNotRegisterFutureOperators()
+    public void CreateDefault_RegistersQuoteOperators()
     {
         // Act
         var registry = OperatorRegistry.CreateDefault();
 
-        // Assert - these are NOT in v1.3.0 (legacy/rarely used operators)
-        registry.HasHandler("'").Should().BeFalse("Quote operator is not in v1.3.0");
-        registry.HasHandler("\"").Should().BeFalse("Double-quote operator is not in v1.3.0");
+        // Assert - quote operators are now supported (issues #81 and #82)
+        registry.HasHandler("'").Should().BeTrue("Quote operator should be registered (issue #81)");
+        registry.HasHandler("\"").Should().BeTrue("Double-quote operator should be registered (issue #82)");
     }
 
     [Fact]

@@ -237,26 +237,53 @@ public class VeraPdfCorpusTests : IDisposable
 
         int successful = 0;
         int failed = 0;
+        int skipped = 0;
+        var failures = new List<(string path, string reason)>();
 
         foreach (var pdfPath in pdfFilesWithText)
         {
             try
             {
-                var result = TestRedactionOnFile(pdfPath);
+                var result = TestRedactionOnFile(pdfPath, out string failureReason);
                 if (result)
+                {
                     successful++;
+                }
+                else if (failureReason.StartsWith("No 5+ letter word"))
+                {
+                    // Not a redaction failure - just no suitable test word found
+                    // (e.g., Japanese text, chart labels with numbers)
+                    skipped++;
+                }
                 else
+                {
                     failed++;
+                    failures.Add((pdfPath, failureReason));
+                }
             }
             catch (Exception ex)
             {
                 _output.WriteLine($"Exception processing {Path.GetFileName(pdfPath)}: {ex.Message}");
                 failed++;
+                failures.Add((pdfPath, $"Exception: {ex.Message}"));
             }
         }
 
-        _output.WriteLine($"Redaction integrity test: {successful} successful, {failed} failed");
+        _output.WriteLine($"Redaction integrity test: {successful} successful, {skipped} skipped (no suitable text), {failed} failed");
+
+        if (failures.Count > 0)
+        {
+            _output.WriteLine("\n=== FAILURE DETAILS ===");
+            foreach (var (path, reason) in failures)
+            {
+                _output.WriteLine($"FAILED: {Path.GetFileName(path)}");
+                _output.WriteLine($"  Path: {path}");
+                _output.WriteLine($"  Reason: {reason}");
+            }
+        }
+
         successful.Should().BeGreaterThan(0, "At least some files should be redactable");
+        failed.Should().Be(0, "All files with suitable text should be redactable");
     }
 
     /// <summary>
@@ -309,6 +336,125 @@ public class VeraPdfCorpusTests : IDisposable
 
         var successRate = (double)results.Successful / results.Total;
         successRate.Should().BeGreaterOrEqualTo(0.75, "At least 75% of diverse PDFs should be processable");
+    }
+
+    #endregion
+
+    #region PDF/A-1b Clause 6.1 File Structure Tests
+
+    /// <summary>
+    /// Tests redaction against PDF/A-1b 6.1 File structure corpus files.
+    /// Verifies that redaction preserves PDF file structure integrity.
+    /// Issue #141: Atomic Test Suite for PDF Structure Integrity
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Corpus")]
+    [Trait("Standard", "PDF/A-1b")]
+    [Trait("Clause", "6.1")]
+    public void FileStructure_RedactionPreservesIntegrity()
+    {
+        Skip.IfNot(CorpusExists, "veraPDF corpus not found");
+
+        var fileStructureDir = Path.Combine(CorpusPath, "PDF_A-1b", "6.1 File structure");
+        if (!Directory.Exists(fileStructureDir))
+        {
+            _output.WriteLine("6.1 File structure directory not found, skipping");
+            return;
+        }
+
+        var pdfFiles = Directory.GetFiles(fileStructureDir, "*.pdf", SearchOption.AllDirectories).ToList();
+        _output.WriteLine($"Testing {pdfFiles.Count} files from 6.1 File structure category");
+
+        if (pdfFiles.Count == 0)
+        {
+            _output.WriteLine("No files found in 6.1 File structure");
+            return;
+        }
+
+        int successful = 0;
+        int failed = 0;
+        var failures = new List<(string path, string reason)>();
+
+        foreach (var pdfPath in pdfFiles)
+        {
+            try
+            {
+                // 1. Verify we can open the original
+                var infoResult = PdferTestRunner.Run("info", pdfPath);
+                if (infoResult.ExitCode != 0)
+                {
+                    // Skip files that pdfer can't open (intentional fail cases)
+                    continue;
+                }
+
+                // 2. Redact an arbitrary area (center of first page)
+                var outputPath = Path.Combine(_tempDir, $"struct_test_{Guid.NewGuid()}.pdf");
+                var redactResult = PdferTestRunner.Run("redact", pdfPath, outputPath, "test", "-q");
+
+                // 3. Verify output file exists and can be opened
+                if (!File.Exists(outputPath))
+                {
+                    failed++;
+                    failures.Add((pdfPath, "Output file not created"));
+                    continue;
+                }
+
+                // 4. Verify file structure preserved - can still get info
+                var outputInfoResult = PdferTestRunner.Run("info", outputPath);
+                if (outputInfoResult.ExitCode != 0)
+                {
+                    failed++;
+                    failures.Add((pdfPath, $"Output file structure corrupted: {outputInfoResult.Stderr}"));
+                    continue;
+                }
+
+                // 5. Verify with PdfPig (independent reader)
+                try
+                {
+                    using var doc = PdfDocument.Open(outputPath);
+                    var pageCount = doc.NumberOfPages;
+                    if (pageCount == 0)
+                    {
+                        failed++;
+                        failures.Add((pdfPath, "Output has 0 pages"));
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    failures.Add((pdfPath, $"PdfPig cannot open output: {ex.Message}"));
+                    continue;
+                }
+
+                successful++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                failures.Add((pdfPath, $"Exception: {ex.Message}"));
+            }
+        }
+
+        _output.WriteLine($"6.1 File structure: {successful} successful, {failed} failed");
+
+        if (failures.Count > 0)
+        {
+            _output.WriteLine("\n=== FAILURE DETAILS (6.1 File structure) ===");
+            foreach (var (path, reason) in failures.Take(10)) // Limit output
+            {
+                _output.WriteLine($"FAILED: {Path.GetFileName(path)} - {reason}");
+            }
+        }
+
+        // At least 90% should maintain structure (some files may be intentional fail cases)
+        var total = successful + failed;
+        if (total > 0)
+        {
+            var successRate = (double)successful / total;
+            successRate.Should().BeGreaterOrEqualTo(0.90,
+                "Redaction should preserve PDF file structure in at least 90% of 6.1 corpus files");
+        }
     }
 
     #endregion
@@ -438,29 +584,54 @@ public class VeraPdfCorpusTests : IDisposable
 
     private bool TestRedactionOnFile(string pdfPath)
     {
+        return TestRedactionOnFile(pdfPath, out _);
+    }
+
+    private bool TestRedactionOnFile(string pdfPath, out string failureReason)
+    {
+        failureReason = string.Empty;
+
         // Extract some text to redact
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.GetPages().FirstOrDefault(p => p.Text.Length > 10);
 
-        if (page == null) return false;
+        if (page == null)
+        {
+            failureReason = "No page with text > 10 chars";
+            return false;
+        }
 
         // Find a word to redact (take first 5+ character word)
         var words = page.Text.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
         var targetWord = words.FirstOrDefault(w => w.Length >= 5 && w.All(char.IsLetter));
 
-        if (targetWord == null) return false;
+        if (targetWord == null)
+        {
+            failureReason = $"No 5+ letter word found in text: '{page.Text.Substring(0, Math.Min(50, page.Text.Length))}...'";
+            return false;
+        }
 
         var outputPath = Path.Combine(_tempDir, $"redacted_{Guid.NewGuid()}.pdf");
 
         // Perform redaction
         var result = PdferTestRunner.Run("redact", pdfPath, outputPath, targetWord, "-q");
 
-        if (result.ExitCode != 0) return false;
+        if (result.ExitCode != 0)
+        {
+            failureReason = $"Redaction command failed (exit {result.ExitCode}) for '{targetWord}': {result.Stderr}";
+            return false;
+        }
 
         // Verify redaction
         var verifyResult = PdferTestRunner.Run("verify", outputPath, targetWord);
 
-        return verifyResult.ExitCode == 0;  // 0 = text not found (good!)
+        if (verifyResult.ExitCode != 0)
+        {
+            failureReason = $"Text '{targetWord}' still present after redaction";
+            return false;
+        }
+
+        return true;  // 0 = text not found (good!)
     }
 
     private void LogResults(CorpusTestResults results)
