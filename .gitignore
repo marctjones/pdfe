@@ -58,3 +58,14 @@ publish/
 
 # Logs from test runs
 logs/
+
+# Downloaded PDF specifications (large files)
+ISO-32000-*.pdf
+ISO-32000-*.md
+
+# Test output
+test-output/
+run_output.txt
+
+# Screenshots (temporary debug files)
+screenshots/
