@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PdfEditor\PdfEditor.csproj" />
+    <ProjectReference Include="..\PdfEditor.Redaction\PdfEditor.Redaction.csproj" />
   </ItemGroup>
 
 </Project>
