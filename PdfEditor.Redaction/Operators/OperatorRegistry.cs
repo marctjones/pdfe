@@ -27,6 +27,11 @@ public class OperatorRegistry
         // Text state operators
         registry.Register(new TfOperatorHandler());
         registry.Register(new TlOperatorHandler());
+        registry.Register(new TrOperatorHandler());
+        registry.Register(new TcOperatorHandler());
+        registry.Register(new TwOperatorHandler());
+        registry.Register(new TzOperatorHandler());
+        registry.Register(new TsOperatorHandler());
 
         // Text positioning operators
         registry.Register(new TmOperatorHandler());
@@ -37,6 +42,8 @@ public class OperatorRegistry
         // Text showing operators
         registry.Register(new TjOperatorHandler());
         registry.Register(new TjUpperOperatorHandler());
+        registry.Register(new QuoteOperatorHandler());        // ' operator
+        registry.Register(new DoubleQuoteOperatorHandler()); // " operator
 
         return registry;
     }

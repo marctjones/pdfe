@@ -47,8 +47,9 @@ public class LetterFinder
             return matches;
         }
 
-        // Strategy: Use Y-range filtering + proximity to operation start + text length limit
-        // This handles cases where bbox estimates are wrong but Y-position is approximately correct
+        // Strategy: Use Y-range filtering + TEXT MATCHING to find the sequence
+        // Issue #90: Parsed glyph positions can differ from PdfPig by 3-6 points,
+        // so we can't rely solely on X proximity. Instead, search for the text within the Y band.
 
         // Get starting position from glyphs if available, otherwise use bbox
         double startX = opBox.Left;
@@ -60,39 +61,72 @@ public class LetterFinder
         }
 
         // Find letters in the same Y-range (with tolerance for height differences)
-        const double YTolerance = 5.0;
+        // Issue #125: Adaptive Y-tolerance based on font size
+        // Issue #90: Parsed glyph positions can differ from PdfPig by 3-6 points
+        // Small fonts: use minimum tolerance (5.0 points)
+        // Large fonts: scale with font size (40% of font size)
+        double fontSize = textOperation.FontSize > 0 ? textOperation.FontSize : 12.0;
+        double yTolerance = Math.Max(5.0, fontSize * 0.4);
+
         var candidateLetters = allLetters
             .Where(l => {
-                bool yNearby = Math.Abs(l.GlyphRectangle.Bottom - startY) <= YTolerance;
+                bool yNearby = Math.Abs(l.GlyphRectangle.Bottom - startY) <= yTolerance;
                 return yNearby;
             })
             .OrderBy(l => l.GlyphRectangle.Left)
             .ToList();
 
-        // Now find the sequence starting closest to our start position
-        // Take letters that form a continuous sequence
-        var nearbyLetters = new List<Letter>();
-
-        if (candidateLetters.Count > 0)
+        if (candidateLetters.Count == 0)
         {
-            // Find the letter closest to our start X position
-            var closestLetter = candidateLetters
-                .OrderBy(l => Math.Abs(l.GlyphRectangle.Left - startX))
-                .First();
-
-            var startIndex = candidateLetters.IndexOf(closestLetter);
-
-            // Take letters from this point, up to the text length (with some tolerance for ligatures)
-            var maxLetters = Math.Min(candidateLetters.Count - startIndex, textOperation.Text.Length + 5);
-            nearbyLetters = candidateLetters.Skip(startIndex).Take(maxLetters).ToList();
+            _logger.LogDebug("No candidate letters in Y band for operation '{Text}'",
+                textOperation.Text.Length > 30 ? textOperation.Text.Substring(0, 30) + "..." : textOperation.Text);
+            return matches;
         }
 
-        _logger.LogDebug("Found {Count} letters for operation at ({X:F2},{Y:F2}) with text '{Text}'",
-            nearbyLetters.Count, opBox.Left, opBox.Bottom,
-            textOperation.Text.Length > 20 ? textOperation.Text.Substring(0, 20) + "..." : textOperation.Text);
+        // Build full text from candidate letters
+        var candidateText = string.Join("", candidateLetters.Select(l => l.Value));
+        var operationText = textOperation.Text;
 
-        // Now try to match the nearby letters to our text operation
-        // Use combined spatial + textual matching
+        _logger.LogDebug("Searching for '{OpText}' in Y-band text '{CandidateText}' ({Count} letters)",
+            operationText.Length > 30 ? operationText.Substring(0, 30) + "..." : operationText,
+            candidateText.Length > 50 ? candidateText.Substring(0, 50) + "..." : candidateText,
+            candidateLetters.Count);
+
+        // Strategy 1: Find exact text match within the Y band
+        int matchIndex = FindTextInCandidates(candidateText, operationText, candidateLetters, startX);
+
+        if (matchIndex >= 0)
+        {
+            // Found exact match - use the letters at this position
+            int count = Math.Min(operationText.Length, candidateLetters.Count - matchIndex);
+            for (int i = 0; i < count; i++)
+            {
+                matches.Add(new LetterMatch
+                {
+                    CharacterIndex = i,
+                    Letter = candidateLetters[matchIndex + i],
+                    OperationText = operationText
+                });
+            }
+            _logger.LogDebug("Text match found at index {Index}: {Count} letters matched", matchIndex, matches.Count);
+            return matches;
+        }
+
+        // Strategy 2: Fallback to old proximity-based matching for non-text operations
+        // (keeping this for backwards compatibility with edge cases)
+        var nearbyLetters = new List<Letter>();
+        var closestLetter = candidateLetters
+            .OrderBy(l => Math.Abs(l.GlyphRectangle.Left - startX))
+            .First();
+
+        var startIndex = candidateLetters.IndexOf(closestLetter);
+        var maxLetters = Math.Min(candidateLetters.Count - startIndex, textOperation.Text.Length + 5);
+        nearbyLetters = candidateLetters.Skip(startIndex).Take(maxLetters).ToList();
+
+        _logger.LogDebug("Fallback to proximity: {Count} letters starting from '{First}'",
+            nearbyLetters.Count, nearbyLetters.FirstOrDefault()?.Value ?? "?");
+
+        // Try to match with relaxed rules
         matches = MatchLettersToText(nearbyLetters, textOperation.Text, textOperation);
 
         if (matches.Count == 0)
@@ -103,6 +137,57 @@ public class LetterFinder
         }
 
         return matches;
+    }
+
+    /// <summary>
+    /// Find the operation text within the candidate letters, preferring matches closer to startX.
+    /// </summary>
+    private int FindTextInCandidates(string candidateText, string operationText, List<Letter> candidateLetters, double startX)
+    {
+        // Find all occurrences of operation text in candidate text
+        var foundIndices = new List<int>();
+        int searchStart = 0;
+        while (true)
+        {
+            int idx = candidateText.IndexOf(operationText, searchStart, StringComparison.Ordinal);
+            if (idx < 0)
+            {
+                // Try case-insensitive
+                idx = candidateText.IndexOf(operationText, searchStart, StringComparison.OrdinalIgnoreCase);
+            }
+            if (idx < 0) break;
+            foundIndices.Add(idx);
+            searchStart = idx + 1;
+        }
+
+        if (foundIndices.Count == 0)
+            return -1;
+
+        if (foundIndices.Count == 1)
+            return foundIndices[0];
+
+        // Multiple matches found - pick the one closest to startX
+        int bestIndex = foundIndices[0];
+        double bestDistance = double.MaxValue;
+
+        foreach (var idx in foundIndices)
+        {
+            if (idx < candidateLetters.Count)
+            {
+                double letterX = candidateLetters[idx].GlyphRectangle.Left;
+                double distance = Math.Abs(letterX - startX);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestIndex = idx;
+                }
+            }
+        }
+
+        _logger.LogDebug("Found {Count} matches, chose index {Index} (X distance: {Distance:F2})",
+            foundIndices.Count, bestIndex, bestDistance);
+
+        return bestIndex;
     }
 
     /// <summary>

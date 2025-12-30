@@ -27,6 +27,56 @@ public interface ITextRedactor
     /// <param name="options">Optional redaction options.</param>
     /// <returns>Result containing information about what was redacted.</returns>
     RedactionResult RedactLocations(string inputPath, string outputPath, IEnumerable<RedactionLocation> locations, RedactionOptions? options = null);
+
+    /// <summary>
+    /// Redact specific areas on a PdfPage in-place.
+    ///
+    /// IMPORTANT: Coordinates must be in PDF coordinate system (bottom-left origin, points).
+    /// The page is modified directly; the document is NOT saved.
+    ///
+    /// For glyph-level redaction (UseGlyphLevelRedaction = true), you should provide pageLetters
+    /// for best performance when making multiple redactions on the same page.
+    /// Call ExtractLettersFromPage() once and cache the result.
+    /// </summary>
+    /// <param name="page">The PdfPage to redact (from PdfSharp).</param>
+    /// <param name="areas">Areas to redact (PDF coordinates, bottom-left origin).</param>
+    /// <param name="options">Optional redaction options.</param>
+    /// <param name="pageLetters">Optional pre-extracted letters for glyph-level redaction (improves performance).</param>
+    /// <returns>Result containing information about what was redacted.</returns>
+    PageRedactionResult RedactPage(
+        PdfSharp.Pdf.PdfPage page,
+        IEnumerable<PdfRectangle> areas,
+        RedactionOptions? options = null,
+        IReadOnlyList<Letter>? pageLetters = null);
+
+    /// <summary>
+    /// Extract PdfPig letters from a PdfPage for glyph-level redaction.
+    ///
+    /// IMPORTANT: This method saves the document to a MemoryStream to extract letters.
+    /// Cache and reuse the results for multiple redactions on the same page to avoid
+    /// repeated document serialization.
+    ///
+    /// RECOMMENDATION: For best performance with multiple redactions:
+    /// 1. Call ExtractLettersFromPage() once
+    /// 2. Cache the returned letters
+    /// 3. Pass the cached letters to multiple RedactPage() calls
+    /// </summary>
+    /// <param name="page">The PdfPage to extract letters from.</param>
+    /// <returns>List of letters on the page for use in glyph-level redaction.</returns>
+    IReadOnlyList<Letter> ExtractLettersFromPage(PdfSharp.Pdf.PdfPage page);
+
+    /// <summary>
+    /// Sanitize document metadata after redactions.
+    ///
+    /// This removes:
+    /// - Title, Subject, Author, Keywords from Info dictionary
+    /// - XMP metadata stream
+    /// - Other identifying information
+    ///
+    /// Call this AFTER all redactions, before saving the document.
+    /// </summary>
+    /// <param name="document">The PdfDocument to sanitize.</param>
+    void SanitizeDocumentMetadata(PdfSharp.Pdf.PdfDocument document);
 }
 
 /// <summary>
@@ -64,9 +114,10 @@ public class RedactionOptions
 
     /// <summary>
     /// Whether to sanitize document metadata (Info dictionary, XMP).
-    /// Default: false
+    /// Default: true (security best practice - prevents redacted text leaking via metadata)
+    /// See issue #150: Metadata may contain redacted text - security concern
     /// </summary>
-    public bool SanitizeMetadata { get; set; } = false;
+    public bool SanitizeMetadata { get; set; } = true;
 
     /// <summary>
     /// Case-sensitive text matching.
@@ -81,6 +132,31 @@ public class RedactionOptions
     /// Default: true (TRUE glyph-level redaction is the purpose of this library)
     /// </summary>
     public bool UseGlyphLevelRedaction { get; set; } = true;
+
+    /// <summary>
+    /// Whether to preserve PDF/A identification metadata after redaction.
+    /// When true, PDF/A documents will retain their PDF/A identification in XMP metadata.
+    /// Default: true (maintains document compliance claims)
+    /// See issue #157: Preserve PDF/A XMP metadata during redaction
+    /// </summary>
+    public bool PreservePdfAMetadata { get; set; } = true;
+
+    /// <summary>
+    /// Whether to redact annotations (comments, highlights, stamps, form fields) in the redaction area.
+    /// When true, annotations that intersect with the redaction area will be removed.
+    /// Default: true (security best practice - annotations may contain sensitive data)
+    /// See issue #164: Implement annotation redaction
+    /// </summary>
+    public bool RedactAnnotations { get; set; } = true;
+
+    /// <summary>
+    /// Whether to remove transparency features for PDF/A-1 compliance.
+    /// PDF/A-1 (ISO 19005-1) forbids transparency entirely.
+    /// When true, removes /Group transparency entries, normalizes ExtGState (CA, ca, SMask, BM).
+    /// Default: true (ensures visual markers don't break PDF/A-1 compliance)
+    /// See issue #158: Draw redaction boxes without transparency for PDF/A
+    /// </summary>
+    public bool RemovePdfATransparency { get; set; } = true;
 }
 
 /// <summary>
@@ -183,4 +259,51 @@ public readonly record struct PdfRectangle(double Left, double Bottom, double Ri
     {
         return x >= Left && x <= Right && y >= Bottom && y <= Top;
     }
+}
+
+/// <summary>
+/// Result of a single-page redaction operation.
+/// </summary>
+public class PageRedactionResult
+{
+    /// <summary>
+    /// Whether the redaction completed successfully.
+    /// </summary>
+    public bool Success { get; init; }
+
+    /// <summary>
+    /// Number of redactions applied to the page.
+    /// </summary>
+    public int RedactionCount { get; init; }
+
+    /// <summary>
+    /// Error message if Success is false.
+    /// </summary>
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// Detailed information about each redaction.
+    /// </summary>
+    public IReadOnlyList<RedactionDetail> Details { get; init; } = Array.Empty<RedactionDetail>();
+
+    /// <summary>
+    /// Create a successful result.
+    /// </summary>
+    public static PageRedactionResult Succeeded(IEnumerable<RedactionDetail> details)
+        => new()
+        {
+            Success = true,
+            RedactionCount = details.Count(),
+            Details = details.ToList()
+        };
+
+    /// <summary>
+    /// Create a failed result.
+    /// </summary>
+    public static PageRedactionResult Failed(string error)
+        => new()
+        {
+            Success = false,
+            ErrorMessage = error
+        };
 }
