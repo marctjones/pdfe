@@ -4,8 +4,8 @@ A cross-platform desktop PDF editor built with **C# + .NET 8 + Avalonia UI** fea
 
 [![Release](https://img.shields.io/github/v/release/marctjones/pdfe)](https://github.com/marctjones/pdfe/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-280%20passing-brightgreen)](PdfEditor.Tests)
-[![CLI Tests](https://img.shields.io/badge/CLI%20tests-74%20passing-brightgreen)](PdfEditor.Redaction.Cli.Tests)
+[![Tests](https://img.shields.io/badge/tests-1600%2B%20passing-brightgreen)](PdfEditor.Tests)
+[![Build](https://img.shields.io/badge/build-0%20warnings-brightgreen)](PdfEditor)
 
 ## Features
 
@@ -35,7 +35,7 @@ Unlike most PDF redaction tools that just draw black boxes over content, PdfEdit
 - **Verified with external tools** (pdftotext, PdfPig, pdfer) - redacted text cannot be extracted
 - **Clipboard history** shows exactly what text was removed
 - **Page rotation aware** - accurate redaction on rotated pages
-- **280+ automated tests** verify redaction integrity
+- **1600+ automated tests** verify redaction integrity
 - **Real-world validated** - Successfully redacts government forms (birth certificates, etc.)
 
 ## Installation
@@ -313,8 +313,8 @@ pdfe/
 Run the comprehensive test suite:
 
 ```bash
-# All tests (280+ tests across all projects)
-dotnet test
+# All tests (1600+ tests across all projects)
+dotnet test PdfEditor.Tests PdfEditor.Redaction.Tests PdfEditor.Redaction.Cli.Tests
 
 # GUI tests
 cd PdfEditor.Tests
@@ -333,10 +333,10 @@ dotnet test --filter "FullyQualifiedName~BirthCertificate"
 ```
 
 **Test Statistics:**
-- **280 total tests** across 3 test projects
-- **74 CLI tests** (100% passing) - pdfer command validation
-- **136 library tests** (97% passing) - Redaction engine
-- **70+ GUI tests** (including automation scripts)
+- **1600+ total tests** across 3 test projects
+- **809 library tests** - Redaction engine (PdfEditor.Redaction.Tests)
+- **74+ CLI tests** - pdfer command validation (PdfEditor.Redaction.Cli.Tests)
+- **899 GUI tests** - Application tests (PdfEditor.Tests)
 
 **Test Categories:**
 - **Unit tests** - ViewModel, operators, coordinate conversion
@@ -376,7 +376,7 @@ dotnet publish -c Release -r osx-arm64 --self-contained true -p:PublishSingleFil
 ## Documentation
 
 - **[GitHub Wiki](https://github.com/marctjones/pdfe/wiki)** - Project architecture, redaction engine, testing guide
-- **[AGENT.md](AGENT.md)** - AI assistant guidelines and development documentation
+- **[CLAUDE.md](CLAUDE.md)** - AI assistant guidelines and development documentation
 - **[REDACTION_AI_GUIDELINES.md](REDACTION_AI_GUIDELINES.md)** - Critical guidelines for AI-assisted development
 - **[LICENSES.md](LICENSES.md)** - Complete dependency licensing
 
