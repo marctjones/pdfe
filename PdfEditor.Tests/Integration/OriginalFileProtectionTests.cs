@@ -426,7 +426,7 @@ public class OriginalFileProtectionTests : IDisposable
         var document2 = _documentService.GetCurrentDocument();
 
         var area2 = GetWordBounds(secondOriginal, "ANOTHER");
-        _redactionService.RedactArea(document2!.Pages[0], area2, originalPath, renderDpi: 150);
+        _redactionService.RedactArea(document2!.Pages[0], area2, secondOriginal, renderDpi: 150);
 
         var secondSavePath = CreateTempPath("sequential2_v1.pdf");
         _documentService.SaveDocument(secondSavePath);
