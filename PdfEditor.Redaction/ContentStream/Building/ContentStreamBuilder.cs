@@ -164,6 +164,16 @@ public class ContentStreamBuilder : IContentStreamBuilder
 
     private void SerializeOperation(PdfOperation operation, StringBuilder sb)
     {
+        // CJK support (Issue #174): Check if this operation needs hex string encoding
+        if (operation is TextOperation textOp)
+        {
+            _currentOpIsCidFont = textOp.IsCidFont || textOp.WasHexString;
+        }
+        else
+        {
+            _currentOpIsCidFont = false;
+        }
+
         // Serialize operands
         foreach (var operand in operation.Operands)
         {
@@ -174,6 +184,9 @@ public class ContentStreamBuilder : IContentStreamBuilder
         // Add operator
         sb.Append(operation.Operator);
     }
+
+    // Track whether current operation is CID font (for hex string serialization)
+    private bool _currentOpIsCidFont;
 
     private void SerializeOperand(object operand, StringBuilder sb)
     {
@@ -206,8 +219,16 @@ public class ContentStreamBuilder : IContentStreamBuilder
                 break;
 
             case byte[] bytes:
-                // Hex string or literal string from bytes
-                SerializeLiteralStringFromBytes(bytes, sb);
+                // CJK support (Issue #174): Use hex strings for CID fonts
+                // Hex strings are required for proper 2-byte CID encoding
+                if (_currentOpIsCidFont)
+                {
+                    SerializeHexString(bytes, sb);
+                }
+                else
+                {
+                    SerializeLiteralStringFromBytes(bytes, sb);
+                }
                 break;
 
             case List<object> array:
@@ -334,6 +355,20 @@ public class ContentStreamBuilder : IContentStreamBuilder
         }
 
         sb.Append(')');
+    }
+
+    /// <summary>
+    /// Serialize bytes as a hex string for CID/CJK fonts.
+    /// CID fonts require hex strings because they use 2-byte character codes.
+    /// </summary>
+    private void SerializeHexString(byte[] bytes, StringBuilder sb)
+    {
+        sb.Append('<');
+        foreach (byte b in bytes)
+        {
+            sb.Append(b.ToString("X2"));
+        }
+        sb.Append('>');
     }
 
     private void SerializeArray(List<object> array, StringBuilder sb)

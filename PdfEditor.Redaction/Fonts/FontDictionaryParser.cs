@@ -16,14 +16,36 @@ public static class FontDictionaryParser
     /// <returns>Dictionary mapping font names (e.g., "/F1") to FontInfo.</returns>
     public static Dictionary<string, FontInfo> ExtractFonts(PdfPage page)
     {
-        var fonts = new Dictionary<string, FontInfo>();
-
         try
         {
             var resources = page.Elements.GetDictionary("/Resources");
             if (resources == null)
-                return fonts;
+                return new Dictionary<string, FontInfo>();
 
+            return ExtractFontsFromResources(resources);
+        }
+        catch
+        {
+            // Return empty dictionary if resources can't be accessed
+            return new Dictionary<string, FontInfo>();
+        }
+    }
+
+    /// <summary>
+    /// Extract font information from a resources dictionary.
+    /// Used when parsing content streams without access to the full page object.
+    /// </summary>
+    /// <param name="resources">The PDF resources dictionary containing fonts.</param>
+    /// <returns>Dictionary mapping font names (e.g., "/F1") to FontInfo.</returns>
+    public static Dictionary<string, FontInfo> ExtractFontsFromResources(PdfDictionary? resources)
+    {
+        var fonts = new Dictionary<string, FontInfo>();
+
+        if (resources == null)
+            return fonts;
+
+        try
+        {
             var fontDict = resources.Elements.GetDictionary("/Font");
             if (fontDict == null)
                 return fonts;
@@ -84,14 +106,52 @@ public static class FontDictionaryParser
         // Check if this is a CID font (Type0 with DescendantFonts)
         bool isCidFont = subtype == "Type0" && HasDescendantFonts(fontDict);
 
+        // Extract ToUnicode CMap data if present
+        byte[]? toUnicodeData = ExtractToUnicodeData(fontDict);
+
         return new FontInfo
         {
             Name = fontName,
             Subtype = subtype,
             BaseFont = baseFont,
             Encoding = encoding,
-            IsCidFont = isCidFont
+            IsCidFont = isCidFont,
+            ToUnicodeData = toUnicodeData
         };
+    }
+
+    /// <summary>
+    /// Extract the ToUnicode CMap stream data from a font dictionary.
+    /// </summary>
+    private static byte[]? ExtractToUnicodeData(PdfDictionary fontDict)
+    {
+        try
+        {
+            var toUnicodeItem = fontDict.Elements["/ToUnicode"];
+            if (toUnicodeItem == null)
+                return null;
+
+            PdfDictionary? streamDict = null;
+
+            if (toUnicodeItem is PdfReference toUnicodeRef)
+            {
+                streamDict = toUnicodeRef.Value as PdfDictionary;
+            }
+            else if (toUnicodeItem is PdfDictionary dict)
+            {
+                streamDict = dict;
+            }
+
+            if (streamDict?.Stream != null)
+            {
+                return streamDict.Stream.UnfilteredValue;
+            }
+        }
+        catch
+        {
+            // Ignore errors extracting ToUnicode
+        }
+        return null;
     }
 
     /// <summary>

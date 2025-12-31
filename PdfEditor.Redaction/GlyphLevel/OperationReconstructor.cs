@@ -306,10 +306,32 @@ public class OperationReconstructor
             // For reconstructed operations, segment width may be inaccurate due to
             // unmapped characters. Use a minimal bbox and rely on PdfPig to provide
             // accurate positions when this gets parsed again.
+
+            // CJK support (Issue #174): Use raw bytes to preserve encoding
+            // Must use raw bytes when:
+            // 1. CID fonts (2-byte character codes)
+            // 2. Fonts with ToUnicode CMap (HasToUnicode) - the text was decoded, need original bytes
+            // 3. Any font using non-ASCII character codes (detected by examining text vs raw bytes)
+            object operandValue;
+            var rawBytes = segment.GetRawBytes();
+            bool needRawBytes = segment.IsCidFont || segment.HasToUnicode ||
+                                (rawBytes.Length > 0 && ContainsNonAsciiOrMismatch(segment.Text, rawBytes));
+
+            if (needRawBytes && rawBytes.Length > 0)
+            {
+                operandValue = rawBytes;  // byte[] will be serialized as hex string
+                _logger.LogDebug("[CJK-RECONSTRUCT] Using {ByteCount} raw bytes for segment '{Text}' (CID={IsCid}, ToUnicode={HasToUnicode})",
+                    rawBytes.Length, segment.Text, segment.IsCidFont, segment.HasToUnicode);
+            }
+            else
+            {
+                operandValue = segment.Text;
+            }
+
             var textOp = new TextOperation
             {
                 Operator = "Tj",
-                Operands = new List<object> { segment.Text },
+                Operands = new List<object> { operandValue },
                 BoundingBox = new PdfRectangle(
                     segment.StartX,
                     segment.StartY,
@@ -320,7 +342,11 @@ public class OperationReconstructor
                 FontSize = fontSize,
                 StreamPosition = 0,
                 InsideTextBlock = false,  // Reconstructed operations are NOT inside the original text block
-                Glyphs = new List<GlyphPosition>()
+                Glyphs = new List<GlyphPosition>(),
+                // CJK support (Issue #174)
+                IsCidFont = segment.IsCidFont,
+                WasHexString = segment.WasHexString || segment.IsCidFont,
+                RawBytes = segment.GetRawBytes()
             };
 
             operations.Add(textOp);
@@ -339,5 +365,70 @@ public class OperationReconstructor
             segments.Count, operations.Count);
 
         return operations;
+    }
+
+    /// <summary>
+    /// Check if raw bytes represent a custom encoding that differs from simple character-to-byte mapping.
+    /// This indicates ToUnicode decoding was used and we need raw bytes for reconstruction.
+    /// </summary>
+    /// <remarks>
+    /// For CJK fonts with ToUnicode CMap, the bytes are character codes (e.g., 0x01, 0x02, 0x03)
+    /// that get decoded to Unicode characters (便, 携, 式). The raw bytes must be used for reconstruction.
+    ///
+    /// For Western fonts with Unicode text (e.g., em dash), PdfSharp writes the Unicode
+    /// code point directly, and the "raw bytes" from glyph positions would just be the lower
+    /// byte of each character - but we should NOT use them as they're not the real encoding.
+    ///
+    /// Detection: If all raw bytes are in 0x00-0x1F range (control characters that map to
+    /// CJK or other symbols via ToUnicode), then it's a ToUnicode font.
+    /// </remarks>
+    private static bool ContainsNonAsciiOrMismatch(string text, byte[] rawBytes)
+    {
+        if (rawBytes.Length == 0 || text.Length == 0)
+            return false;
+
+        // Key insight: ToUnicode fonts use low byte values (0x01-0x1F, etc.) as character codes
+        // that decode to high Unicode characters. If we see a pattern like:
+        // - Raw bytes: 0x04 0x05 0x06 0x03
+        // - Decoded text: 文件格式 (Unicode 0x6587, 0x4EF6, 0x683C, 0x5F0F)
+        // Then the raw bytes clearly don't correspond to the Unicode values,
+        // indicating ToUnicode decoding was used.
+
+        // Check if any character is CJK (U+4E00 to U+9FFF and related ranges)
+        // AND the raw bytes are low values (indicating character codes, not actual encoding)
+        bool hasCjk = false;
+        bool hasHighByte = false;
+
+        foreach (char c in text)
+        {
+            // CJK ranges
+            if ((c >= 0x4E00 && c <= 0x9FFF) ||  // CJK Unified Ideographs
+                (c >= 0x3400 && c <= 0x4DBF) ||  // CJK Extension A
+                (c >= 0xF900 && c <= 0xFAFF) ||  // CJK Compatibility Ideographs
+                (c >= 0x3040 && c <= 0x30FF) ||  // Hiragana + Katakana
+                (c >= 0xAC00 && c <= 0xD7AF))    // Hangul Syllables
+            {
+                hasCjk = true;
+            }
+        }
+
+        // Check raw bytes - ToUnicode fonts typically use sequential low bytes
+        foreach (byte b in rawBytes)
+        {
+            if (b >= 0x80)
+                hasHighByte = true;
+        }
+
+        // If text has CJK characters but raw bytes are all low values,
+        // this is a ToUnicode-encoded font that needs raw bytes for reconstruction
+        if (hasCjk && !hasHighByte)
+            return true;
+
+        // Also check for obvious encoding mismatch: if lengths differ significantly
+        // (CID fonts might use 2 bytes per character, but we handle that separately)
+        // For simple fonts, the number of raw bytes should roughly equal number of chars
+        // If they differ significantly, likely a different encoding scheme is in use.
+
+        return false;
     }
 }

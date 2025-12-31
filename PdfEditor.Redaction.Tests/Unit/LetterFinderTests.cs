@@ -35,10 +35,12 @@ public class LetterFinderTests : IDisposable
     }
 
     [Fact]
-    public void FindOperationLetters_EmptyBoundingBox_ReturnsEmpty()
+    public void FindOperationLetters_EmptyBoundingBox_StillMatchesByText()
     {
         // Arrange
         var pdfPath = CreateTempPdf("Hello");
+        // Empty bounding box - but LetterFinder uses TEXT matching, not spatial!
+        // Issue #151: Text matching is rotation-independent and more reliable.
         var textOp = CreateTextOperation("Hello", bbox: new PdfRectangle(0, 0, 0, 0));
 
         using var document = PdfDocument.Open(pdfPath);
@@ -47,8 +49,9 @@ public class LetterFinderTests : IDisposable
         // Act
         var matches = _finder.FindOperationLetters(textOp, letters);
 
-        // Assert
-        matches.Should().BeEmpty();
+        // Assert - Text matching finds letters regardless of bounding box
+        matches.Should().HaveCount(5, "LetterFinder uses text content matching, not bounding box");
+        matches[0].Letter.Value.Should().Be("H");
     }
 
     [Fact]
@@ -113,7 +116,7 @@ public class LetterFinderTests : IDisposable
     }
 
     [Fact]
-    public void FindOperationLetters_NoOverlap_ReturnsEmpty()
+    public void FindOperationLetters_NoOverlap_StillMatchesByText()
     {
         // Arrange
         var pdfPath = CreateTempPdf("Hello");
@@ -121,14 +124,17 @@ public class LetterFinderTests : IDisposable
         using var document = PdfDocument.Open(pdfPath);
         var letters = document.GetPage(1).Letters;
 
-        // Bounding box far away from actual letters
+        // Bounding box far away from actual letters - but LetterFinder uses TEXT matching, not spatial!
+        // Issue #151: Text matching is rotation-independent and more reliable than spatial matching.
         var textOp = CreateTextOperation("Hello", bbox: new PdfRectangle(500, 500, 550, 520));
 
         // Act
         var matches = _finder.FindOperationLetters(textOp, letters);
 
-        // Assert
-        matches.Should().BeEmpty();
+        // Assert - Text matching finds the letters regardless of bounding box position
+        matches.Should().HaveCount(5, "LetterFinder uses text content matching, not spatial overlap");
+        matches[0].Letter.Value.Should().Be("H");
+        matches[4].Letter.Value.Should().Be("o");
     }
 
     [Fact]

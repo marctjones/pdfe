@@ -253,43 +253,22 @@ public class ContentStreamParser : IContentStreamParser
     }
 
     /// <summary>
-    /// Parse a content stream with access to page resources for Form XObject resolution.
+    /// Parse a content stream with access to page resources for Form XObject resolution and font awareness.
     /// This method detects Form XObjects and recursively parses their content streams.
+    /// It also extracts font information from resources for proper CID/CJK encoding support.
     /// </summary>
     public IReadOnlyList<PdfOperation> ParseWithResources(byte[] contentBytes, double pageHeight, PdfDictionary? resources)
     {
-        // First, parse the main content stream
-        var operations = Parse(contentBytes, pageHeight).ToList();
-
         if (resources == null)
-            return operations;
+            return Parse(contentBytes, pageHeight);
 
-        // Find all Do operations and check if they reference Form XObjects
-        var result = new List<PdfOperation>();
+        // Extract fonts from resources for CID/CJK support
+        var fonts = FontDictionaryParser.ExtractFontsFromResources(resources);
 
-        foreach (var op in operations)
-        {
-            if (op is ImageOperation imageOp && imageOp.Operator == "Do")
-            {
-                // Try to resolve the XObject and check if it's a Form
-                var formOp = TryParseFormXObject(imageOp, resources, pageHeight);
-                if (formOp != null)
-                {
-                    result.Add(formOp);
-                }
-                else
-                {
-                    // Keep as ImageOperation (it's an image or couldn't be resolved)
-                    result.Add(op);
-                }
-            }
-            else
-            {
-                result.Add(op);
-            }
-        }
+        // Parse with font awareness
+        var operations = ParseWithFonts(contentBytes, pageHeight, fonts, resources).ToList();
 
-        return result;
+        return operations;
     }
 
     /// <summary>
