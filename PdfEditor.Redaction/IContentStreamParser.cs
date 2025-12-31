@@ -140,15 +140,38 @@ public class TextOperation : PdfOperation
     public double TextLeading { get; init; }
 
     #endregion
+
+    #region CJK Support (Issue #174)
+
+    /// <summary>
+    /// Whether this text operation used hex string format in the original PDF.
+    /// CID fonts typically use hex strings like &lt;0048006500&gt;.
+    /// </summary>
+    public bool WasHexString { get; init; }
+
+    /// <summary>
+    /// Whether this text is from a CID-keyed font.
+    /// CID fonts require 2-byte character codes and special reconstruction.
+    /// </summary>
+    public bool IsCidFont { get; init; }
+
+    /// <summary>
+    /// The raw bytes of the operand (for faithful reconstruction).
+    /// </summary>
+    public byte[]? RawBytes { get; init; }
+
+    #endregion
 }
 
 /// <summary>
 /// Position information for a single glyph.
+/// Enhanced for CJK font support with raw byte preservation.
 /// </summary>
 public record GlyphPosition
 {
     /// <summary>
-    /// The character value.
+    /// The Unicode character value (decoded from raw bytes).
+    /// For CJK fonts, this is the ToUnicode-mapped or Identity-decoded value.
     /// </summary>
     public required string Character { get; init; }
 
@@ -166,6 +189,31 @@ public record GlyphPosition
     /// Index within the string element.
     /// </summary>
     public int StringIndex { get; init; }
+
+    /// <summary>
+    /// Raw bytes as they appear in the PDF content stream.
+    /// For Western fonts: 1 byte. For CID fonts: 2 bytes (big-endian).
+    /// Used for faithful reconstruction during redaction.
+    /// </summary>
+    public byte[]? RawBytes { get; init; }
+
+    /// <summary>
+    /// Character ID (CID) for CID-keyed fonts.
+    /// For Western fonts, this is the single byte value.
+    /// For CID fonts, this is the 2-byte big-endian value.
+    /// </summary>
+    public int CidValue { get; init; }
+
+    /// <summary>
+    /// Whether this glyph came from a CID-keyed font.
+    /// </summary>
+    public bool IsCidGlyph { get; init; }
+
+    /// <summary>
+    /// Whether the original operand was a hex string (true) or literal string (false).
+    /// Needed to reconstruct the operand in the same format.
+    /// </summary>
+    public bool WasHexString { get; init; }
 }
 
 /// <summary>

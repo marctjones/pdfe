@@ -65,6 +65,7 @@ internal class ContentStreamRedactor
     /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
     /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
     /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
+    /// <param name="resources">Page resources for font information (CJK support). If null, font detection is disabled.</param>
     /// <returns>Modified content stream bytes and list of redaction details.</returns>
     public (byte[] modifiedContent, List<RedactionDetail> details) RedactContentStream(
         byte[] contentBytes,
@@ -75,7 +76,8 @@ internal class ContentStreamRedactor
         List<PdfRectangle>? visualRedactionAreas = null,
         int pageRotation = 0,
         double mediaBoxWidth = 612,
-        double mediaBoxHeight = 792)
+        double mediaBoxHeight = 792,
+        PdfDictionary? resources = null)
     {
         var details = new List<RedactionDetail>();
 
@@ -87,8 +89,17 @@ internal class ContentStreamRedactor
 
         RedactionLogger.LogParseStart(_logger, contentBytes.Length, pageHeight);
 
-        // Parse content stream
-        var operations = _parser.Parse(contentBytes, pageHeight);
+        // Parse content stream (with font awareness if resources provided)
+        IReadOnlyList<PdfOperation> operations;
+        var parser = _parser as ContentStreamParser;
+        if (parser != null && resources != null)
+        {
+            operations = parser.ParseWithResources(contentBytes, pageHeight, resources);
+        }
+        else
+        {
+            operations = _parser.Parse(contentBytes, pageHeight);
+        }
 
         // Log redaction areas
         foreach (var area in redactionAreas)
@@ -254,9 +265,10 @@ internal class ContentStreamRedactor
         // Then redact the main content stream
         // Pass visual areas for glyph-level letter matching (if provided)
         // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
+        // CRITICAL FIX (Issue #174): Pass resources for CJK font support
         var (mainContent, mainDetails) = RedactContentStream(
             contentBytes, pageHeight, redactionAreas, letters, options, visualRedactionAreas,
-            pageRotation, mediaBoxWidth, mediaBoxHeight);
+            pageRotation, mediaBoxWidth, mediaBoxHeight, resources);
         allDetails.AddRange(mainDetails);
 
         return (mainContent, allDetails, formXObjectResults);

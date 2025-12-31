@@ -1,5 +1,6 @@
 using PdfEditor.Redaction.ContentStream;
 using PdfEditor.Redaction.Fonts;
+using PdfEditor.Redaction.StringEncoding;
 
 namespace PdfEditor.Redaction.Operators.TextShowing;
 
@@ -10,6 +11,8 @@ namespace PdfEditor.Redaction.Operators.TextShowing;
 /// </summary>
 public class TjOperatorHandler : IOperatorHandler
 {
+    private readonly HexStringParser _hexParser = new();
+
     public string OperatorName => "Tj";
 
     public PdfOperation? Handle(IReadOnlyList<object> operands, PdfParserState state)
@@ -22,17 +25,39 @@ public class TjOperatorHandler : IOperatorHandler
         var stringOperand = operands[0];
         string text;
         byte[]? rawBytes = null;
+        bool wasHexString = false;
+
+        // Get font info for CID-aware parsing
+        var fontInfo = state.GetCurrentFontInfo();
+        bool isCidFont = fontInfo?.IsCidFont ?? false;
 
         if (stringOperand is byte[] bytes)
         {
             rawBytes = bytes;
+            wasHexString = true; // byte[] operands come from hex strings
             // Use font-aware decoding for CID/CJK support
-            var fontInfo = state.GetCurrentFontInfo();
             text = TextDecoder.Decode(bytes, fontInfo);
         }
         else if (stringOperand is string s)
         {
-            text = s;
+            // For CJK fonts with ToUnicode CMap, we need to re-decode from raw bytes
+            // because the parser decoded with Windows-1252 but the font uses custom encoding
+            if (fontInfo?.HasToUnicode == true)
+            {
+                // Convert string back to bytes for ToUnicode decoding
+                rawBytes = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes(s);
+                text = TextDecoder.Decode(rawBytes, fontInfo);
+            }
+            else
+            {
+                // For standard fonts, use the string as-is
+                text = s;
+                // Still set rawBytes for CID font reconstruction (if needed)
+                if (isCidFont)
+                {
+                    rawBytes = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes(s);
+                }
+            }
         }
         else
         {
@@ -42,14 +67,24 @@ public class TjOperatorHandler : IOperatorHandler
         if (string.IsNullOrEmpty(text))
             return null;
 
-        // Calculate glyph positions with CJK-aware widths
-        var glyphs = CalculateGlyphPositions(text, state);
+        // Calculate glyph positions with CJK-aware widths and raw bytes
+        var glyphs = CalculateGlyphPositions(text, rawBytes, wasHexString, fontInfo, state);
 
         // Calculate bounding box from all glyphs
         var boundingBox = CalculateBoundingBox(glyphs);
 
         // Advance text matrix by total width
         AdvanceTextMatrix(text, glyphs, state);
+
+        // Calculate effective font size including text matrix scaling
+        // PDF uses: effectiveSize = Tf_size * Tm_scale
+        // For example: "/F1 1 Tf" + "9 0 0 9 x y Tm" → effective size = 1 * 9 = 9pt
+        var textMatrix = state.TextMatrix;
+        var effectiveFontSize = state.FontSize * Math.Abs(textMatrix.D);  // Y-scale from matrix
+        if (effectiveFontSize <= 0 || effectiveFontSize > 1000)
+        {
+            effectiveFontSize = state.FontSize > 0 ? state.FontSize : 12.0;
+        }
 
         return new TextOperation
         {
@@ -60,7 +95,7 @@ public class TjOperatorHandler : IOperatorHandler
             Text = text,
             Glyphs = glyphs,
             FontName = state.FontName,
-            FontSize = state.FontSize,
+            FontSize = effectiveFontSize,  // Use effective size including Tm scaling
             BoundingBox = boundingBox,
             // Copy text state parameters for reconstruction (issue #122)
             CharacterSpacing = state.CharacterSpacing,
@@ -68,11 +103,20 @@ public class TjOperatorHandler : IOperatorHandler
             HorizontalScaling = state.HorizontalScaling,
             TextRenderingMode = state.TextRenderingMode,
             TextRise = state.TextRise,
-            TextLeading = state.TextLeading
+            TextLeading = state.TextLeading,
+            // CJK support (issue #174)
+            WasHexString = wasHexString,
+            IsCidFont = isCidFont,
+            RawBytes = rawBytes
         };
     }
 
-    private List<GlyphPosition> CalculateGlyphPositions(string text, PdfParserState state)
+    private List<GlyphPosition> CalculateGlyphPositions(
+        string text,
+        byte[]? rawBytes,
+        bool wasHexString,
+        FontInfo? fontInfo,
+        PdfParserState state)
     {
         var glyphs = new List<GlyphPosition>();
 
@@ -86,6 +130,13 @@ public class TjOperatorHandler : IOperatorHandler
         var charHeight = effectiveFontSize;
 
         double currentX = startX;
+
+        bool isCidFont = fontInfo?.IsCidFont ?? false;
+        int bytesPerChar = fontInfo?.BytesPerCharacter ?? 1;
+
+        // For CID fonts, we need to correlate Unicode chars with raw byte pairs
+        // Each CID is 2 bytes, each Unicode char corresponds to one CID
+        int byteIndex = 0;
 
         for (int i = 0; i < text.Length; i++)
         {
@@ -111,12 +162,42 @@ public class TjOperatorHandler : IOperatorHandler
                 Top = startY + charHeight
             };
 
+            // Extract raw bytes for this glyph
+            byte[]? glyphRawBytes = null;
+            int cidValue = 0;
+
+            if (rawBytes != null && byteIndex + bytesPerChar <= rawBytes.Length)
+            {
+                glyphRawBytes = new byte[bytesPerChar];
+                Array.Copy(rawBytes, byteIndex, glyphRawBytes, 0, bytesPerChar);
+
+                // Calculate CID value
+                cidValue = bytesPerChar switch
+                {
+                    1 => glyphRawBytes[0],
+                    2 => (glyphRawBytes[0] << 8) | glyphRawBytes[1],
+                    _ => 0
+                };
+
+                byteIndex += bytesPerChar;
+            }
+            else if (!isCidFont)
+            {
+                // For Western fonts without raw bytes, use character code
+                cidValue = (byte)ch;
+                glyphRawBytes = new[] { (byte)ch };
+            }
+
             glyphs.Add(new GlyphPosition
             {
                 Character = ch.ToString(),
                 BoundingBox = glyphBox,
                 ArrayIndex = 0,
-                StringIndex = i
+                StringIndex = i,
+                RawBytes = glyphRawBytes,
+                CidValue = cidValue,
+                IsCidGlyph = isCidFont,
+                WasHexString = wasHexString
             });
 
             // Advance position

@@ -164,16 +164,16 @@ public class OperationReconstructorTests
             OriginalText = "ABC"
         };
 
-        // Act
-        var operation = _reconstructor.CreatePositioningOperation(segment);
+        // Act - pass font size (12pt) which will be used as scale factor in Tm
+        var operation = _reconstructor.CreatePositioningOperation(segment, 12.0);
 
         // Assert
         operation.Operator.Should().Be("Tm");
         operation.Operands.Should().HaveCount(6);
-        operation.Operands[0].Should().Be(1.0);  // a - horizontal scaling
-        operation.Operands[1].Should().Be(0.0);  // b - vertical skew
-        operation.Operands[2].Should().Be(0.0);  // c - horizontal skew
-        operation.Operands[3].Should().Be(1.0);  // d - vertical scaling
+        operation.Operands[0].Should().Be(12.0);  // a - horizontal scaling (font size)
+        operation.Operands[1].Should().Be(0.0);   // b - vertical skew
+        operation.Operands[2].Should().Be(0.0);   // c - horizontal skew
+        operation.Operands[3].Should().Be(12.0);  // d - vertical scaling (font size)
         operation.Operands[4].Should().Be(150.5);  // e - x position
         operation.Operands[5].Should().Be(250.75);  // f - y position
     }

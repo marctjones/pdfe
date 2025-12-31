@@ -183,4 +183,60 @@ public static class TestPdfGenerator
 
         document.Save(outputPath);
     }
+
+    /// <summary>
+    /// Create a PDF with a rotated page.
+    /// The text is drawn normally but the page has a /Rotate entry.
+    /// </summary>
+    /// <param name="outputPath">Output file path</param>
+    /// <param name="text">Text to include on the page</param>
+    /// <param name="rotationDegrees">Rotation in degrees (0, 90, 180, 270)</param>
+    public static void CreateRotatedPdf(string outputPath, string text, int rotationDegrees)
+    {
+        using var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(612);  // US Letter
+        page.Height = XUnit.FromPoint(792);
+
+        // Set the page rotation
+        page.Rotate = rotationDegrees;
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Helvetica", 12);
+
+        // Draw text at a known position in page content stream coordinates
+        // The position is in the unrotated coordinate system
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(100, 92));
+
+        document.Save(outputPath);
+    }
+
+    /// <summary>
+    /// Create a PDF with multiple lines of text on a rotated page.
+    /// </summary>
+    /// <param name="outputPath">Output file path</param>
+    /// <param name="rotationDegrees">Rotation in degrees (0, 90, 180, 270)</param>
+    /// <param name="lines">Lines of text to include</param>
+    public static void CreateRotatedMultiLinePdf(string outputPath, int rotationDegrees, params string[] lines)
+    {
+        using var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(612);  // US Letter
+        page.Height = XUnit.FromPoint(792);
+
+        // Set the page rotation
+        page.Rotate = rotationDegrees;
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Helvetica", 12);
+
+        double y = 92;
+        foreach (var line in lines)
+        {
+            gfx.DrawString(line, font, XBrushes.Black, new XPoint(100, y));
+            y += 20;
+        }
+
+        document.Save(outputPath);
+    }
 }

@@ -82,10 +82,13 @@ public class TextSegmenter
             {
                 // We have letter position info - check if in redaction area
                 keep = !IsLetterInRedactionArea(match.Letter.GlyphRectangle, redactionArea);
-                glyphX = match.Letter.GlyphRectangle.Left;
-                glyphY = match.Letter.GlyphRectangle.Bottom;
-                glyphWidth = match.Letter.GlyphRectangle.Width;
-                glyphHeight = match.Letter.GlyphRectangle.Height;
+
+                // Normalize coordinates - PdfPig can return swapped Left/Right or Bottom/Top for rotated text
+                var rect = match.Letter.GlyphRectangle;
+                glyphX = Math.Min(rect.Left, rect.Right);
+                glyphY = Math.Min(rect.Bottom, rect.Top);
+                glyphWidth = Math.Abs(rect.Right - rect.Left);
+                glyphHeight = Math.Abs(rect.Top - rect.Bottom);
             }
             else
             {
@@ -120,14 +123,29 @@ public class TextSegmenter
                     StartY = glyphY,
                     Width = glyphWidth,
                     Height = glyphHeight,
-                    OriginalText = textOperation.Text
+                    OriginalText = textOperation.Text,
+                    // CJK support (Issue #174)
+                    IsCidFont = textOperation.IsCidFont,
+                    WasHexString = textOperation.WasHexString
                 };
+
+                // Add letter match to new segment
+                if (match != null)
+                {
+                    currentSegment.LetterMatches.Add(match);
+                }
             }
             else
             {
                 // Extend current segment
                 currentSegment.EndIndex = i + 1;
                 currentSegment.Width += glyphWidth;
+
+                // Add letter match to current segment
+                if (match != null)
+                {
+                    currentSegment.LetterMatches.Add(match);
+                }
             }
         }
 
@@ -152,12 +170,19 @@ public class TextSegmenter
 
     /// <summary>
     /// Check if a letter's center point is within the redaction area.
+    /// Handles rotated text where PdfPig may return swapped Left/Right or Bottom/Top.
     /// </summary>
     private bool IsLetterInRedactionArea(UglyToad.PdfPig.Core.PdfRectangle glyphRect, PdfRectangle redactionArea)
     {
+        // Normalize coordinates for rotated text (PdfPig can return Left > Right for 90° rotation)
+        double left = Math.Min(glyphRect.Left, glyphRect.Right);
+        double right = Math.Max(glyphRect.Left, glyphRect.Right);
+        double bottom = Math.Min(glyphRect.Bottom, glyphRect.Top);
+        double top = Math.Max(glyphRect.Bottom, glyphRect.Top);
+
         // Use letter center point for determination
-        double centerX = (glyphRect.Left + glyphRect.Right) / 2.0;
-        double centerY = (glyphRect.Bottom + glyphRect.Top) / 2.0;
+        double centerX = (left + right) / 2.0;
+        double centerY = (bottom + top) / 2.0;
 
         return redactionArea.Contains(centerX, centerY);
     }
@@ -165,6 +190,7 @@ public class TextSegmenter
 
 /// <summary>
 /// Represents a segment of text that should be kept or removed.
+/// Enhanced for CJK support with raw byte preservation.
 /// </summary>
 public class TextSegment
 {
@@ -212,4 +238,44 @@ public class TextSegment
     /// The text of this segment.
     /// </summary>
     public string Text => OriginalText.Substring(StartIndex, EndIndex - StartIndex);
+
+    #region CJK Support (Issue #174)
+
+    /// <summary>
+    /// The letter matches for this segment's characters.
+    /// Used to access raw bytes and glyph positions for reconstruction.
+    /// </summary>
+    public List<LetterMatch> LetterMatches { get; set; } = new();
+
+    /// <summary>
+    /// Whether this segment is from a CID-keyed font.
+    /// </summary>
+    public bool IsCidFont { get; set; }
+
+    /// <summary>
+    /// Whether the font has a ToUnicode CMap.
+    /// When true, raw bytes must be used for reconstruction to preserve encoding.
+    /// </summary>
+    public bool HasToUnicode { get; set; }
+
+    /// <summary>
+    /// Whether the original operand was a hex string.
+    /// </summary>
+    public bool WasHexString { get; set; }
+
+    /// <summary>
+    /// Get the raw bytes for this segment (for CJK reconstruction).
+    /// </summary>
+    public byte[] GetRawBytes()
+    {
+        if (LetterMatches.Count == 0)
+            return Array.Empty<byte>();
+
+        return LetterMatches
+            .Where(m => m.RawBytes != null)
+            .SelectMany(m => m.RawBytes!)
+            .ToArray();
+    }
+
+    #endregion
 }

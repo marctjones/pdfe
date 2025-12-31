@@ -34,6 +34,33 @@ public class FontInfo
     public bool IsCidFont { get; init; }
 
     /// <summary>
+    /// The raw ToUnicode CMap stream bytes (if present).
+    /// Used to map CID values to Unicode characters.
+    /// </summary>
+    public byte[]? ToUnicodeData { get; init; }
+
+    /// <summary>
+    /// Whether a ToUnicode CMap is available for this font.
+    /// </summary>
+    public bool HasToUnicode => ToUnicodeData != null && ToUnicodeData.Length > 0;
+
+    /// <summary>
+    /// Whether the encoding is Identity-H (horizontal) or Identity-V (vertical).
+    /// For Identity encoding, CID values directly map to Unicode code points.
+    /// </summary>
+    public bool IsIdentityEncoding =>
+        Encoding != null &&
+        (Encoding.Equals("Identity-H", StringComparison.OrdinalIgnoreCase) ||
+         Encoding.Equals("Identity-V", StringComparison.OrdinalIgnoreCase) ||
+         Encoding.Contains("Identity"));
+
+    /// <summary>
+    /// Number of bytes per character code.
+    /// Western fonts use 1 byte, CID fonts typically use 2 bytes.
+    /// </summary>
+    public int BytesPerCharacter => IsCidFont ? 2 : 1;
+
+    /// <summary>
     /// Whether this font likely contains CJK characters based on encoding or base font name.
     /// </summary>
     public bool IsCjkFont => IsCidFont || IsCjkEncoding || IsCjkBaseFont;

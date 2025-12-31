@@ -14,8 +14,13 @@ public static class TextDecoder
         return Encoding.GetEncoding("Windows-1252");
     });
 
+    // Cache for parsed ToUnicode CMaps
+    private static readonly Dictionary<byte[], CidToUnicodeMapper> _toUnicodeCache = new();
+    private static readonly object _cacheLock = new();
+
     /// <summary>
     /// Decode a PDF text string based on font information.
+    /// Uses ToUnicode CMap when available for accurate CJK text decoding.
     /// </summary>
     /// <param name="bytes">Raw bytes from the PDF content stream.</param>
     /// <param name="fontInfo">Font information, or null for default encoding.</param>
@@ -25,8 +30,86 @@ public static class TextDecoder
         if (bytes == null || bytes.Length == 0)
             return string.Empty;
 
+        // If font has ToUnicode CMap, use it for decoding
+        if (fontInfo?.HasToUnicode == true && fontInfo.ToUnicodeData != null)
+        {
+            var decoded = DecodeWithToUnicode(bytes, fontInfo);
+            if (!string.IsNullOrEmpty(decoded) && IsLikelyValidText(decoded))
+            {
+                return decoded;
+            }
+        }
+
         var encoding = fontInfo?.RecommendedEncoding ?? TextEncoding.Windows1252;
         return Decode(bytes, encoding);
+    }
+
+    /// <summary>
+    /// Decode bytes using the font's ToUnicode CMap.
+    /// </summary>
+    private static string DecodeWithToUnicode(byte[] bytes, FontInfo fontInfo)
+    {
+        try
+        {
+            // Get or create the mapper for this font's ToUnicode data
+            CidToUnicodeMapper mapper;
+            lock (_cacheLock)
+            {
+                if (!_toUnicodeCache.TryGetValue(fontInfo.ToUnicodeData!, out mapper!))
+                {
+                    var parser = new ToUnicodeCMapParser();
+                    var mapping = parser.Parse(fontInfo.ToUnicodeData!);
+                    mapper = new CidToUnicodeMapper(mapping);
+                    _toUnicodeCache[fontInfo.ToUnicodeData!] = mapper;
+                }
+            }
+
+            // Determine bytes per character code
+            // For CID fonts, typically 2 bytes; for simple fonts, 1 byte
+            int bytesPerChar = fontInfo.BytesPerCharacter;
+
+            // Decode each character code using the ToUnicode mapping
+            var sb = new StringBuilder();
+            for (int i = 0; i < bytes.Length; i += bytesPerChar)
+            {
+                int charCode;
+                if (bytesPerChar == 2 && i + 1 < bytes.Length)
+                {
+                    // Big-endian 2-byte character code
+                    charCode = (bytes[i] << 8) | bytes[i + 1];
+                }
+                else
+                {
+                    // Single byte character code
+                    charCode = bytes[i];
+                }
+
+                var unicode = mapper.MapCidToUnicode(charCode);
+                if (unicode != null)
+                {
+                    sb.Append(unicode);
+                }
+                else
+                {
+                    // Fallback: use the character code directly if it's in printable range
+                    if (charCode >= 0x20 && charCode <= 0x7E)
+                    {
+                        sb.Append((char)charCode);
+                    }
+                    else
+                    {
+                        // Use replacement character
+                        sb.Append('\uFFFD');
+                    }
+                }
+            }
+
+            return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>

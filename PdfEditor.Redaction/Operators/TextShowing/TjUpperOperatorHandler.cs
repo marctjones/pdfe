@@ -25,14 +25,27 @@ public class TjUpperOperatorHandler : IOperatorHandler
         if (array == null || array.Count == 0)
             return null;
 
+        // Get font info for CID-aware parsing
+        var fontInfo = state.GetCurrentFontInfo();
+        bool isCidFont = fontInfo?.IsCidFont ?? false;
+
         // Process the array and build glyphs
-        var (text, glyphs) = ProcessArray(array, state);
+        var (text, glyphs, wasHexString, rawBytes) = ProcessArray(array, fontInfo, state);
 
         if (string.IsNullOrEmpty(text))
             return null;
 
         // Calculate bounding box from all glyphs
         var boundingBox = CalculateBoundingBox(glyphs);
+
+        // Calculate effective font size including text matrix scaling
+        // PDF uses: effectiveSize = Tf_size * Tm_scale
+        var textMatrix = state.TextMatrix;
+        var effectiveFontSize = state.FontSize * Math.Abs(textMatrix.D);
+        if (effectiveFontSize <= 0 || effectiveFontSize > 1000)
+        {
+            effectiveFontSize = state.FontSize > 0 ? state.FontSize : 12.0;
+        }
 
         return new TextOperation
         {
@@ -43,7 +56,7 @@ public class TjUpperOperatorHandler : IOperatorHandler
             Text = text,
             Glyphs = glyphs,
             FontName = state.FontName,
-            FontSize = state.FontSize,
+            FontSize = effectiveFontSize,  // Use effective size including Tm scaling
             BoundingBox = boundingBox,
             // Copy text state parameters for reconstruction (issue #122)
             CharacterSpacing = state.CharacterSpacing,
@@ -51,7 +64,11 @@ public class TjUpperOperatorHandler : IOperatorHandler
             HorizontalScaling = state.HorizontalScaling,
             TextRenderingMode = state.TextRenderingMode,
             TextRise = state.TextRise,
-            TextLeading = state.TextLeading
+            TextLeading = state.TextLeading,
+            // CJK support (issue #174)
+            WasHexString = wasHexString,
+            IsCidFont = isCidFont,
+            RawBytes = rawBytes
         };
     }
 
@@ -65,10 +82,15 @@ public class TjUpperOperatorHandler : IOperatorHandler
         };
     }
 
-    private (string text, List<GlyphPosition> glyphs) ProcessArray(IList<object> array, PdfParserState state)
+    private (string text, List<GlyphPosition> glyphs, bool wasHexString, byte[]? rawBytes) ProcessArray(
+        IList<object> array,
+        FontInfo? fontInfo,
+        PdfParserState state)
     {
         var textBuilder = new StringBuilder();
         var glyphs = new List<GlyphPosition>();
+        var allRawBytes = new List<byte>();
+        bool foundHexString = false;
 
         // Get starting position from text matrix
         var startPosition = state.GetCurrentTextPosition();
@@ -82,8 +104,8 @@ public class TjUpperOperatorHandler : IOperatorHandler
         var effectiveFontSize = state.FontSize * textMatrix.D;  // Y-scale from matrix
         var charHeight = effectiveFontSize;
 
-        // Get font info for encoding
-        var fontInfo = state.GetCurrentFontInfo();
+        bool isCidFont = fontInfo?.IsCidFont ?? false;
+        int bytesPerChar = fontInfo?.BytesPerCharacter ?? 1;
 
         int arrayIndex = 0;
         int globalStringIndex = 0;
@@ -122,19 +144,48 @@ public class TjUpperOperatorHandler : IOperatorHandler
             {
                 // String element - decode using font-aware encoding
                 string text;
+                byte[]? elementBytes = null;
+                bool elementWasHex = false;
+
                 if (element is byte[] bytes)
                 {
                     text = TextDecoder.Decode(bytes, fontInfo);
+                    elementBytes = bytes;
+                    elementWasHex = true;
+                    foundHexString = true;
                 }
                 else if (element is string s)
                 {
-                    text = s;
+                    // For CJK fonts with ToUnicode CMap, we need to re-decode from raw bytes
+                    // because the parser decoded with Windows-1252 but the font uses custom encoding
+                    if (fontInfo?.HasToUnicode == true)
+                    {
+                        elementBytes = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes(s);
+                        text = TextDecoder.Decode(elementBytes, fontInfo);
+                    }
+                    else
+                    {
+                        // For standard fonts, use the string as-is
+                        text = s;
+                        if (isCidFont)
+                        {
+                            elementBytes = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes(s);
+                        }
+                    }
                 }
                 else
                 {
                     arrayIndex++;
                     continue;
                 }
+
+                if (elementBytes != null)
+                {
+                    allRawBytes.AddRange(elementBytes);
+                }
+
+                // Track byte position within this element
+                int byteIndex = 0;
 
                 // Process each character in the string
                 for (int charIndex = 0; charIndex < text.Length; charIndex++)
@@ -162,12 +213,40 @@ public class TjUpperOperatorHandler : IOperatorHandler
                         Top = startY + charHeight
                     };
 
+                    // Extract raw bytes for this glyph
+                    byte[]? glyphRawBytes = null;
+                    int cidValue = 0;
+
+                    if (elementBytes != null && byteIndex + bytesPerChar <= elementBytes.Length)
+                    {
+                        glyphRawBytes = new byte[bytesPerChar];
+                        Array.Copy(elementBytes, byteIndex, glyphRawBytes, 0, bytesPerChar);
+
+                        cidValue = bytesPerChar switch
+                        {
+                            1 => glyphRawBytes[0],
+                            2 => (glyphRawBytes[0] << 8) | glyphRawBytes[1],
+                            _ => 0
+                        };
+
+                        byteIndex += bytesPerChar;
+                    }
+                    else if (!isCidFont)
+                    {
+                        cidValue = (byte)ch;
+                        glyphRawBytes = new[] { (byte)ch };
+                    }
+
                     glyphs.Add(new GlyphPosition
                     {
                         Character = ch.ToString(),
                         BoundingBox = glyphBox,
                         ArrayIndex = arrayIndex,
-                        StringIndex = globalStringIndex
+                        StringIndex = globalStringIndex,
+                        RawBytes = glyphRawBytes,
+                        CidValue = cidValue,
+                        IsCidGlyph = isCidFont,
+                        WasHexString = elementWasHex
                     });
 
                     // Advance position
@@ -184,7 +263,7 @@ public class TjUpperOperatorHandler : IOperatorHandler
         var advance = PdfMatrix.Translate(totalAdvance, 0);
         state.TextMatrix = advance.Multiply(state.TextMatrix);
 
-        return (textBuilder.ToString(), glyphs);
+        return (textBuilder.ToString(), glyphs, foundHexString, allRawBytes.Count > 0 ? allRawBytes.ToArray() : null);
     }
 
     private static PdfRectangle CalculateBoundingBox(IReadOnlyList<GlyphPosition> glyphs)

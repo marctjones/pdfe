@@ -68,6 +68,14 @@ public class DoubleQuoteOperatorHandler : IOperatorHandler
         // Advance text matrix by total width
         AdvanceTextMatrix(text, glyphs, state);
 
+        // Calculate effective font size including text matrix scaling
+        var textMatrix = state.TextMatrix;
+        var effectiveFontSize = state.FontSize * Math.Abs(textMatrix.D);
+        if (effectiveFontSize <= 0 || effectiveFontSize > 1000)
+        {
+            effectiveFontSize = state.FontSize > 0 ? state.FontSize : 12.0;
+        }
+
         return new TextOperation
         {
             Operator = OperatorName,
@@ -77,7 +85,7 @@ public class DoubleQuoteOperatorHandler : IOperatorHandler
             Text = text,
             Glyphs = glyphs,
             FontName = state.FontName,
-            FontSize = state.FontSize,
+            FontSize = effectiveFontSize,  // Use effective size including Tm scaling
             BoundingBox = boundingBox,
             CharacterSpacing = state.CharacterSpacing,
             WordSpacing = state.WordSpacing,

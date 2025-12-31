@@ -37,251 +37,214 @@ public class LetterFinder
         IReadOnlyList<Letter> allLetters)
     {
         var matches = new List<LetterMatch>();
-
-        // Get the operation bounding box and glyphs
-        var opBox = textOperation.BoundingBox;
-
-        if (opBox.Width <= 0 || opBox.Height <= 0)
-        {
-            _logger.LogDebug("Operation has invalid bounding box, cannot match letters");
-            return matches;
-        }
-
-        // Strategy: Use Y-range filtering + TEXT MATCHING to find the sequence
-        // Issue #90: Parsed glyph positions can differ from PdfPig by 3-6 points,
-        // so we can't rely solely on X proximity. Instead, search for the text within the Y band.
-
-        // Get starting position from glyphs if available, otherwise use bbox
-        double startX = opBox.Left;
-        double startY = opBox.Bottom;
-        if (textOperation.Glyphs.Count > 0)
-        {
-            startX = textOperation.Glyphs[0].BoundingBox.Left;
-            startY = textOperation.Glyphs[0].BoundingBox.Bottom;
-        }
-
-        // Find letters in the same Y-range (with tolerance for height differences)
-        // Issue #125: Adaptive Y-tolerance based on font size
-        // Issue #90: Parsed glyph positions can differ from PdfPig by 3-6 points
-        // Small fonts: use minimum tolerance (5.0 points)
-        // Large fonts: scale with font size (40% of font size)
-        double fontSize = textOperation.FontSize > 0 ? textOperation.FontSize : 12.0;
-        double yTolerance = Math.Max(5.0, fontSize * 0.4);
-
-        var candidateLetters = allLetters
-            .Where(l => {
-                bool yNearby = Math.Abs(l.GlyphRectangle.Bottom - startY) <= yTolerance;
-                return yNearby;
-            })
-            .OrderBy(l => l.GlyphRectangle.Left)
-            .ToList();
-
-        if (candidateLetters.Count == 0)
-        {
-            _logger.LogDebug("No candidate letters in Y band for operation '{Text}'",
-                textOperation.Text.Length > 30 ? textOperation.Text.Substring(0, 30) + "..." : textOperation.Text);
-            return matches;
-        }
-
-        // Build full text from candidate letters
-        var candidateText = string.Join("", candidateLetters.Select(l => l.Value));
         var operationText = textOperation.Text;
 
-        _logger.LogDebug("Searching for '{OpText}' in Y-band text '{CandidateText}' ({Count} letters)",
-            operationText.Length > 30 ? operationText.Substring(0, 30) + "..." : operationText,
-            candidateText.Length > 50 ? candidateText.Substring(0, 50) + "..." : candidateText,
-            candidateLetters.Count);
-
-        // Strategy 1: Find exact text match within the Y band
-        int matchIndex = FindTextInCandidates(candidateText, operationText, candidateLetters, startX);
-
-        if (matchIndex >= 0)
+        if (string.IsNullOrEmpty(operationText))
         {
-            // Found exact match - use the letters at this position
-            int count = Math.Min(operationText.Length, candidateLetters.Count - matchIndex);
-            for (int i = 0; i < count; i++)
-            {
-                matches.Add(new LetterMatch
-                {
-                    CharacterIndex = i,
-                    Letter = candidateLetters[matchIndex + i],
-                    OperationText = operationText
-                });
-            }
-            _logger.LogDebug("Text match found at index {Index}: {Count} letters matched", matchIndex, matches.Count);
+            _logger.LogDebug("Operation has empty text, cannot match letters");
             return matches;
         }
 
-        // Strategy 2: Fallback to old proximity-based matching for non-text operations
-        // (keeping this for backwards compatibility with edge cases)
-        var nearbyLetters = new List<Letter>();
-        var closestLetter = candidateLetters
-            .OrderBy(l => Math.Abs(l.GlyphRectangle.Left - startX))
-            .First();
+        // Strategy: TEXT CONTENT MATCHING (rotation-independent)
+        // Issue #151: Parsed operation positions are in unrotated content stream coordinates,
+        // but PdfPig letters are in visual/rotated coordinates. For rotated pages (90°, 180°, 270°),
+        // these coordinate systems don't match, so Y-band filtering fails.
+        //
+        // Solution: Match by text content first (which is rotation-independent), then use
+        // spatial position only as a tiebreaker when multiple matches exist.
+        //
+        // IMPORTANT: Use PdfPig's original letter order - it preserves reading order regardless
+        // of page rotation. DO NOT re-sort letters as this breaks text matching for rotated pages.
 
-        var startIndex = candidateLetters.IndexOf(closestLetter);
-        var maxLetters = Math.Min(candidateLetters.Count - startIndex, textOperation.Text.Length + 5);
-        nearbyLetters = candidateLetters.Skip(startIndex).Take(maxLetters).ToList();
+        // Use PdfPig's original letter order (preserves reading order for all rotations)
+        var orderedLetters = allLetters.ToList();
+        var fullPageText = string.Join("", orderedLetters.Select(l => l.Value));
 
-        _logger.LogDebug("Fallback to proximity: {Count} letters starting from '{First}'",
-            nearbyLetters.Count, nearbyLetters.FirstOrDefault()?.Value ?? "?");
+        _logger.LogDebug("Searching for '{OpText}' in page text ({TotalLetters} letters)",
+            operationText.Length > 30 ? operationText.Substring(0, 30) + "..." : operationText,
+            orderedLetters.Count);
 
-        // Try to match with relaxed rules
-        matches = MatchLettersToText(nearbyLetters, textOperation.Text, textOperation);
+        // Find all occurrences of operation text in the full page text
+        var foundIndices = FindAllTextOccurrences(fullPageText, operationText);
 
-        if (matches.Count == 0)
+        // ISSUE #172 FIX: If exact match fails, try matching just the meaningful part (before repeated underscores/dashes)
+        // This handles form fields like "FULL NAME AT BIRTH: _______________" where the parser and PdfPig
+        // report different numbers of underscores due to TJ array kerning differences.
+        if (foundIndices.Count == 0 && (operationText.Contains("_") || operationText.Contains("-")))
         {
-            _logger.LogWarning("Could not match any letters for operation '{Text}' at ({X:F2},{Y:F2})",
-                textOperation.Text.Length > 50 ? textOperation.Text.Substring(0, 50) + "..." : textOperation.Text,
-                opBox.Left, opBox.Bottom);
+            // Extract the meaningful part before repeated fill characters
+            var meaningfulPart = ExtractMeaningfulText(operationText);
+            if (!string.IsNullOrEmpty(meaningfulPart) && meaningfulPart.Length >= 3)
+            {
+                _logger.LogDebug("Exact match failed, trying meaningful part: '{Part}'", meaningfulPart);
+                foundIndices = FindAllTextOccurrences(fullPageText, meaningfulPart);
+
+                if (foundIndices.Count > 0)
+                {
+                    _logger.LogDebug("Found meaningful part at {Count} location(s)", foundIndices.Count);
+                    // Adjust match to only cover the meaningful part, not the underscores
+                    operationText = meaningfulPart;
+                }
+            }
         }
+
+        if (foundIndices.Count == 0)
+        {
+            _logger.LogDebug("Text '{OpText}' not found in page letters",
+                operationText.Length > 30 ? operationText.Substring(0, 30) + "..." : operationText);
+            return matches;
+        }
+
+        // If only one match, use it
+        int matchIndex;
+        if (foundIndices.Count == 1)
+        {
+            matchIndex = foundIndices[0];
+        }
+        else
+        {
+            // Multiple matches - need to disambiguate
+            // For rotated pages, we can't use parsed coordinates directly.
+            // Use letter cluster detection: find the match whose letters form a spatially coherent group.
+            matchIndex = FindBestMatchByCoherence(foundIndices, orderedLetters, operationText.Length);
+            _logger.LogDebug("Found {Count} matches, chose index {Index} by spatial coherence",
+                foundIndices.Count, matchIndex);
+        }
+
+        // Build matches from the found position
+        int count = Math.Min(operationText.Length, orderedLetters.Count - matchIndex);
+        for (int i = 0; i < count; i++)
+        {
+            var match = new LetterMatch
+            {
+                CharacterIndex = i,
+                Letter = orderedLetters[matchIndex + i],
+                OperationText = operationText
+            };
+
+            // Populate CJK fields from corresponding GlyphPosition (Issue #174)
+            if (i < textOperation.Glyphs.Count)
+            {
+                var glyph = textOperation.Glyphs[i];
+                match.RawBytes = glyph.RawBytes;
+                match.CidValue = glyph.CidValue;
+                match.IsCidGlyph = glyph.IsCidGlyph;
+                match.WasHexString = glyph.WasHexString;
+                match.GlyphPosition = glyph;
+            }
+
+            matches.Add(match);
+        }
+        _logger.LogDebug("Text match found at index {Index}: {Count} letters matched", matchIndex, matches.Count);
 
         return matches;
     }
 
     /// <summary>
-    /// Find the operation text within the candidate letters, preferring matches closer to startX.
+    /// Find all occurrences of text in candidates.
     /// </summary>
-    private int FindTextInCandidates(string candidateText, string operationText, List<Letter> candidateLetters, double startX)
+    private List<int> FindAllTextOccurrences(string candidateText, string searchText)
     {
-        // Find all occurrences of operation text in candidate text
-        var foundIndices = new List<int>();
+        var indices = new List<int>();
         int searchStart = 0;
+
         while (true)
         {
-            int idx = candidateText.IndexOf(operationText, searchStart, StringComparison.Ordinal);
+            int idx = candidateText.IndexOf(searchText, searchStart, StringComparison.Ordinal);
             if (idx < 0)
             {
-                // Try case-insensitive
-                idx = candidateText.IndexOf(operationText, searchStart, StringComparison.OrdinalIgnoreCase);
+                // Try case-insensitive as fallback
+                idx = candidateText.IndexOf(searchText, searchStart, StringComparison.OrdinalIgnoreCase);
             }
             if (idx < 0) break;
-            foundIndices.Add(idx);
+            indices.Add(idx);
             searchStart = idx + 1;
         }
 
-        if (foundIndices.Count == 0)
-            return -1;
+        return indices;
+    }
 
-        if (foundIndices.Count == 1)
-            return foundIndices[0];
+    /// <summary>
+    /// Find the best match by spatial coherence - letters that form a tight cluster.
+    /// For rotated pages, coordinates are already in visual space from PdfPig.
+    /// </summary>
+    private int FindBestMatchByCoherence(List<int> indices, List<Letter> letters, int textLength)
+    {
+        if (indices.Count == 0) return -1;
+        if (indices.Count == 1) return indices[0];
 
-        // Multiple matches found - pick the one closest to startX
-        int bestIndex = foundIndices[0];
-        double bestDistance = double.MaxValue;
+        int bestIndex = indices[0];
+        double bestScore = double.MaxValue;
 
-        foreach (var idx in foundIndices)
+        foreach (var idx in indices)
         {
-            if (idx < candidateLetters.Count)
+            if (idx + textLength > letters.Count) continue;
+
+            // Calculate spatial spread of this match's letters
+            var matchLetters = letters.Skip(idx).Take(textLength).ToList();
+            if (matchLetters.Count == 0) continue;
+
+            // Compute bounding box of the match
+            // Normalize coordinates - PdfPig can return swapped Left/Right or Bottom/Top for rotated text
+            double minX = matchLetters.Min(l => Math.Min(l.GlyphRectangle.Left, l.GlyphRectangle.Right));
+            double maxX = matchLetters.Max(l => Math.Max(l.GlyphRectangle.Left, l.GlyphRectangle.Right));
+            double minY = matchLetters.Min(l => Math.Min(l.GlyphRectangle.Bottom, l.GlyphRectangle.Top));
+            double maxY = matchLetters.Max(l => Math.Max(l.GlyphRectangle.Bottom, l.GlyphRectangle.Top));
+
+            // Score by total spread (smaller is better - more coherent cluster)
+            double spread = (maxX - minX) + (maxY - minY);
+
+            // Prefer matches with smaller Y spread (letters on same line)
+            double ySpread = maxY - minY;
+            double score = spread + ySpread * 10; // Weight Y spread more heavily
+
+            if (score < bestScore)
             {
-                double letterX = candidateLetters[idx].GlyphRectangle.Left;
-                double distance = Math.Abs(letterX - startX);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    bestIndex = idx;
-                }
+                bestScore = score;
+                bestIndex = idx;
             }
         }
-
-        _logger.LogDebug("Found {Count} matches, chose index {Index} (X distance: {Distance:F2})",
-            foundIndices.Count, bestIndex, bestDistance);
 
         return bestIndex;
     }
 
     /// <summary>
-    /// Match nearby letters to text operation using combined spatial + textual matching.
+    /// Extract the meaningful text portion from a form field operation.
+    /// Handles cases like "FULL NAME AT BIRTH: _______________" by returning "FULL NAME AT BIRTH: "
+    /// This fixes Issue #172 where TJ array kerning causes underscore count mismatches.
     /// </summary>
-    private List<LetterMatch> MatchLettersToText(
-        List<Letter> nearbyLetters,
-        string operationText,
-        TextOperation textOperation)
+    private static string ExtractMeaningfulText(string operationText)
     {
-        var matches = new List<LetterMatch>();
+        if (string.IsNullOrEmpty(operationText))
+            return operationText;
 
-        if (nearbyLetters.Count == 0 || string.IsNullOrEmpty(operationText))
-            return matches;
-
-        // Strategy: Find a contiguous sequence of letters that matches our text
-        // Handle the fact that letter count may not equal text length due to:
-        // - Ligatures (fi, fl rendered as single glyphs)
-        // - Encoding differences
-        // - Whitespace handling
-
-        // Build the text from nearby letters
-        var letterText = string.Join("", nearbyLetters.Select(l => l.Value));
-
-        _logger.LogDebug("Letter text: '{LetterText}' vs Operation text: '{OpText}'",
-            letterText.Length > 50 ? letterText.Substring(0, 50) + "..." : letterText,
-            operationText.Length > 50 ? operationText.Substring(0, 50) + "..." : operationText);
-
-        // Try exact match first
-        if (letterText.StartsWith(operationText) && nearbyLetters.Count >= operationText.Length)
+        // Find the first occurrence of repeated fill characters (3+ underscores or dashes)
+        int fillStart = -1;
+        for (int i = 0; i < operationText.Length - 2; i++)
         {
-            // Perfect match - map first N letters to operation text
-            for (int i = 0; i < operationText.Length; i++)
+            char c = operationText[i];
+            if ((c == '_' || c == '-') &&
+                i + 2 < operationText.Length &&
+                operationText[i + 1] == c &&
+                operationText[i + 2] == c)
             {
-                matches.Add(new LetterMatch
-                {
-                    CharacterIndex = i,
-                    Letter = nearbyLetters[i],
-                    OperationText = operationText
-                });
+                fillStart = i;
+                break;
             }
-
-            _logger.LogDebug("Exact match: {Count} letters matched", matches.Count);
-            return matches;
         }
 
-        // Try case-insensitive match
-        if (letterText.StartsWith(operationText, StringComparison.OrdinalIgnoreCase) && nearbyLetters.Count >= operationText.Length)
-        {
-            for (int i = 0; i < operationText.Length; i++)
-            {
-                matches.Add(new LetterMatch
-                {
-                    CharacterIndex = i,
-                    Letter = nearbyLetters[i],
-                    OperationText = operationText
-                });
-            }
+        if (fillStart <= 0)
+            return operationText;  // No fill pattern found, or it's at the start
 
-            _logger.LogDebug("Case-insensitive match: {Count} letters matched", matches.Count);
-            return matches;
-        }
-
-        // Try fuzzy match - handle encoding differences
-        // Only if counts are VERY similar (not just within 3)
-        if (nearbyLetters.Count == operationText.Length ||
-            (nearbyLetters.Count == operationText.Length + 1) ||  // Allow 1 extra letter (ligature, etc.)
-            (nearbyLetters.Count == operationText.Length - 1))    // Allow 1 missing letter
-        {
-            int count = Math.Min(nearbyLetters.Count, operationText.Length);
-            for (int i = 0; i < count; i++)
-            {
-                matches.Add(new LetterMatch
-                {
-                    CharacterIndex = i,
-                    Letter = nearbyLetters[i],
-                    OperationText = operationText
-                });
-            }
-
-            _logger.LogDebug("Fuzzy match: {Count} letters matched (letter count: {LetterCount}, text length: {TextLength})",
-                matches.Count, nearbyLetters.Count, operationText.Length);
-            return matches;
-        }
-
-        _logger.LogWarning("Could not match letters to text - letter text: '{LetterText}', operation text: '{OpText}'",
-            letterText, operationText);
-
-        return matches;
+        // Return text up to the fill pattern (including any trailing space/colon)
+        return operationText.Substring(0, fillStart).TrimEnd();
     }
+
 }
 
 /// <summary>
 /// Represents a match between a PdfPig letter and a character in a text operation.
+/// Enhanced for CJK support with raw byte preservation.
 /// </summary>
 public class LetterMatch
 {
@@ -304,4 +267,36 @@ public class LetterMatch
     /// Whether this letter falls within a redaction area (set by TextSegmenter).
     /// </summary>
     public bool InRedactionArea { get; set; }
+
+    #region CJK Support (Issue #174)
+
+    /// <summary>
+    /// Raw bytes as they appear in the PDF content stream.
+    /// For Western fonts: 1 byte. For CID fonts: 2 bytes (big-endian).
+    /// Set when correlating with GlyphPosition from TextOperation.
+    /// </summary>
+    public byte[]? RawBytes { get; set; }
+
+    /// <summary>
+    /// Character ID (CID) for CID-keyed fonts.
+    /// </summary>
+    public int CidValue { get; set; }
+
+    /// <summary>
+    /// Whether this glyph came from a CID-keyed font.
+    /// </summary>
+    public bool IsCidGlyph { get; set; }
+
+    /// <summary>
+    /// Whether the original operand was a hex string.
+    /// </summary>
+    public bool WasHexString { get; set; }
+
+    /// <summary>
+    /// Reference to the corresponding GlyphPosition from the TextOperation.
+    /// Provides access to all glyph details.
+    /// </summary>
+    public GlyphPosition? GlyphPosition { get; set; }
+
+    #endregion
 }
