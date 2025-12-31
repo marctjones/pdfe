@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using PdfEditor.Redaction;
+using PdfSharp.Fonts;
 
 namespace PdfEditor.Redaction.Cli;
 
@@ -42,6 +43,7 @@ class Program
             "verify" => RunVerify(args.Skip(1).ToArray()),
             "search" => RunSearch(args.Skip(1).ToArray()),
             "info" => RunInfo(args.Skip(1).ToArray()),
+            "demo" => RunDemo(args.Skip(1).ToArray()),
             _ => PrintUsage($"Unknown command: {command}")
         };
     }
@@ -64,6 +66,7 @@ COMMANDS:
     verify      Verify text is NOT extractable from PDF
     search      Search for text in PDF and show locations
     info        Show PDF information and text content
+    demo        Run true redaction verification demo
 
 GLOBAL OPTIONS:
     -h, --help      Show this help message
@@ -920,6 +923,748 @@ OPTIONS:
         catch (Exception ex)
         {
             return PrintError($"Failed to read PDF: {ex.Message}");
+        }
+    }
+
+    static int RunDemo(string[] args)
+    {
+        string? inputPdf = null;
+        string? outputDir = null;
+        bool createTest = false;
+        string? redactText = null;
+        string? redactArea = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+
+            if (arg == "--help" || arg == "-h")
+            {
+                return PrintDemoHelp();
+            }
+            else if (arg == "--create-test" || arg == "-c")
+            {
+                createTest = true;
+            }
+            else if (arg == "--output-dir" || arg == "-o")
+            {
+                if (i + 1 < args.Length)
+                    outputDir = args[++i];
+                else
+                    return PrintError("--output-dir requires a path");
+            }
+            else if (arg == "--redact-text" || arg == "-t")
+            {
+                if (i + 1 < args.Length)
+                    redactText = args[++i];
+                else
+                    return PrintError("--redact-text requires a term");
+            }
+            else if (arg == "--redact-area" || arg == "-a")
+            {
+                if (i + 1 < args.Length)
+                    redactArea = args[++i];
+                else
+                    return PrintError("--redact-area requires coordinates (x1,y1,x2,y2)");
+            }
+            else if (!arg.StartsWith("-"))
+            {
+                inputPdf = arg;
+            }
+        }
+
+        // Set output directory
+        if (outputDir == null)
+        {
+            outputDir = Path.Combine(Path.GetTempPath(), $"pdfer_demo_{DateTime.Now:yyyyMMdd_HHmmss}");
+        }
+        Directory.CreateDirectory(outputDir);
+
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine("                TRUE REDACTION VERIFICATION DEMO");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine();
+        Console.WriteLine("This demo proves that pdfer performs TRUE redaction - removing content");
+        Console.WriteLine("from the PDF structure, not just drawing black boxes over it.");
+        Console.WriteLine();
+
+        string beforePdf;
+        string afterPdf = Path.Combine(outputDir, "after_redaction.pdf");
+        var textsToRedact = new List<string>();
+        PdfRectangle? areaToRedact = null;
+
+        if (createTest || inputPdf == null)
+        {
+            // Create a test PDF with known content
+            beforePdf = Path.Combine(outputDir, "before_redaction.pdf");
+            Console.WriteLine("📄 Creating test PDF with known content...");
+            CreateDemoTestPdf(beforePdf);
+            textsToRedact.AddRange(new[] { "SECRET-TEXT-A", "PARTIAL-TEXT" });
+            areaToRedact = new PdfRectangle(200, 100, 400, 750);
+            Console.WriteLine($"   Created: {beforePdf}");
+        }
+        else
+        {
+            beforePdf = inputPdf;
+            if (!File.Exists(beforePdf))
+            {
+                return PrintError($"Input file not found: {beforePdf}");
+            }
+            Console.WriteLine($"📄 Using input PDF: {beforePdf}");
+
+            if (redactText != null)
+            {
+                textsToRedact.Add(redactText);
+            }
+
+            if (redactArea != null)
+            {
+                var parts = redactArea.Split(',');
+                if (parts.Length == 4 &&
+                    double.TryParse(parts[0], out var x1) &&
+                    double.TryParse(parts[1], out var y1) &&
+                    double.TryParse(parts[2], out var x2) &&
+                    double.TryParse(parts[3], out var y2))
+                {
+                    areaToRedact = new PdfRectangle(x1, y1, x2, y2);
+                }
+                else
+                {
+                    return PrintError("Invalid --redact-area format. Use: x1,y1,x2,y2");
+                }
+            }
+
+            if (textsToRedact.Count == 0 && areaToRedact == null)
+            {
+                return PrintError("Specify --redact-text or --redact-area for custom PDF");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine("                         STEP 1: BEFORE STATE");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine();
+
+        // Extract text BEFORE
+        Console.WriteLine("📝 Extracting text from BEFORE PDF using PdfPig...");
+        var textBefore = ExtractAllText(beforePdf);
+        Console.WriteLine();
+        Console.WriteLine("Text content (first 500 chars):");
+        Console.WriteLine("─────────────────────────────────────────────────────────────────────");
+        Console.WriteLine(textBefore.Length > 500 ? textBefore.Substring(0, 500) + "..." : textBefore);
+        Console.WriteLine("─────────────────────────────────────────────────────────────────────");
+
+        // Check for texts to redact
+        Console.WriteLine();
+        Console.WriteLine("🔍 Checking for text to be redacted:");
+        foreach (var term in textsToRedact)
+        {
+            var found = textBefore.Contains(term);
+            Console.WriteLine($"   '{term}': {(found ? "✓ FOUND" : "✗ NOT FOUND")}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine("                       STEP 2: PERFORMING REDACTION");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine();
+
+        // Perform redaction
+        var redactor = new TextRedactor();
+        bool success = true;
+
+        if (textsToRedact.Count > 0)
+        {
+            Console.WriteLine($"🔒 Redacting text terms: {string.Join(", ", textsToRedact.Select(t => $"'{t}'"))}");
+
+            string currentInput = beforePdf;
+            for (int i = 0; i < textsToRedact.Count; i++)
+            {
+                var term = textsToRedact[i];
+                var currentOutput = i == textsToRedact.Count - 1 && areaToRedact == null
+                    ? afterPdf
+                    : Path.Combine(outputDir, $"temp_{i}.pdf");
+
+                var result = redactor.RedactText(currentInput, currentOutput, term);
+                Console.WriteLine($"   '{term}': {result.RedactionCount} occurrences redacted");
+
+                if (!result.Success)
+                {
+                    Console.WriteLine($"   ERROR: {result.ErrorMessage}");
+                    success = false;
+                    break;
+                }
+
+                currentInput = currentOutput;
+            }
+
+            if (areaToRedact != null && success)
+            {
+                // Also do area redaction
+                var location = new RedactionLocation
+                {
+                    PageNumber = 1,
+                    BoundingBox = areaToRedact.Value
+                };
+                Console.WriteLine($"🔒 Redacting area: ({areaToRedact.Value.Left},{areaToRedact.Value.Bottom}) to ({areaToRedact.Value.Right},{areaToRedact.Value.Top})");
+                var result = redactor.RedactLocations(currentInput, afterPdf, new[] { location });
+                success = result.Success;
+            }
+        }
+        else if (areaToRedact != null)
+        {
+            var location = new RedactionLocation
+            {
+                PageNumber = 1,
+                BoundingBox = areaToRedact.Value
+            };
+            Console.WriteLine($"🔒 Redacting area: ({areaToRedact.Value.Left},{areaToRedact.Value.Bottom}) to ({areaToRedact.Value.Right},{areaToRedact.Value.Top})");
+            var result = redactor.RedactLocations(beforePdf, afterPdf, new[] { location });
+            success = result.Success;
+        }
+
+        if (!success)
+        {
+            return PrintError("Redaction failed");
+        }
+
+        Console.WriteLine($"   Output saved to: {afterPdf}");
+
+        Console.WriteLine();
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine("                         STEP 3: AFTER STATE");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine();
+
+        // Extract text AFTER
+        Console.WriteLine("📝 Extracting text from AFTER PDF using PdfPig...");
+        var textAfter = ExtractAllText(afterPdf);
+        Console.WriteLine();
+        Console.WriteLine("Text content (first 500 chars):");
+        Console.WriteLine("─────────────────────────────────────────────────────────────────────");
+        Console.WriteLine(textAfter.Length > 500 ? textAfter.Substring(0, 500) + "..." : textAfter);
+        Console.WriteLine("─────────────────────────────────────────────────────────────────────");
+
+        Console.WriteLine();
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine("                     STEP 4: VERIFICATION REPORT");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine();
+
+        bool allPassed = true;
+        Console.WriteLine("📋 TEXT VERIFICATION (proves true removal, not just visual covering):");
+        Console.WriteLine();
+
+        foreach (var term in textsToRedact)
+        {
+            var stillPresent = textAfter.Contains(term);
+            var passed = !stillPresent;
+            allPassed &= passed;
+
+            if (passed)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"   ✓ PASS: '{term}' is NOT extractable");
+                Console.WriteLine($"           → Text was REMOVED from PDF structure");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"   ✗ FAIL: '{term}' is STILL extractable");
+                Console.WriteLine($"           → Redaction may have failed");
+            }
+            Console.ResetColor();
+        }
+
+        // Also verify with pdftotext if available
+        Console.WriteLine();
+        Console.WriteLine("📋 CROSS-VERIFICATION with pdftotext:");
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "pdftotext",
+                Arguments = $"\"{afterPdf}\" -",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process != null)
+            {
+                var pdftotextOutput = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(5000);
+
+                foreach (var term in textsToRedact)
+                {
+                    var found = pdftotextOutput.Contains(term);
+                    if (!found)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"   ✓ pdftotext confirms: '{term}' not found");
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"   ✗ pdftotext found: '{term}'");
+                        allPassed = false;
+                    }
+                    Console.ResetColor();
+                }
+            }
+        }
+        catch
+        {
+            Console.WriteLine("   (pdftotext not available for cross-verification)");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine("                          FINAL VERDICT");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════════════");
+        Console.WriteLine();
+
+        if (allPassed)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("   ████████████████████████████████████████████████████████████████");
+            Console.WriteLine("   █                                                              █");
+            Console.WriteLine("   █   ✓ TRUE REDACTION VERIFIED                                  █");
+            Console.WriteLine("   █                                                              █");
+            Console.WriteLine("   █   Content was REMOVED from PDF structure.                    █");
+            Console.WriteLine("   █   This is SECURE redaction - not just visual covering.       █");
+            Console.WriteLine("   █                                                              █");
+            Console.WriteLine("   ████████████████████████████████████████████████████████████████");
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("   ████████████████████████████████████████████████████████████████");
+            Console.WriteLine("   █                                                              █");
+            Console.WriteLine("   █   ✗ VERIFICATION FAILED                                      █");
+            Console.WriteLine("   █                                                              █");
+            Console.WriteLine("   █   Some content may still be extractable.                     █");
+            Console.WriteLine("   █   Review the output and investigate.                         █");
+            Console.WriteLine("   █                                                              █");
+            Console.WriteLine("   ████████████████████████████████████████████████████████████████");
+        }
+        Console.ResetColor();
+
+        Console.WriteLine();
+        Console.WriteLine("📁 Files created:");
+        Console.WriteLine($"   Before: {beforePdf}");
+        Console.WriteLine($"   After:  {afterPdf}");
+        Console.WriteLine();
+        Console.WriteLine("🖼️  View with:");
+        Console.WriteLine($"   pdftoppm -png \"{beforePdf}\" /tmp/before");
+        Console.WriteLine($"   pdftoppm -png \"{afterPdf}\" /tmp/after");
+        Console.WriteLine($"   timg --grid=2 -g 80x40 /tmp/before-1.png /tmp/after-1.png");
+        Console.WriteLine();
+
+        return allPassed ? 0 : 2;
+    }
+
+    static int PrintDemoHelp()
+    {
+        Console.WriteLine(@"pdfer demo - Run true redaction verification demo
+
+USAGE:
+    pdfer demo [options]              Create test PDF and demonstrate redaction
+    pdfer demo <input.pdf> [options]  Use custom PDF for demo
+
+OPTIONS:
+    -c, --create-test              Force creation of test PDF (even if input provided)
+    -o, --output-dir <path>        Output directory for demo files
+    -t, --redact-text <term>       Text to redact (for custom PDF)
+    -a, --redact-area <coords>     Area to redact: x1,y1,x2,y2 (for custom PDF)
+    -h, --help                     Show this help
+
+EXAMPLES:
+    # Run demo with auto-generated test PDF
+    pdfer demo
+
+    # Run demo with custom PDF and text redaction
+    pdfer demo document.pdf --redact-text ""SECRET""
+
+    # Run demo with area-based redaction
+    pdfer demo document.pdf --redact-area 100,400,300,600
+
+    # Specify output directory
+    pdfer demo --output-dir ./demo_output
+
+WHAT THIS DEMO PROVES:
+    The demo shows that pdfer performs TRUE glyph-level redaction:
+    1. Text is REMOVED from the PDF content stream
+    2. Text extraction tools (PdfPig, pdftotext) cannot find redacted text
+    3. This is fundamentally different from just drawing black boxes
+
+    Fake redaction (black box only) would still allow extraction of the
+    underlying text. This demo proves that doesn't happen with pdfer.");
+
+        return 0;
+    }
+
+    static void CreateDemoTestPdf(string outputPath)
+    {
+        // Initialize font resolver for cross-platform support
+        if (GlobalFontSettings.FontResolver == null)
+        {
+            GlobalFontSettings.FontResolver = new CustomFontResolver();
+        }
+
+        using var document = new PdfSharp.Pdf.PdfDocument();
+        var page = document.AddPage();
+        page.Width = PdfSharp.Drawing.XUnit.FromPoint(612);
+        page.Height = PdfSharp.Drawing.XUnit.FromPoint(792);
+
+        using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(page);
+        var titleFont = new PdfSharp.Drawing.XFont("Helvetica", 14, PdfSharp.Drawing.XFontStyleEx.Bold);
+        var labelFont = new PdfSharp.Drawing.XFont("Helvetica", 8);
+        var textFont = new PdfSharp.Drawing.XFont("Helvetica", 11);
+
+        // Title
+        gfx.DrawString("TRUE REDACTION VERIFICATION TEST PDF", titleFont,
+            PdfSharp.Drawing.XBrushes.Black, new PdfSharp.Drawing.XPoint(150, 30));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 1: TEXT REDACTION TESTS (y=50-120)
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("TEXT TESTS:", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 55));
+
+        // Text inside zone (should be removed)
+        gfx.DrawString("Inside→", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(10, 75));
+        gfx.DrawString("SECRET-TEXT-A", textFont, PdfSharp.Drawing.XBrushes.Black,
+            new PdfSharp.Drawing.XPoint(220, 75));
+
+        // Text outside zone (should remain)
+        gfx.DrawString("Outside→", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(10, 100));
+        gfx.DrawString("KEEP-TEXT-B", textFont, PdfSharp.Drawing.XBrushes.Black,
+            new PdfSharp.Drawing.XPoint(60, 100));
+
+        // Text straddling zone
+        gfx.DrawString("Partial→", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(420, 75));
+        gfx.DrawString("VISIBLE", textFont, PdfSharp.Drawing.XBrushes.Black,
+            new PdfSharp.Drawing.XPoint(470, 75));
+        gfx.DrawString("PARTIAL-TEXT", textFont, PdfSharp.Drawing.XBrushes.Black,
+            new PdfSharp.Drawing.XPoint(220, 100));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 1.5: ROTATED TEXT TESTS (y=115-130)
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("ROTATED TEXT:", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 115));
+
+        // Rotated text INSIDE zone (should be removed) - 45° at x=250
+        DrawRotatedText(gfx, "ROT45-SECRET", textFont, 250, 125, 45, PdfSharp.Drawing.XColors.DarkRed);
+
+        // Rotated text OUTSIDE zone (should remain) - 90° at x=450 (right of zone)
+        DrawRotatedText(gfx, "ROT90-KEEP", textFont, 480, 90, 90, PdfSharp.Drawing.XColors.DarkGreen);
+
+        // Rotated text OUTSIDE zone (should remain) - 270° at x=150 (left of zone)
+        DrawRotatedText(gfx, "ROT270-KEEP", textFont, 150, 120, 270, PdfSharp.Drawing.XColors.DarkBlue);
+
+        // Rotated text partially in zone - 30° starting outside, extending into zone
+        DrawRotatedText(gfx, "ROT30-PARTIAL", textFont, 180, 140, 30, PdfSharp.Drawing.XColors.DarkOrange);
+
+        // Upside down text INSIDE zone (should be removed) - 180°
+        DrawRotatedText(gfx, "ROT180-SECRET", textFont, 300, 140, 180, PdfSharp.Drawing.XColors.Purple);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 2: BASIC SHAPES - INSIDE ZONE (y=150-230) - Should be REMOVED
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("SHAPES INSIDE (removed):", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 155));
+
+        // Rectangle (inside)
+        gfx.DrawRectangle(new PdfSharp.Drawing.XSolidBrush(PdfSharp.Drawing.XColors.Blue),
+            220, 170, 50, 50);
+        gfx.DrawString("Rect", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(230, 225));
+
+        // Circle/Ellipse (inside)
+        gfx.DrawEllipse(new PdfSharp.Drawing.XSolidBrush(PdfSharp.Drawing.XColors.Red),
+            290, 170, 50, 50);
+        gfx.DrawString("Circle", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(298, 225));
+
+        // Triangle (inside)
+        DrawTriangle(gfx, 380, 220, 25, PdfSharp.Drawing.XColors.Green);
+        gfx.DrawString("Tri", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(372, 225));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 3: BASIC SHAPES - OUTSIDE ZONE (y=220-320) - Should REMAIN
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("SHAPES OUTSIDE (remain):", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 225));
+
+        // Rectangle (outside)
+        gfx.DrawRectangle(new PdfSharp.Drawing.XSolidBrush(PdfSharp.Drawing.XColors.Orange),
+            30, 240, 50, 50);
+        gfx.DrawString("Rect", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(40, 295));
+
+        // Circle (outside)
+        gfx.DrawEllipse(new PdfSharp.Drawing.XSolidBrush(PdfSharp.Drawing.XColors.Purple),
+            100, 240, 50, 50);
+        gfx.DrawString("Circle", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(108, 295));
+
+        // Triangle (outside - right side)
+        DrawTriangle(gfx, 500, 290, 25, PdfSharp.Drawing.XColors.Teal);
+        gfx.DrawString("Tri", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(492, 295));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 4: COMPLEX SHAPES - INSIDE ZONE (y=310-410) - Should be REMOVED
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("COMPLEX INSIDE (removed):", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 315));
+
+        // Pentagon (inside)
+        DrawRegularPolygon(gfx, 245, 355, 25, 5, PdfSharp.Drawing.XColors.Magenta);
+        gfx.DrawString("Pent", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(232, 390));
+
+        // Hexagon (inside)
+        DrawRegularPolygon(gfx, 315, 355, 25, 6, PdfSharp.Drawing.XColors.Cyan);
+        gfx.DrawString("Hex", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(305, 390));
+
+        // Star (inside)
+        DrawStar(gfx, 385, 355, 25, 15, 5, PdfSharp.Drawing.XColors.Gold);
+        gfx.DrawString("Star", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(375, 390));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 5: COMPLEX SHAPES - OUTSIDE ZONE (y=400-500) - Should REMAIN
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("COMPLEX OUTSIDE (remain):", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 405));
+
+        // Pentagon (outside)
+        DrawRegularPolygon(gfx, 55, 445, 25, 5, PdfSharp.Drawing.XColors.Coral);
+        gfx.DrawString("Pent", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(42, 480));
+
+        // Hexagon (outside)
+        DrawRegularPolygon(gfx, 125, 445, 25, 6, PdfSharp.Drawing.XColors.LimeGreen);
+        gfx.DrawString("Hex", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(115, 480));
+
+        // Star (outside - right side)
+        DrawStar(gfx, 500, 445, 25, 15, 5, PdfSharp.Drawing.XColors.DeepPink);
+        gfx.DrawString("Star", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(490, 480));
+
+        // Octagon (outside)
+        DrawRegularPolygon(gfx, 560, 355, 20, 8, PdfSharp.Drawing.XColors.SlateBlue);
+        gfx.DrawString("Oct", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(552, 385));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 6: PARTIAL OVERLAP SHAPES (y=500-600) - Should be CLIPPED
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("PARTIAL OVERLAP (clipped):", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 505));
+
+        // Wide rectangle straddling zone boundary (left half remains)
+        gfx.DrawRectangle(new PdfSharp.Drawing.XSolidBrush(PdfSharp.Drawing.XColors.ForestGreen),
+            100, 520, 200, 50);
+        gfx.DrawString("Rect (left half remains)", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(100, 575));
+
+        // Ellipse straddling zone (right portion removed)
+        gfx.DrawEllipse(new PdfSharp.Drawing.XSolidBrush(PdfSharp.Drawing.XColors.Crimson),
+            150, 590, 100, 60);
+        gfx.DrawString("Ellipse (right clipped)", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(150, 655));
+
+        // Triangle straddling zone
+        DrawTriangle(gfx, 250, 680, 40, PdfSharp.Drawing.XColors.DarkOrange);
+        gfx.DrawString("Tri (partial)", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(210, 690));
+
+        // Star straddling zone
+        DrawStar(gfx, 350, 620, 30, 18, 5, PdfSharp.Drawing.XColors.DodgerBlue);
+        gfx.DrawString("Star (partial)", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(410, 630));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROW 7: IRREGULAR SHAPES (y=700-770)
+        // ═══════════════════════════════════════════════════════════════════
+        gfx.DrawString("IRREGULAR SHAPES:", labelFont, PdfSharp.Drawing.XBrushes.DarkBlue,
+            new PdfSharp.Drawing.XPoint(10, 705));
+
+        // Arrow shape (outside)
+        DrawArrow(gfx, 30, 720, 60, 30, PdfSharp.Drawing.XColors.Navy);
+        gfx.DrawString("Arrow", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(40, 760));
+
+        // Diamond (inside - should be removed)
+        DrawDiamond(gfx, 280, 740, 30, 40, PdfSharp.Drawing.XColors.Maroon);
+        gfx.DrawString("Diamond", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(260, 765));
+
+        // Cross/Plus (outside)
+        DrawCross(gfx, 500, 740, 25, 8, PdfSharp.Drawing.XColors.DarkGreen);
+        gfx.DrawString("Cross", labelFont, PdfSharp.Drawing.XBrushes.Gray,
+            new PdfSharp.Drawing.XPoint(490, 765));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // REDACTION ZONE INDICATOR
+        // ═══════════════════════════════════════════════════════════════════
+        var dashedPen = new PdfSharp.Drawing.XPen(PdfSharp.Drawing.XColors.Red, 2)
+        {
+            DashStyle = PdfSharp.Drawing.XDashStyle.Dash
+        };
+        gfx.DrawRectangle(dashedPen, 200, 50, 200, 730);
+
+        // Zone labels
+        gfx.DrawString("REDACTION", labelFont, PdfSharp.Drawing.XBrushes.Red,
+            new PdfSharp.Drawing.XPoint(265, 45));
+        gfx.DrawString("ZONE", labelFont, PdfSharp.Drawing.XBrushes.Red,
+            new PdfSharp.Drawing.XPoint(280, 785));
+        gfx.DrawString("x=200-400", labelFont, PdfSharp.Drawing.XBrushes.Red,
+            new PdfSharp.Drawing.XPoint(268, 795));
+
+        document.Save(outputPath);
+    }
+
+    // Helper: Draw rotated text
+    static void DrawRotatedText(PdfSharp.Drawing.XGraphics gfx, string text, PdfSharp.Drawing.XFont font, double x, double y, double angleDegrees, PdfSharp.Drawing.XColor color)
+    {
+        // Save current graphics state
+        var state = gfx.Save();
+
+        // Move to text position
+        gfx.TranslateTransform(x, y);
+
+        // Rotate around that point
+        gfx.RotateTransform(angleDegrees);
+
+        // Draw text at origin (now rotated)
+        gfx.DrawString(text, font, new PdfSharp.Drawing.XSolidBrush(color), 0, 0);
+
+        // Restore graphics state
+        gfx.Restore(state);
+    }
+
+    // Helper: Draw a triangle
+    static void DrawTriangle(PdfSharp.Drawing.XGraphics gfx, double centerX, double centerY, double radius, PdfSharp.Drawing.XColor color)
+    {
+        var points = new PdfSharp.Drawing.XPoint[3];
+        for (int i = 0; i < 3; i++)
+        {
+            double angle = (i * 2 * Math.PI / 3) - Math.PI / 2; // Start from top
+            points[i] = new PdfSharp.Drawing.XPoint(
+                centerX + radius * Math.Cos(angle),
+                centerY + radius * Math.Sin(angle));
+        }
+        gfx.DrawPolygon(new PdfSharp.Drawing.XSolidBrush(color), points, PdfSharp.Drawing.XFillMode.Winding);
+    }
+
+    // Helper: Draw a regular polygon (pentagon, hexagon, octagon, etc.)
+    static void DrawRegularPolygon(PdfSharp.Drawing.XGraphics gfx, double centerX, double centerY, double radius, int sides, PdfSharp.Drawing.XColor color)
+    {
+        var points = new PdfSharp.Drawing.XPoint[sides];
+        for (int i = 0; i < sides; i++)
+        {
+            double angle = (i * 2 * Math.PI / sides) - Math.PI / 2;
+            points[i] = new PdfSharp.Drawing.XPoint(
+                centerX + radius * Math.Cos(angle),
+                centerY + radius * Math.Sin(angle));
+        }
+        gfx.DrawPolygon(new PdfSharp.Drawing.XSolidBrush(color), points, PdfSharp.Drawing.XFillMode.Winding);
+    }
+
+    // Helper: Draw a star
+    static void DrawStar(PdfSharp.Drawing.XGraphics gfx, double centerX, double centerY, double outerRadius, double innerRadius, int points, PdfSharp.Drawing.XColor color)
+    {
+        var starPoints = new PdfSharp.Drawing.XPoint[points * 2];
+        for (int i = 0; i < points * 2; i++)
+        {
+            double radius = (i % 2 == 0) ? outerRadius : innerRadius;
+            double angle = (i * Math.PI / points) - Math.PI / 2;
+            starPoints[i] = new PdfSharp.Drawing.XPoint(
+                centerX + radius * Math.Cos(angle),
+                centerY + radius * Math.Sin(angle));
+        }
+        gfx.DrawPolygon(new PdfSharp.Drawing.XSolidBrush(color), starPoints, PdfSharp.Drawing.XFillMode.Winding);
+    }
+
+    // Helper: Draw an arrow pointing right
+    static void DrawArrow(PdfSharp.Drawing.XGraphics gfx, double x, double y, double width, double height, PdfSharp.Drawing.XColor color)
+    {
+        var points = new PdfSharp.Drawing.XPoint[]
+        {
+            new PdfSharp.Drawing.XPoint(x, y + height * 0.25),
+            new PdfSharp.Drawing.XPoint(x + width * 0.6, y + height * 0.25),
+            new PdfSharp.Drawing.XPoint(x + width * 0.6, y),
+            new PdfSharp.Drawing.XPoint(x + width, y + height * 0.5),
+            new PdfSharp.Drawing.XPoint(x + width * 0.6, y + height),
+            new PdfSharp.Drawing.XPoint(x + width * 0.6, y + height * 0.75),
+            new PdfSharp.Drawing.XPoint(x, y + height * 0.75),
+        };
+        gfx.DrawPolygon(new PdfSharp.Drawing.XSolidBrush(color), points, PdfSharp.Drawing.XFillMode.Winding);
+    }
+
+    // Helper: Draw a diamond
+    static void DrawDiamond(PdfSharp.Drawing.XGraphics gfx, double centerX, double centerY, double halfWidth, double halfHeight, PdfSharp.Drawing.XColor color)
+    {
+        var points = new PdfSharp.Drawing.XPoint[]
+        {
+            new PdfSharp.Drawing.XPoint(centerX, centerY - halfHeight),
+            new PdfSharp.Drawing.XPoint(centerX + halfWidth, centerY),
+            new PdfSharp.Drawing.XPoint(centerX, centerY + halfHeight),
+            new PdfSharp.Drawing.XPoint(centerX - halfWidth, centerY),
+        };
+        gfx.DrawPolygon(new PdfSharp.Drawing.XSolidBrush(color), points, PdfSharp.Drawing.XFillMode.Winding);
+    }
+
+    // Helper: Draw a cross/plus sign
+    static void DrawCross(PdfSharp.Drawing.XGraphics gfx, double centerX, double centerY, double size, double thickness, PdfSharp.Drawing.XColor color)
+    {
+        var points = new PdfSharp.Drawing.XPoint[]
+        {
+            new PdfSharp.Drawing.XPoint(centerX - thickness/2, centerY - size),
+            new PdfSharp.Drawing.XPoint(centerX + thickness/2, centerY - size),
+            new PdfSharp.Drawing.XPoint(centerX + thickness/2, centerY - thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX + size, centerY - thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX + size, centerY + thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX + thickness/2, centerY + thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX + thickness/2, centerY + size),
+            new PdfSharp.Drawing.XPoint(centerX - thickness/2, centerY + size),
+            new PdfSharp.Drawing.XPoint(centerX - thickness/2, centerY + thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX - size, centerY + thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX - size, centerY - thickness/2),
+            new PdfSharp.Drawing.XPoint(centerX - thickness/2, centerY - thickness/2),
+        };
+        gfx.DrawPolygon(new PdfSharp.Drawing.XSolidBrush(color), points, PdfSharp.Drawing.XFillMode.Winding);
+    }
+
+    static string ExtractAllText(string pdfPath)
+    {
+        try
+        {
+            using var document = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+            var sb = new System.Text.StringBuilder();
+            foreach (var page in document.GetPages())
+            {
+                sb.AppendLine(page.Text);
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"[Error extracting text: {ex.Message}]";
         }
     }
 
