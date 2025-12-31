@@ -71,5 +71,4 @@ jobs:
       - name: Test (veraPDF integration tests)
         run: |
           export PATH="$HOME/verapdf:$PATH"
-          dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~VeraPdfConformance|FullyQualifiedName~VeraPdfCorpus" || true
-        continue-on-error: true  # PDF/A compliance tests may fail - tracked in issue #158
+          dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~VeraPdfConformance|FullyQualifiedName~VeraPdfCorpus"
