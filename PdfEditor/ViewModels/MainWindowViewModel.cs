@@ -660,8 +660,87 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogError(ex, "!!! ERROR in LoadDocumentAsync at some step: {FilePath}", filePath);
             _logger.LogError("!!! Exception Type: {ExceptionType}", ex.GetType().Name);
             _logger.LogError("!!! Exception Message: {Message}", ex.Message);
-            _logger.LogError("!!! Stack Trace: {StackTrace}", ex.StackTrace);
-            throw; // Re-throw to see if there's an outer handler
+
+            // Clear document state on failure
+            _currentFilePath = string.Empty;
+            FileState.Reset();
+
+            // Determine user-friendly error message
+            string userMessage;
+            if (ex.Message.Contains("owner password") || ex.Message.Contains("password is required"))
+            {
+                userMessage = "This PDF is password-protected and cannot be opened for editing.\n\nPlease use the original application to remove password protection, or open a different file.";
+            }
+            else if (ex.Message.Contains("encrypted"))
+            {
+                userMessage = "This PDF is encrypted and cannot be opened.\n\nPlease provide an unencrypted version of the file.";
+            }
+            else
+            {
+                userMessage = $"Failed to open PDF:\n\n{ex.Message}";
+            }
+
+            // Show error dialog to user (StatusBarText will show "Ready" from FileState.Reset())
+            this.RaisePropertyChanged(nameof(StatusBarText));
+            await ShowErrorDialogAsync("Cannot Open PDF", userMessage);
+        }
+    }
+
+    private async Task ShowErrorDialogAsync(string title, string message)
+    {
+        try
+        {
+            var mainWindow = Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow
+                : null;
+
+            if (mainWindow != null)
+            {
+                var dialog = new Avalonia.Controls.Window
+                {
+                    Title = title,
+                    Width = 450,
+                    Height = 200,
+                    WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterOwner,
+                    CanResize = false,
+                    Content = new Avalonia.Controls.StackPanel
+                    {
+                        Margin = new Avalonia.Thickness(20),
+                        Spacing = 15,
+                        Children =
+                        {
+                            new Avalonia.Controls.TextBlock
+                            {
+                                Text = message,
+                                TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                            },
+                            new Avalonia.Controls.Button
+                            {
+                                Content = "OK",
+                                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                                Width = 80
+                            }
+                        }
+                    }
+                };
+
+                // Wire up the OK button to close the dialog
+                if (dialog.Content is Avalonia.Controls.StackPanel panel)
+                {
+                    var button = panel.Children.OfType<Avalonia.Controls.Button>().FirstOrDefault();
+                    if (button != null)
+                    {
+                        button.Click += (s, e) => dialog.Close();
+                    }
+                }
+
+                await dialog.ShowDialog(mainWindow);
+            }
+        }
+        catch (Exception dialogEx)
+        {
+            _logger.LogError(dialogEx, "Failed to show error dialog");
         }
     }
 

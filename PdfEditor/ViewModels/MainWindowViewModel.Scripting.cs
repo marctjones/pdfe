@@ -329,6 +329,13 @@ public partial class MainWindowViewModel
 
         try
         {
+            // Apply any pending redactions before saving (like GUI workflow does)
+            if (RedactionWorkflow.PendingCount > 0)
+            {
+                _logger.LogInformation("[SCRIPT] Applying {Count} pending redactions before save", RedactionWorkflow.PendingCount);
+                await ApplyRedactionsViaScriptAsync();
+            }
+
             // Get current document
             var document = _documentService.GetCurrentDocument();
             if (document == null)
@@ -341,7 +348,15 @@ public partial class MainWindowViewModel
             _logger.LogInformation("[SCRIPT] Saving PDF to: {Path}", filePath);
             document.Save(filePath);
 
-            _logger.LogInformation("[SCRIPT] SaveDocumentCommand completed successfully");
+            // Update current file path to point to the saved file
+            // This ensures subsequent operations (like text extraction) use the new file
+            // Bug fix: Without this, ExtractAllText would read from the OLD file path
+            _currentFilePath = filePath;
+            FileState.SetDocument(filePath);
+            this.RaisePropertyChanged(nameof(DocumentName));
+            this.RaisePropertyChanged(nameof(FilePath));
+
+            _logger.LogInformation("[SCRIPT] SaveDocumentCommand completed successfully, current path updated to: {Path}", filePath);
 
             // Run verification if enabled
             if (RunVerifyAfterSave)

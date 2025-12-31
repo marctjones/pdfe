@@ -656,4 +656,220 @@ public static class TestPdfGenerator
 
         return outputPath;
     }
+
+    // ========================================================================
+    // ROTATED PAGE SUPPORT (for Issue #151)
+    // ========================================================================
+
+    /// <summary>
+    /// Creates a PDF with the specified rotation and text at a known CONTENT STREAM position.
+    /// The text will appear at different VISUAL positions depending on rotation.
+    ///
+    /// COORDINATE SYSTEM:
+    /// - contentX, contentY are in PDF content stream coordinates (bottom-left origin, unrotated)
+    /// - XGraphics uses top-left origin, so we convert internally
+    /// - The /Rotate entry is set on the page, which affects how viewers display the page
+    /// </summary>
+    /// <param name="outputPath">Output file path</param>
+    /// <param name="rotation">Page rotation: 0, 90, 180, or 270 degrees</param>
+    /// <param name="text">Text to place on the page</param>
+    /// <param name="contentX">X position in content stream coords (from left of unrotated page)</param>
+    /// <param name="contentY">Y position in content stream coords (from BOTTOM of unrotated page)</param>
+    /// <param name="fontSize">Font size in points</param>
+    public static string CreateRotatedPdf(string outputPath, int rotation, string text,
+        double contentX, double contentY, double fontSize = 12)
+    {
+        EnsureFontResolverInitialized();
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(612);  // Letter width
+        page.Height = XUnit.FromPoint(792); // Letter height
+        page.Rotate = rotation;  // Set rotation
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", fontSize);
+
+        // XGraphics uses top-left origin, convert from PDF bottom-left
+        // contentY is from bottom, XGraphics Y is from top
+        var xGraphicsY = page.Height.Point - contentY;
+        gfx.DrawString(text, font, XBrushes.Black, new XPoint(contentX, xGraphicsY));
+
+        document.Save(outputPath);
+        document.Dispose();
+        return outputPath;
+    }
+
+    /// <summary>
+    /// Creates a PDF with text at a known VISUAL position, regardless of rotation.
+    /// This calculates the content stream position needed to achieve the visual position.
+    ///
+    /// VISUAL COORDINATES:
+    /// - Origin at top-left of the DISPLAYED page (after rotation is applied)
+    /// - X increases to the right, Y increases downward
+    /// - These match what the user sees on screen
+    /// </summary>
+    /// <param name="outputPath">Output file path</param>
+    /// <param name="rotation">Page rotation: 0, 90, 180, or 270 degrees</param>
+    /// <param name="text">Text to place on the page</param>
+    /// <param name="visualX">X position in visual coords (from left of displayed page)</param>
+    /// <param name="visualY">Y position in visual coords (from TOP of displayed page)</param>
+    /// <param name="fontSize">Font size in points</param>
+    public static string CreateRotatedPdfVisualPosition(string outputPath, int rotation, string text,
+        double visualX, double visualY, double fontSize = 12)
+    {
+        const double pageWidth = 612;
+        const double pageHeight = 792;
+
+        // Convert visual position to content stream position based on rotation
+        var (contentX, contentY) = VisualToContentCoords(visualX, visualY, rotation, pageWidth, pageHeight);
+        return CreateRotatedPdf(outputPath, rotation, text, contentX, contentY, fontSize);
+    }
+
+    /// <summary>
+    /// Creates a PDF with two text items at different visual positions.
+    /// Useful for testing that redaction only removes targeted text.
+    /// </summary>
+    public static string CreateRotatedPdfWithTwoTexts(string outputPath, int rotation,
+        string text1, double visual1X, double visual1Y,
+        string text2, double visual2X, double visual2Y,
+        double fontSize = 12)
+    {
+        const double pageWidth = 612;
+        const double pageHeight = 792;
+
+        EnsureFontResolverInitialized();
+        var document = new PdfDocument();
+        var page = document.AddPage();
+        page.Width = XUnit.FromPoint(pageWidth);
+        page.Height = XUnit.FromPoint(pageHeight);
+        page.Rotate = rotation;
+
+        using var gfx = XGraphics.FromPdfPage(page);
+        var font = new XFont("Arial", fontSize);
+
+        // Convert visual positions to content stream positions
+        var (content1X, content1Y) = VisualToContentCoords(visual1X, visual1Y, rotation, pageWidth, pageHeight);
+        var (content2X, content2Y) = VisualToContentCoords(visual2X, visual2Y, rotation, pageWidth, pageHeight);
+
+        // Draw text 1
+        var xGraphics1Y = pageHeight - content1Y;
+        gfx.DrawString(text1, font, XBrushes.Black, new XPoint(content1X, xGraphics1Y));
+
+        // Draw text 2
+        var xGraphics2Y = pageHeight - content2Y;
+        gfx.DrawString(text2, font, XBrushes.Black, new XPoint(content2X, xGraphics2Y));
+
+        document.Save(outputPath);
+        document.Dispose();
+        return outputPath;
+    }
+
+    /// <summary>
+    /// Creates a multi-page PDF with different rotations on each page.
+    /// Page 1: 0°, Page 2: 90°, Page 3: 180°, Page 4: 270°
+    /// Each page has text at the same visual position.
+    /// </summary>
+    public static string CreateMixedRotationPdf(string outputPath, string text,
+        double visualX, double visualY, double fontSize = 12)
+    {
+        const double pageWidth = 612;
+        const double pageHeight = 792;
+
+        EnsureFontResolverInitialized();
+        var document = new PdfDocument();
+
+        foreach (var rotation in new[] { 0, 90, 180, 270 })
+        {
+            var page = document.AddPage();
+            page.Width = XUnit.FromPoint(pageWidth);
+            page.Height = XUnit.FromPoint(pageHeight);
+            page.Rotate = rotation;
+
+            using var gfx = XGraphics.FromPdfPage(page);
+            var font = new XFont("Arial", fontSize);
+
+            var (contentX, contentY) = VisualToContentCoords(visualX, visualY, rotation, pageWidth, pageHeight);
+            var xGraphicsY = pageHeight - contentY;
+
+            gfx.DrawString($"{text} (Page {rotation}°)", font, XBrushes.Black, new XPoint(contentX, xGraphicsY));
+        }
+
+        document.Save(outputPath);
+        document.Dispose();
+        return outputPath;
+    }
+
+    /// <summary>
+    /// Convert visual coordinates (top-left origin, rotated view) to
+    /// content stream coordinates (bottom-left origin, unrotated).
+    ///
+    /// This is the inverse of what a PDF viewer does when displaying a rotated page.
+    /// </summary>
+    /// <param name="visualX">X from left of displayed (rotated) page</param>
+    /// <param name="visualY">Y from TOP of displayed (rotated) page</param>
+    /// <param name="rotation">Page rotation in degrees</param>
+    /// <param name="pageWidth">Unrotated page width</param>
+    /// <param name="pageHeight">Unrotated page height</param>
+    /// <returns>Content stream coordinates (X from left, Y from BOTTOM of unrotated page)</returns>
+    private static (double contentX, double contentY) VisualToContentCoords(
+        double visualX, double visualY, int rotation, double pageWidth, double pageHeight)
+    {
+        // Normalize rotation
+        rotation = ((rotation % 360) + 360) % 360;
+
+        // Visual coordinates are in the DISPLAYED page space (after rotation)
+        // For 90° and 270°, the displayed dimensions are swapped
+        //
+        // We need to map back to content stream space (unrotated, bottom-left origin)
+        //
+        // The transformations below were derived by:
+        // 1. Understanding that visual (0,0) is top-left of rotated view
+        // 2. Working out where that maps to in unrotated content stream space
+
+        return rotation switch
+        {
+            0 => (
+                // No rotation: visual X = content X, visual Y (from top) → content Y (from bottom)
+                visualX,
+                pageHeight - visualY
+            ),
+            90 => (
+                // 90° clockwise: displayed width = pageHeight, displayed height = pageWidth
+                // Visual top-left → content bottom-right area
+                // visualX maps to contentY, visualY maps to (pageWidth - contentX)
+                pageHeight - visualY,
+                pageHeight - visualX
+            ),
+            180 => (
+                // 180°: both axes flipped
+                pageWidth - visualX,
+                visualY
+            ),
+            270 => (
+                // 270° clockwise (90° counter-clockwise)
+                visualY,
+                visualX
+            ),
+            _ => (visualX, pageHeight - visualY)
+        };
+    }
+
+    /// <summary>
+    /// Convert content stream coordinates to visual coordinates.
+    /// Inverse of VisualToContentCoords.
+    /// </summary>
+    public static (double visualX, double visualY) ContentToVisualCoords(
+        double contentX, double contentY, int rotation, double pageWidth, double pageHeight)
+    {
+        rotation = ((rotation % 360) + 360) % 360;
+
+        return rotation switch
+        {
+            0 => (contentX, pageHeight - contentY),
+            90 => (pageHeight - contentY, contentX),
+            180 => (pageWidth - contentX, contentY),
+            270 => (contentY, pageWidth - contentX),
+            _ => (contentX, pageHeight - contentY)
+        };
+    }
 }
