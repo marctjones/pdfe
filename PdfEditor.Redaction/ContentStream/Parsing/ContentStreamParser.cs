@@ -94,6 +94,19 @@ public class ContentStreamParser : IContentStreamParser
 
             if (token.IsOperator)
             {
+                // Handle inline images (BI...ID...EI) - special parsing
+                if (token.StringValue == "BI")
+                {
+                    state.StreamPosition = operationIndex++;
+                    var inlineImageOp = ParseInlineImage(contentBytes, ref position, state);
+                    if (inlineImageOp != null)
+                    {
+                        operations.Add(inlineImageOp);
+                    }
+                    operandStack.Clear();
+                    continue;
+                }
+
                 // Dispatch to handler
                 state.StreamPosition = operationIndex++;
                 var handler = _registry.GetHandler(token.StringValue);
@@ -213,6 +226,19 @@ public class ContentStreamParser : IContentStreamParser
 
             if (token.IsOperator)
             {
+                // Handle inline images (BI...ID...EI) - special parsing
+                if (token.StringValue == "BI")
+                {
+                    state.StreamPosition = operationIndex++;
+                    var inlineImageOp = ParseInlineImage(contentBytes, ref position, state);
+                    if (inlineImageOp != null)
+                    {
+                        operations.Add(inlineImageOp);
+                    }
+                    operandStack.Clear();
+                    continue;
+                }
+
                 // Dispatch to handler
                 state.StreamPosition = operationIndex++;
                 var handler = _registry.GetHandler(token.StringValue);
@@ -907,6 +933,219 @@ public class ContentStreamParser : IContentStreamParser
 
     private static bool IsNumberStart(byte b) =>
         (b >= '0' && b <= '9') || b == '+' || b == '-' || b == '.';
+
+    /// <summary>
+    /// Parse an inline image (BI...ID...EI sequence).
+    /// Called after BI has been detected. Parses the dictionary, image data, and EI terminator.
+    /// </summary>
+    /// <param name="bytes">Content stream bytes.</param>
+    /// <param name="position">Current position (after BI). Updated to position after EI.</param>
+    /// <param name="state">Parser state for CTM-based bounding box calculation.</param>
+    /// <returns>InlineImageOperation or null if parsing fails.</returns>
+    private InlineImageOperation? ParseInlineImage(byte[] bytes, ref int position, PdfParserState state)
+    {
+        // Mark start position (including BI which was just consumed)
+        int startPosition = position - 2; // Back up to include "BI"
+        if (startPosition < 0) startPosition = 0;
+
+        // Parse inline image dictionary (key/value pairs until ID)
+        int imageWidth = 0;
+        int imageHeight = 0;
+        int bitsPerComponent = 8;
+        string? colorSpace = null;
+        string? filter = null;
+
+        while (position < bytes.Length)
+        {
+            // Skip whitespace
+            while (position < bytes.Length && IsWhitespace(bytes[position]))
+                position++;
+
+            if (position >= bytes.Length)
+                break;
+
+            // Check for ID operator (marks end of dictionary, start of image data)
+            if (position + 1 < bytes.Length &&
+                bytes[position] == 'I' && bytes[position + 1] == 'D')
+            {
+                position += 2; // Skip "ID"
+
+                // Skip single whitespace after ID (required by PDF spec)
+                if (position < bytes.Length && (bytes[position] == ' ' || bytes[position] == '\n' || bytes[position] == '\r'))
+                    position++;
+
+                break;
+            }
+
+            // Parse key (name without leading /)
+            var key = ParseInlineImageKey(bytes, ref position);
+            if (string.IsNullOrEmpty(key))
+            {
+                position++;
+                continue;
+            }
+
+            // Skip whitespace
+            while (position < bytes.Length && IsWhitespace(bytes[position]))
+                position++;
+
+            // Parse value
+            var value = ParseInlineImageValue(bytes, ref position);
+
+            // Extract relevant properties
+            // See PDF Reference Table 4.43 for abbreviations
+            switch (key)
+            {
+                case "W":
+                case "Width":
+                    if (value is double w) imageWidth = (int)w;
+                    else if (value is int wi) imageWidth = wi;
+                    break;
+                case "H":
+                case "Height":
+                    if (value is double h) imageHeight = (int)h;
+                    else if (value is int hi) imageHeight = hi;
+                    break;
+                case "BPC":
+                case "BitsPerComponent":
+                    if (value is double bpc) bitsPerComponent = (int)bpc;
+                    else if (value is int bpci) bitsPerComponent = bpci;
+                    break;
+                case "CS":
+                case "ColorSpace":
+                    colorSpace = value?.ToString();
+                    break;
+                case "F":
+                case "Filter":
+                    filter = value?.ToString();
+                    break;
+            }
+        }
+
+        // Now find EI (end of image data)
+        // The tricky part: EI must be preceded by whitespace and followed by whitespace/EOF
+        int imageDataStart = position;
+        int eiPosition = FindEndOfImageData(bytes, position);
+
+        if (eiPosition < 0)
+        {
+            // Couldn't find EI - skip to end of content stream
+            return null;
+        }
+
+        // Skip past "EI"
+        position = eiPosition + 2;
+
+        // Capture the entire BI...ID...EI sequence as raw bytes
+        int endPosition = position;
+        int length = endPosition - startPosition;
+        var rawBytes = new byte[length];
+        Array.Copy(bytes, startPosition, rawBytes, 0, length);
+
+        // Calculate bounding box from CTM (images are defined in unit square)
+        var boundingBox = CalculateXObjectBoundingBox(state.TransformationMatrix);
+
+        return new InlineImageOperation
+        {
+            Operator = "BI",
+            Operands = new List<object>(),
+            StreamPosition = state.StreamPosition,
+            InsideTextBlock = state.InTextObject,
+            BoundingBox = boundingBox,
+            RawBytes = rawBytes,
+            ImageWidth = imageWidth,
+            ImageHeight = imageHeight,
+            BitsPerComponent = bitsPerComponent,
+            ColorSpace = colorSpace,
+            Filter = filter
+        };
+    }
+
+    /// <summary>
+    /// Parse an inline image dictionary key.
+    /// </summary>
+    private string ParseInlineImageKey(byte[] bytes, ref int position)
+    {
+        // Keys can be with or without leading /
+        if (position < bytes.Length && bytes[position] == '/')
+            position++;
+
+        var sb = new StringBuilder();
+        while (position < bytes.Length && !IsWhitespace(bytes[position]) && !IsDelimiter(bytes[position]))
+        {
+            sb.Append((char)bytes[position]);
+            position++;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parse an inline image dictionary value.
+    /// </summary>
+    private object? ParseInlineImageValue(byte[] bytes, ref int position)
+    {
+        if (position >= bytes.Length)
+            return null;
+
+        // Try parsing as number
+        if (IsNumberStart(bytes[position]))
+        {
+            return ParseNumber(bytes, ref position)?.Value;
+        }
+
+        // Name (with or without /)
+        if (bytes[position] == '/')
+        {
+            var token = ParseName(bytes, ref position);
+            return token?.Value;
+        }
+
+        // Array
+        if (bytes[position] == '[')
+        {
+            var token = ParseArray(bytes, ref position);
+            return token?.Value;
+        }
+
+        // Boolean or name without /
+        var sb = new StringBuilder();
+        while (position < bytes.Length && !IsWhitespace(bytes[position]) && !IsDelimiter(bytes[position]))
+        {
+            sb.Append((char)bytes[position]);
+            position++;
+        }
+
+        var str = sb.ToString();
+        if (str == "true") return true;
+        if (str == "false") return false;
+        return str;
+    }
+
+    /// <summary>
+    /// Find the position of "EI" that ends the inline image data.
+    /// Must be preceded by whitespace and followed by whitespace or EOF.
+    /// </summary>
+    private int FindEndOfImageData(byte[] bytes, int startPosition)
+    {
+        // Scan for "EI" pattern
+        for (int i = startPosition; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] == 'E' && bytes[i + 1] == 'I')
+            {
+                // Check if preceded by whitespace (required)
+                if (i > 0 && !IsWhitespace(bytes[i - 1]))
+                    continue;
+
+                // Check if followed by whitespace or EOF (required)
+                if (i + 2 < bytes.Length && !IsWhitespace(bytes[i + 2]))
+                    continue;
+
+                return i;
+            }
+        }
+
+        return -1;
+    }
 
     /// <summary>
     /// Internal token representation.

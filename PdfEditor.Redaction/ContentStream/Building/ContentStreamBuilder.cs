@@ -175,6 +175,15 @@ public class ContentStreamBuilder : IContentStreamBuilder
 
     private void SerializeOperation(PdfOperation operation, StringBuilder sb)
     {
+        // Special handling for inline images - write raw bytes directly
+        if (operation is InlineImageOperation inlineImage)
+        {
+            // Write the raw bytes as-is (they contain BI...ID...data...EI)
+            var rawString = System.Text.Encoding.Latin1.GetString(inlineImage.RawBytes);
+            sb.Append(rawString);
+            return;
+        }
+
         // CJK support (Issue #174): Check if this operation needs hex string encoding
         if (operation is TextOperation textOp)
         {
