@@ -385,6 +385,7 @@ public class TextRedactor : ITextRedactor
 
     /// <summary>
     /// Calculate bounding box from a sequence of letters.
+    /// Handles rotated text where PdfPig may return GlyphRectangles with swapped Left/Right or Bottom/Top.
     /// </summary>
     private static PdfRectangle CalculateBoundingBox(List<Letter> letters)
     {
@@ -399,10 +400,18 @@ public class TextRedactor : ITextRedactor
         foreach (var letter in letters)
         {
             var rect = letter.GlyphRectangle;
-            if (rect.Left < left) left = rect.Left;
-            if (rect.Bottom < bottom) bottom = rect.Bottom;
-            if (rect.Right > right) right = rect.Right;
-            if (rect.Top > top) top = rect.Top;
+
+            // Normalize coordinates - PdfPig can return swapped Left/Right or Bottom/Top for rotated text
+            // For example, 90° rotation returns GlyphRectangle with Left > Right
+            double letterLeft = Math.Min(rect.Left, rect.Right);
+            double letterRight = Math.Max(rect.Left, rect.Right);
+            double letterBottom = Math.Min(rect.Bottom, rect.Top);
+            double letterTop = Math.Max(rect.Bottom, rect.Top);
+
+            if (letterLeft < left) left = letterLeft;
+            if (letterBottom < bottom) bottom = letterBottom;
+            if (letterRight > right) right = letterRight;
+            if (letterTop > top) top = letterTop;
         }
 
         return new PdfRectangle(left, bottom, right, top);
@@ -419,9 +428,42 @@ public class TextRedactor : ITextRedactor
         List<PdfRectangle> redactionAreas,
         RedactionOptions options)
     {
-        // Get page dimensions
+        // Get page dimensions, accounting for rotation
         var mediaBox = page.MediaBox;
-        var pageHeight = mediaBox.Height;
+        var rotation = GetPageRotation(page);
+
+        // For content stream parsing, use MediaBox height (unrotated)
+        var contentStreamPageHeight = mediaBox.Height;
+
+        _logger.LogDebug("Page {Page} rotation: {Rotation}°, MediaBox: {W}x{H}",
+            pageNumber, rotation, mediaBox.Width, mediaBox.Height);
+
+        // CRITICAL FIX for Issue #151 (rotated page redaction):
+        // PdfPig returns letter coordinates in VISUAL space (post-rotation)
+        // ContentStreamParser returns coordinates in CONTENT STREAM space (pre-rotation)
+        // For rotated pages, we must transform redaction areas from visual to content stream space
+        List<PdfRectangle> contentStreamAreas;
+        if (rotation != 0)
+        {
+            _logger.LogDebug("Transforming {Count} redaction areas from visual to content stream space (rotation: {Rotation}°)",
+                redactionAreas.Count, rotation);
+
+            contentStreamAreas = redactionAreas
+                .Select(area => RotationTransform.VisualToContentStream(area, rotation, mediaBox.Width, mediaBox.Height))
+                .ToList();
+
+            for (int i = 0; i < redactionAreas.Count; i++)
+            {
+                _logger.LogDebug("  Area {I}: Visual ({VL:F1},{VB:F1})-({VR:F1},{VT:F1}) → Content ({CL:F1},{CB:F1})-({CR:F1},{CT:F1})",
+                    i,
+                    redactionAreas[i].Left, redactionAreas[i].Bottom, redactionAreas[i].Right, redactionAreas[i].Top,
+                    contentStreamAreas[i].Left, contentStreamAreas[i].Bottom, contentStreamAreas[i].Right, contentStreamAreas[i].Top);
+            }
+        }
+        else
+        {
+            contentStreamAreas = redactionAreas;
+        }
 
         // Get content stream bytes
         var contentBytes = GetContentStreamBytes(page);
@@ -442,13 +484,19 @@ public class TextRedactor : ITextRedactor
         var resources = page.Elements.GetDictionary("/Resources");
 
         // Delegate to ContentStreamRedactor for core redaction logic (with Form XObject support)
+        // NOTE: Content stream areas are for operation-level matching, visual areas are for letter-level matching
+        // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation in glyph-level redaction
         var (newContentBytes, details, formXObjectResults) = _contentStreamRedactor.RedactContentStreamWithFormXObjects(
             contentBytes,
-            pageHeight,
-            redactionAreas,
+            contentStreamPageHeight,
+            contentStreamAreas,
             letters,
             options,
-            resources);
+            resources,
+            redactionAreas,  // Pass original visual areas for glyph-level letter matching
+            rotation,        // Page rotation for coordinate transformation
+            mediaBox.Width,  // MediaBox width for coordinate transformation
+            mediaBox.Height); // MediaBox height for coordinate transformation
 
         // Replace page content
         ReplacePageContent(page, newContentBytes);
@@ -459,10 +507,10 @@ public class TextRedactor : ITextRedactor
             UpdateFormXObjects(resources, formXObjectResults);
         }
 
-        // Draw visual markers
+        // Draw visual markers (using content stream coordinates so they appear correctly)
         if (options.DrawVisualMarker)
         {
-            DrawRedactionMarkers(page, redactionAreas, options.MarkerColor);
+            DrawRedactionMarkers(page, contentStreamAreas, options.MarkerColor);
         }
 
         // Convert details to return format
@@ -531,6 +579,27 @@ public class TextRedactor : ITextRedactor
                 _logger.LogWarning(ex, "Failed to update Form XObject: {Name}", result.XObjectName);
             }
         }
+    }
+
+    /// <summary>
+    /// Get the page rotation in degrees (0, 90, 180, or 270).
+    /// </summary>
+    private int GetPageRotation(PdfPage page)
+    {
+        try
+        {
+            if (page.Elements.ContainsKey("/Rotate"))
+            {
+                var rotation = page.Elements.GetInteger("/Rotate");
+                // Normalize to 0, 90, 180, 270
+                return ((rotation % 360) + 360) % 360;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get page rotation, assuming 0°");
+        }
+        return 0;
     }
 
     /// <summary>

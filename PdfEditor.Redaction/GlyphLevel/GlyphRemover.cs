@@ -35,10 +35,20 @@ public class GlyphRemover
     /// <summary>
     /// Process text operations to perform glyph-level redaction using block-aware filtering.
     /// </summary>
+    /// <param name="operations">PDF operations to process.</param>
+    /// <param name="letters">PdfPig letters for position matching.</param>
+    /// <param name="redactionArea">Area to redact in visual coordinates.</param>
+    /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
+    /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
+    /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
+    /// <returns>List of modified operations with redacted text removed.</returns>
     public List<PdfOperation> ProcessOperations(
         List<PdfOperation> operations,
         IReadOnlyList<Letter> letters,
-        PdfRectangle redactionArea)
+        PdfRectangle redactionArea,
+        int pageRotation = 0,
+        double mediaBoxWidth = 612,
+        double mediaBoxHeight = 792)
     {
         _logger.LogInformation("=== STARTING OPERATION PROCESSING ===");
         _logger.LogInformation("Total operations: {Count}, Redaction area: ({L:F2},{B:F2})-({R:F2},{T:F2})",
@@ -93,7 +103,9 @@ public class GlyphRemover
 
                     if (segments.Count > 0)
                     {
-                        var reconstructed = _operationReconstructor.ReconstructWithPositioning(segments, textOp);
+                        // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
+                        var reconstructed = _operationReconstructor.ReconstructWithPositioning(
+                            segments, textOp, pageRotation, mediaBoxWidth, mediaBoxHeight);
                         modifiedOperations.AddRange(reconstructed);
                         operationsReconstructed++;
                         _logger.LogInformation("Reconstructed TextOp '{Text}' into {Count} segments",

@@ -74,25 +74,71 @@ public class OperationReconstructor
     /// Generate positioning operator (Tm - set text matrix) for a text segment.
     /// </summary>
     /// <param name="segment">The text segment to position.</param>
+    /// <param name="fontSize">Font size to use for text matrix scaling.</param>
+    /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270).</param>
+    /// <param name="mediaBoxWidth">Page MediaBox width in points.</param>
+    /// <param name="mediaBoxHeight">Page MediaBox height in points.</param>
     /// <returns>Text state operation representing Tm operator.</returns>
-    public TextStateOperation CreatePositioningOperation(TextSegment segment)
+    /// <remarks>
+    /// PDF text rendering uses: effectiveSize = Tf_size * Tm_scale
+    /// Many PDFs use Tf with size 1 and encode the actual size in the Tm matrix.
+    /// For example: "/F1 1 Tf" + "9 0 0 9 50 700 Tm" → renders at 9pt.
+    ///
+    /// We use Tf with size 1 and put the font size in the Tm matrix to match
+    /// the common PDF pattern and ensure correct text sizing.
+    ///
+    /// CRITICAL FIX (Issue #173): For rotated pages, segment coordinates are in
+    /// VISUAL space (from PdfPig), but Tm operator needs CONTENT STREAM coordinates.
+    /// We must transform visual → content stream coordinates using RotationTransform.
+    /// </remarks>
+    public TextStateOperation CreatePositioningOperation(
+        TextSegment segment,
+        double fontSize,
+        int pageRotation = 0,
+        double mediaBoxWidth = 612,
+        double mediaBoxHeight = 792)
     {
         // Tm operator: a b c d e f Tm
-        // For simple positioning (no rotation/skew):
-        // [1 0 0 1 x y] Tm
-        // Where (x, y) is the text position
+        // The text matrix includes font scaling in a and d components:
+        // [fontSize 0 0 fontSize x y] Tm
+        // Where (x, y) is the text position and fontSize is the scaling factor
+
+        // Ensure we have a valid font size (default to 12 if missing)
+        var scale = fontSize > 0 && fontSize < 1000 ? fontSize : 12.0;
+
+        // CRITICAL FIX (Issue #173): Transform visual coordinates to content stream coordinates
+        // Segment coordinates come from PdfPig letters which are in VISUAL space (post-rotation).
+        // The Tm operator needs coordinates in CONTENT STREAM space (pre-rotation).
+        double contentX, contentY;
+        if (pageRotation != 0)
+        {
+            (contentX, contentY) = RotationTransform.VisualToContentStream(
+                segment.StartX,
+                segment.StartY,
+                pageRotation,
+                mediaBoxWidth,
+                mediaBoxHeight);
+
+            _logger.LogDebug("[ROTATION-FIX] {Rotation}°: Visual ({VX:F1},{VY:F1}) → Content ({CX:F1},{CY:F1})",
+                pageRotation, segment.StartX, segment.StartY, contentX, contentY);
+        }
+        else
+        {
+            contentX = segment.StartX;
+            contentY = segment.StartY;
+        }
 
         return new TextStateOperation
         {
             Operator = "Tm",
             Operands = new List<object>
             {
-                1.0,  // a - horizontal scaling
-                0.0,  // b - vertical skew
-                0.0,  // c - horizontal skew
-                1.0,  // d - vertical scaling
-                segment.StartX,  // e - horizontal position
-                segment.StartY   // f - vertical position (baseline)
+                scale,    // a - horizontal scaling (font size)
+                0.0,      // b - vertical skew
+                0.0,      // c - horizontal skew
+                scale,    // d - vertical scaling (font size)
+                contentX, // e - horizontal position (content stream coords)
+                contentY  // f - vertical position (content stream coords)
             },
             StreamPosition = 0,  // Will be set during serialization
             InsideTextBlock = false  // Reconstructed operations are NOT inside the original text block
@@ -105,10 +151,16 @@ public class OperationReconstructor
     /// </summary>
     /// <param name="segments">Segments to reconstruct.</param>
     /// <param name="originalOperation">Original operation for context.</param>
+    /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
+    /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
+    /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
     /// <returns>List of operations (BT, Tf, [Tm, Tj]*, ET).</returns>
     public List<PdfOperation> ReconstructWithPositioning(
         List<TextSegment> segments,
-        TextOperation originalOperation)
+        TextOperation originalOperation,
+        int pageRotation = 0,
+        double mediaBoxWidth = 612,
+        double mediaBoxHeight = 792)
     {
         var operations = new List<PdfOperation>();
 
@@ -148,10 +200,14 @@ public class OperationReconstructor
             fontSize = 12.0;  // Default 12pt
         }
 
+        // CRITICAL FIX (Issue #XXX): Use Tf with size 1, put actual size in Tm matrix
+        // Many PDFs use this pattern: "/F1 1 Tf" + "9 0 0 9 x y Tm" → renders at 9pt
+        // Previously we used "/F1 9 Tf" + "1 0 0 1 x y Tm" which also renders at 9pt
+        // but the original PDF might use the Tm scaling pattern, so we match that.
         var tfOperation = new TextStateOperation
         {
             Operator = "Tf",
-            Operands = new List<object> { fontName, fontSize },
+            Operands = new List<object> { fontName, 1.0 },  // Size 1, actual size goes in Tm
             StreamPosition = 0,
             InsideTextBlock = false  // Reconstructed operations are NOT inside the original text block
         };
@@ -241,8 +297,9 @@ public class OperationReconstructor
 
         foreach (var segment in segments)
         {
-            // Add positioning operator
-            operations.Add(CreatePositioningOperation(segment));
+            // Add positioning operator with font size for proper text matrix scaling
+            // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
+            operations.Add(CreatePositioningOperation(segment, fontSize, pageRotation, mediaBoxWidth, mediaBoxHeight));
 
             // Add text operation
             // CRITICAL: Don't set a bounding box based on segment width!

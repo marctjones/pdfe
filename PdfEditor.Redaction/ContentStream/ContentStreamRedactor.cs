@@ -58,16 +58,24 @@ internal class ContentStreamRedactor
     /// </summary>
     /// <param name="contentBytes">Original content stream bytes (decompressed).</param>
     /// <param name="pageHeight">Page height in points (for coordinate calculations).</param>
-    /// <param name="redactionAreas">Areas to redact (PDF coordinates, bottom-left origin).</param>
+    /// <param name="redactionAreas">Areas to redact in content stream coordinates (for operation matching).</param>
     /// <param name="letters">PdfPig letters for glyph-level redaction (null for whole-operation).</param>
     /// <param name="options">Redaction options.</param>
+    /// <param name="visualRedactionAreas">Areas to redact in visual coordinates (for letter matching). If null, uses redactionAreas.</param>
+    /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
+    /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
+    /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
     /// <returns>Modified content stream bytes and list of redaction details.</returns>
     public (byte[] modifiedContent, List<RedactionDetail> details) RedactContentStream(
         byte[] contentBytes,
         double pageHeight,
         List<PdfRectangle> redactionAreas,
         IReadOnlyList<Letter>? letters,
-        RedactionOptions options)
+        RedactionOptions options,
+        List<PdfRectangle>? visualRedactionAreas = null,
+        int pageRotation = 0,
+        double mediaBoxWidth = 612,
+        double mediaBoxHeight = 792)
     {
         var details = new List<RedactionDetail>();
 
@@ -96,17 +104,27 @@ internal class ContentStreamRedactor
             _logger.LogInformation("Using glyph-level redaction with {OpCount} operations and {LetterCount} letters",
                 operations.Count, letters.Count);
 
+            // Use visual areas for letter matching (if provided), content stream areas for operation matching
+            var letterAreas = visualRedactionAreas ?? redactionAreas;
+
             // Use glyph-level redaction for each area
             var modifiedOps = new List<PdfOperation>(operations);
 
-            foreach (var area in redactionAreas)
+            for (int i = 0; i < redactionAreas.Count; i++)
             {
+                var contentStreamArea = redactionAreas[i];
+                var letterArea = letterAreas.Count > i ? letterAreas[i] : contentStreamArea;
+
                 // Process operations with glyph-level redaction
-                modifiedOps = _glyphRemover.ProcessOperations(modifiedOps, letters, area);
+                // letterArea is used for letter position matching (visual coordinates)
+                // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
+                modifiedOps = _glyphRemover.ProcessOperations(
+                    modifiedOps, letters, letterArea, pageRotation, mediaBoxWidth, mediaBoxHeight);
 
                 // Track redacted text (approximate - we don't have exact text anymore)
+                // contentStreamArea is used for operation matching
                 var textOps = operations.OfType<TextOperation>()
-                    .Where(op => op.IntersectsWith(area))
+                    .Where(op => op.IntersectsWith(contentStreamArea))
                     .ToList();
 
                 foreach (var textOp in textOps)
@@ -177,10 +195,14 @@ internal class ContentStreamRedactor
     /// </summary>
     /// <param name="contentBytes">Original page content stream bytes (decompressed).</param>
     /// <param name="pageHeight">Page height in points (for coordinate calculations).</param>
-    /// <param name="redactionAreas">Areas to redact (PDF coordinates, bottom-left origin).</param>
+    /// <param name="redactionAreas">Areas to redact in content stream coordinates (for operation matching).</param>
     /// <param name="letters">PdfPig letters for glyph-level redaction (null for whole-operation).</param>
     /// <param name="options">Redaction options.</param>
     /// <param name="resources">Page resources for Form XObject resolution.</param>
+    /// <param name="visualRedactionAreas">Areas to redact in visual coordinates (for letter matching). If null, uses redactionAreas.</param>
+    /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
+    /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
+    /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
     /// <returns>Modified content stream bytes, redaction details, and modified Form XObjects.</returns>
     public (byte[] modifiedContent, List<RedactionDetail> details, List<FormXObjectRedactionResult> formXObjects)
         RedactContentStreamWithFormXObjects(
@@ -189,7 +211,11 @@ internal class ContentStreamRedactor
             List<PdfRectangle> redactionAreas,
             IReadOnlyList<Letter>? letters,
             RedactionOptions options,
-            PdfDictionary? resources)
+            PdfDictionary? resources,
+            List<PdfRectangle>? visualRedactionAreas = null,
+            int pageRotation = 0,
+            double mediaBoxWidth = 612,
+            double mediaBoxHeight = 792)
     {
         var formXObjectResults = new List<FormXObjectRedactionResult>();
 
@@ -225,8 +251,12 @@ internal class ContentStreamRedactor
             }
         }
 
-        // Then redact the main content stream (using standard method)
-        var (mainContent, mainDetails) = RedactContentStream(contentBytes, pageHeight, redactionAreas, letters, options);
+        // Then redact the main content stream
+        // Pass visual areas for glyph-level letter matching (if provided)
+        // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
+        var (mainContent, mainDetails) = RedactContentStream(
+            contentBytes, pageHeight, redactionAreas, letters, options, visualRedactionAreas,
+            pageRotation, mediaBoxWidth, mediaBoxHeight);
         allDetails.AddRange(mainDetails);
 
         return (mainContent, allDetails, formXObjectResults);
