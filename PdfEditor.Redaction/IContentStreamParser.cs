@@ -309,3 +309,43 @@ public class FormXObjectOperation : PdfOperation
     /// </summary>
     public byte[]? ContentStreamBytes { get; set; }
 }
+
+/// <summary>
+/// Inline image operation (BI...ID...EI sequence).
+/// Inline images are embedded directly in the content stream rather than as XObjects.
+/// </summary>
+public class InlineImageOperation : PdfOperation
+{
+    /// <summary>
+    /// Raw bytes of the complete BI...ID...EI sequence.
+    /// These bytes are written verbatim to the output content stream.
+    /// </summary>
+    public required byte[] RawBytes { get; init; }
+
+    /// <summary>
+    /// Image width from the inline image dictionary (/W or /Width).
+    /// </summary>
+    public int ImageWidth { get; init; }
+
+    /// <summary>
+    /// Image height from the inline image dictionary (/H or /Height).
+    /// </summary>
+    public int ImageHeight { get; init; }
+
+    /// <summary>
+    /// Bits per component from the inline image dictionary (/BPC or /BitsPerComponent).
+    /// </summary>
+    public int BitsPerComponent { get; init; }
+
+    /// <summary>
+    /// Color space abbreviation from the inline image dictionary (/CS or /ColorSpace).
+    /// Common values: G (Grayscale), RGB, CMYK, I (Indexed).
+    /// </summary>
+    public string? ColorSpace { get; init; }
+
+    /// <summary>
+    /// Filter abbreviation from the inline image dictionary (/F or /Filter).
+    /// Common values: AHx (ASCIIHexDecode), A85 (ASCII85Decode), LZW, Fl (FlateDecode), etc.
+    /// </summary>
+    public string? Filter { get; init; }
+}
