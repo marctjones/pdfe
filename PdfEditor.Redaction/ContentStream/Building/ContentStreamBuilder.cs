@@ -18,6 +18,11 @@ public class ContentStreamBuilder : IContentStreamBuilder
     /// Build a content stream from a list of operations.
     /// This method ensures font state is properly maintained across BT/ET blocks.
     /// Issue #167: Each BT block that contains Tj must have a Tf operator.
+    ///
+    /// CRITICAL FIX: PDF font size is calculated as: effectiveSize = Tf_size * Tm_scale
+    /// Many PDFs use "/F1 1 Tf" with size 1, and encode actual size in Tm matrix.
+    /// TextOperation.FontSize contains the EFFECTIVE size (already includes Tm scaling).
+    /// When injecting Tf, we must use the ORIGINAL Tf size (typically 1), not the effective size!
     /// </summary>
     public byte[] Build(IEnumerable<PdfOperation> operations)
     {
@@ -25,33 +30,36 @@ public class ContentStreamBuilder : IContentStreamBuilder
         var operationList = operations.OrderBy(op => op.StreamPosition).ToList();
 
         // Track font state for injection into BT blocks
+        // CRITICAL: Track the RAW Tf size, not the effective size
         string? lastFontName = null;
-        double lastFontSize = 12.0;
+        double lastTfSize = 1.0;  // Default to 1 (common pattern: size in Tm, not Tf)
 
-        // First pass: collect font info from all Tf operators and TextOperations
+        // First pass: collect font info from ACTUAL Tf operators only
+        // Do NOT use TextOperation.FontSize as it contains the effective size
         foreach (var op in operationList)
         {
             if (op is TextStateOperation tso && tso.Operator == "Tf" && tso.Operands.Count >= 2)
             {
                 lastFontName = tso.Operands[0]?.ToString();
-                if (tso.Operands[1] is double d) lastFontSize = d;
-                else if (tso.Operands[1] is int i) lastFontSize = i;
-                else if (tso.Operands[1] is float f) lastFontSize = f;
+                if (tso.Operands[1] is double d) lastTfSize = d;
+                else if (tso.Operands[1] is int i) lastTfSize = i;
+                else if (tso.Operands[1] is float f) lastTfSize = f;
             }
-            else if (op is TextOperation textOp)
+            else if (op is TextOperation textOp && string.IsNullOrEmpty(lastFontName))
             {
-                // TextOperations from parsing have font info - use as fallback
+                // Only use TextOperation.FontName as a LAST RESORT for the font name
+                // NEVER use TextOperation.FontSize for Tf injection
                 if (!string.IsNullOrEmpty(textOp.FontName))
                 {
                     lastFontName = textOp.FontName;
-                    if (textOp.FontSize > 0) lastFontSize = textOp.FontSize;
+                    // Keep lastTfSize at 1.0 - do NOT use textOp.FontSize
                 }
             }
         }
 
         // Now we have the font info. Second pass: serialize with Tf injection
         string? currentBlockFontName = null;
-        double currentBlockFontSize = 12.0;
+        double currentBlockTfSize = 1.0;  // Track raw Tf size, not effective size
         bool inTextBlock = false;
         bool needTfInjection = false;
 
@@ -61,9 +69,9 @@ public class ContentStreamBuilder : IContentStreamBuilder
             if (operation is TextStateOperation tso && tso.Operator == "Tf" && tso.Operands.Count >= 2)
             {
                 currentBlockFontName = tso.Operands[0]?.ToString();
-                if (tso.Operands[1] is double d) currentBlockFontSize = d;
-                else if (tso.Operands[1] is int i) currentBlockFontSize = i;
-                else if (tso.Operands[1] is float f) currentBlockFontSize = f;
+                if (tso.Operands[1] is double d) currentBlockTfSize = d;
+                else if (tso.Operands[1] is int i) currentBlockTfSize = i;
+                else if (tso.Operands[1] is float f) currentBlockTfSize = f;
                 needTfInjection = false; // We have a Tf now
             }
 
@@ -90,32 +98,35 @@ public class ContentStreamBuilder : IContentStreamBuilder
             // If we're about to emit a Tj and haven't seen Tf in this BT block, inject one
             if (inTextBlock && needTfInjection && IsTextShowingOperator(operation.Operator))
             {
-                // Get font from the TextOperation if available
+                // Get font name from the TextOperation if available
+                // CRITICAL: Use the RAW Tf size, not TextOperation.FontSize (which is effective size)
                 string? fontToUse = null;
-                double sizeToUse = 12.0;
+                double tfSizeToUse = 1.0;  // Default to 1 (most common pattern)
 
                 if (operation is TextOperation textOp && !string.IsNullOrEmpty(textOp.FontName))
                 {
                     fontToUse = textOp.FontName;
-                    sizeToUse = textOp.FontSize > 0 ? textOp.FontSize : 12.0;
+                    // Use the tracked raw Tf size, NOT textOp.FontSize
+                    tfSizeToUse = currentBlockTfSize > 0 ? currentBlockTfSize : (lastTfSize > 0 ? lastTfSize : 1.0);
                 }
                 else if (!string.IsNullOrEmpty(currentBlockFontName))
                 {
                     fontToUse = currentBlockFontName;
-                    sizeToUse = currentBlockFontSize;
+                    tfSizeToUse = currentBlockTfSize;
                 }
                 else if (!string.IsNullOrEmpty(lastFontName))
                 {
                     fontToUse = lastFontName;
-                    sizeToUse = lastFontSize;
+                    tfSizeToUse = lastTfSize;
                 }
 
                 if (!string.IsNullOrEmpty(fontToUse))
                 {
                     // Inject Tf operator before the text showing operator
+                    // Use the RAW Tf size, not the effective size
                     sb.Append(fontToUse);
                     sb.Append(' ');
-                    SerializeNumber(sizeToUse, sb);
+                    SerializeNumber(tfSizeToUse, sb);
                     sb.Append(" Tf\n");
                     needTfInjection = false;
                 }
@@ -294,8 +305,21 @@ public class ContentStreamBuilder : IContentStreamBuilder
                 default:
                     if (c < 32 || c > 126)
                     {
-                        // Octal escape for non-printable characters
-                        sb.Append($"\\{Convert.ToString(c, 8).PadLeft(3, '0')}");
+                        // CRITICAL FIX (Issue #187): Encode Unicode characters back to Windows-1252.
+                        // The parser decoded Windows-1252 bytes to Unicode (e.g., byte 0x92 → U+2019 right quote).
+                        // We must re-encode to Windows-1252 to get the correct byte value for octal escape.
+                        // Without this, U+2019 (8217) → octal "20031" which is invalid!
+                        byte byteValue;
+                        try
+                        {
+                            var encoded = Windows1252Encoding.Value.GetBytes(new[] { c });
+                            byteValue = encoded.Length == 1 ? encoded[0] : (byte)(c & 0xFF);
+                        }
+                        catch
+                        {
+                            byteValue = (byte)(c & 0xFF);
+                        }
+                        sb.Append($"\\{Convert.ToString(byteValue, 8).PadLeft(3, '0')}");
                     }
                     else
                     {

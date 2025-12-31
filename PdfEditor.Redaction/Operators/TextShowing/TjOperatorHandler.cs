@@ -1,3 +1,4 @@
+using System.Text;
 using PdfEditor.Redaction.ContentStream;
 using PdfEditor.Redaction.Fonts;
 using PdfEditor.Redaction.StringEncoding;
@@ -12,6 +13,13 @@ namespace PdfEditor.Redaction.Operators.TextShowing;
 public class TjOperatorHandler : IOperatorHandler
 {
     private readonly HexStringParser _hexParser = new();
+
+    // Lazy Windows-1252 encoding for proper character encoding
+    private static readonly Lazy<Encoding> Windows1252Encoding = new(() =>
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return Encoding.GetEncoding("Windows-1252");
+    });
 
     public string OperatorName => "Tj";
 
@@ -183,9 +191,30 @@ public class TjOperatorHandler : IOperatorHandler
             }
             else if (!isCidFont)
             {
-                // For Western fonts without raw bytes, use character code
-                cidValue = (byte)ch;
-                glyphRawBytes = new[] { (byte)ch };
+                // For Western fonts without raw bytes, encode character back to Windows-1252
+                // CRITICAL FIX (Issue #187): Simple (byte)ch fails for Unicode characters like U+2019 (right quote)
+                // which came from Windows-1252 byte 0x92. We must re-encode to Windows-1252 to preserve the byte.
+                try
+                {
+                    var encoded = Windows1252Encoding.Value.GetBytes(new[] { ch });
+                    if (encoded.Length == 1)
+                    {
+                        cidValue = encoded[0];
+                        glyphRawBytes = encoded;
+                    }
+                    else
+                    {
+                        // Multi-byte result - use fallback
+                        cidValue = (byte)(ch & 0xFF);
+                        glyphRawBytes = new[] { (byte)(ch & 0xFF) };
+                    }
+                }
+                catch
+                {
+                    // Encoding failed - use Unicode code point clamped to byte
+                    cidValue = (byte)(ch & 0xFF);
+                    glyphRawBytes = new[] { (byte)(ch & 0xFF) };
+                }
             }
 
             glyphs.Add(new GlyphPosition

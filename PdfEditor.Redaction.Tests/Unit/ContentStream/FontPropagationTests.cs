@@ -91,6 +91,10 @@ public class FontPropagationTests
         // Arrange - Issue #167: Simulate what happens after glyph-level redaction
         // When the first BT block is removed, the second block loses its font state
         // The ContentStreamBuilder.Build() should inject Tf before Tj
+        //
+        // CRITICAL: TextOperation.FontSize contains the EFFECTIVE size (Tf * Tm scale).
+        // When injecting Tf, we must use the RAW Tf size, not the effective size.
+        // Since there's no prior Tf operator in this test, the raw size defaults to 1.0.
 
         var builder = new PdfEditor.Redaction.ContentStream.Building.ContentStreamBuilder();
 
@@ -118,7 +122,7 @@ public class FontPropagationTests
                 StreamPosition = 120,
                 Text = "Separate shape",
                 FontName = "/F0",
-                FontSize = 10,
+                FontSize = 10,  // This is EFFECTIVE size - should NOT be used for Tf injection
                 Glyphs = new List<GlyphPosition>()
             },
             new TextStateOperation
@@ -133,9 +137,100 @@ public class FontPropagationTests
         var result = builder.Build(operations);
         var contentString = System.Text.Encoding.ASCII.GetString(result);
 
-        // Assert - should contain Tf injection
-        contentString.Should().Contain("/F0 10 Tf", "Tf should be injected before Tj when BT block has no Tf");
+        // Assert - should contain Tf injection with RAW size (1.0 default), NOT effective size
+        // The effective size (10) is already baked into the Tm matrix or other state
+        contentString.Should().Contain("/F0 1 Tf", "Tf should be injected with raw size (1.0 default), not effective size");
         contentString.Should().Contain("(Separate shape) Tj", "Tj should be preserved");
+    }
+
+    [Fact]
+    public void Build_WithPriorTfOperator_UsesRawTfSizeNotEffectiveSize()
+    {
+        // Arrange - Issue #186: Font size explosion bug
+        // When a prior Tf operator exists, we should use its RAW size (typically 1)
+        // NOT the effective size from TextOperation.FontSize (which includes Tm scaling)
+        //
+        // Real-world scenario: Birth certificate PDF has "/TT0 1 Tf" with size in Tm matrix.
+        // Without this fix, we were injecting "/TT0 10.02 Tf" which caused ~100pt text!
+
+        var builder = new PdfEditor.Redaction.ContentStream.Building.ContentStreamBuilder();
+
+        var operations = new List<PdfOperation>
+        {
+            // First BT block - has the original Tf with size 1
+            new TextStateOperation
+            {
+                Operator = "BT",
+                Operands = new List<object>(),
+                StreamPosition = 10
+            },
+            new TextStateOperation
+            {
+                Operator = "Tf",
+                Operands = new List<object> { "/TT0", 1.0 },  // RAW Tf size is 1
+                StreamPosition = 20
+            },
+            new TextOperation
+            {
+                Operator = "Tj",
+                Operands = new List<object> { "First text" },
+                StreamPosition = 30,
+                Text = "First text",
+                FontName = "/TT0",
+                FontSize = 10.02,  // EFFECTIVE size (1 * 10.02 from Tm) - should be ignored for Tf
+                Glyphs = new List<GlyphPosition>()
+            },
+            new TextStateOperation
+            {
+                Operator = "ET",
+                Operands = new List<object>(),
+                StreamPosition = 40
+            },
+            // Second BT block - no Tf, needs injection
+            new TextStateOperation
+            {
+                Operator = "BT",
+                Operands = new List<object>(),
+                StreamPosition = 50
+            },
+            new TextOperation
+            {
+                Operator = "Tj",
+                Operands = new List<object> { "Second text" },
+                StreamPosition = 60,
+                Text = "Second text",
+                FontName = "/TT0",
+                FontSize = 10.02,  // EFFECTIVE size - should be ignored for Tf
+                Glyphs = new List<GlyphPosition>()
+            },
+            new TextStateOperation
+            {
+                Operator = "ET",
+                Operands = new List<object>(),
+                StreamPosition = 70
+            }
+        };
+
+        // Act
+        var result = builder.Build(operations);
+        var contentString = System.Text.Encoding.ASCII.GetString(result);
+
+        // Assert - All Tf operators should use size 1 (the raw Tf size), NOT 10.02
+        var tfMatches = System.Text.RegularExpressions.Regex.Matches(contentString, @"/TT0 ([\d.]+) Tf");
+        tfMatches.Count.Should().BeGreaterOrEqualTo(2, "Should have at least 2 Tf operators");
+
+        foreach (System.Text.RegularExpressions.Match match in tfMatches)
+        {
+            var size = double.Parse(match.Groups[1].Value);
+            size.Should().BeApproximately(1.0, 0.01,
+                "All Tf operators should use raw size (1), not effective size (10.02)");
+        }
+
+        // Should NOT contain the wrong size
+        contentString.Should().NotContain("/TT0 10.02 Tf",
+            "Should NOT inject effective size - this causes font explosion bug!");
+        contentString.Should().NotContain("/TT0 10 Tf",
+            "Should NOT inject effective size - this causes font explosion bug!");
     }
 
     /// <summary>
