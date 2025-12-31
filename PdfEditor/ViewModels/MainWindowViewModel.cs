@@ -65,6 +65,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _lastVerifyStatus = string.Empty;
     private bool _lastVerifyFailed;
     private string _operationStatus = string.Empty;
+    private bool _hasInMemoryModifications; // Tracks if document has been modified in-memory (e.g., redactions applied)
 
     /// <summary>
     /// Parameterless constructor for testing and scripting scenarios.
@@ -461,14 +462,29 @@ public partial class MainWindowViewModel : ViewModelBase
         get
         {
             var items = new ObservableCollection<Avalonia.Controls.MenuItem>();
+
+            if (RecentFiles.Count == 0)
+            {
+                // Show placeholder when no recent files
+                var noFilesItem = new Avalonia.Controls.MenuItem
+                {
+                    Header = "No recent files",
+                    IsEnabled = false
+                };
+                items.Add(noFilesItem);
+                return items;
+            }
+
             foreach (var filePath in RecentFiles)
             {
                 var menuItem = new Avalonia.Controls.MenuItem
                 {
-                    Header = filePath,
+                    Header = System.IO.Path.GetFileName(filePath), // Show filename only
                     Command = LoadRecentFileCommand,
                     CommandParameter = filePath
                 };
+                // Set tooltip to show full path
+                Avalonia.Controls.ToolTip.SetTip(menuItem, filePath);
                 items.Add(menuItem);
             }
             return items;
@@ -612,6 +628,7 @@ public partial class MainWindowViewModel : ViewModelBase
             ClipboardHistory.Clear();
             PageThumbnails.Clear();
             _renderService.ClearCache();
+            _hasInMemoryModifications = false;
 
             // Exit redaction mode if active
             if (IsRedactionMode)
@@ -1139,6 +1156,9 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation("Saving redacted PDF to: {Path}", saveFilePath);
             document.Save(saveFilePath);
 
+            // Document saved - clear in-memory modification flag
+            _hasInMemoryModifications = false;
+
             // Move redactions to applied list
             RedactionWorkflow.MoveToApplied();
             FileState.PendingRedactionsCount = 0;
@@ -1146,13 +1166,19 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaisePropertyChanged(nameof(StatusBarText));
 
             _logger.LogInformation("Redacted PDF saved successfully");
-            await ShowMessageDialog("Success", $"Redacted PDF saved to:\n{saveFilePath}\n\nOriginal file preserved.");
 
-            // Exit redaction mode
+            // Exit redaction mode before reloading
             if (IsRedactionMode)
             {
                 ToggleRedactionMode();
             }
+
+            // Reload the saved document so text extraction and rendering work from the redacted file
+            // This ensures the GUI shows the redacted content and text selection can't select removed text
+            _logger.LogInformation("Reloading saved document: {Path}", saveFilePath);
+            await LoadDocumentAsync(saveFilePath);
+
+            await ShowMessageDialog("Success", $"Redacted PDF saved to:\n{saveFilePath}\n\nOriginal file preserved. Document reloaded.");
         }
         catch (Exception ex)
         {
@@ -1218,6 +1244,9 @@ public partial class MainWindowViewModel : ViewModelBase
             var page = document.Pages[CurrentPageIndex];
             // UI selections are in rendered image pixels at the render DPI (150)
             _redactionService.RedactArea(page, areaToRedact, _currentFilePath, CoordinateConverter.DefaultRenderDpi);
+
+            // Mark document as modified in-memory (render cache must use in-memory stream)
+            _hasInMemoryModifications = true;
 
             // Add redacted text to clipboard history (so user can see what was removed)
             if (!string.IsNullOrWhiteSpace(redactedText))
@@ -1587,7 +1616,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RenderCurrentPageAsync()
     {
-        _logger.LogInformation(">>> RenderCurrentPageAsync: START");
+        _logger.LogInformation(">>> RenderCurrentPageAsync: START (hasInMemoryModifications={HasMods})", _hasInMemoryModifications);
 
         if (string.IsNullOrEmpty(_currentFilePath) || !_documentService.IsDocumentLoaded)
         {
@@ -1597,14 +1626,47 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            _logger.LogInformation(">>> RenderCurrentPageAsync: Calling _renderService.RenderPageAsync for page {PageIndex}", CurrentPageIndex);
-            using var skBitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex);
+            SkiaSharp.SKBitmap? skBitmap = null;
 
-            _logger.LogInformation(">>> RenderCurrentPageAsync: Converting to Avalonia bitmap");
-            var avaloniaBitmap = ToAvaloniaBitmap(skBitmap);
+            // If document has in-memory modifications (e.g., applied redactions not yet saved),
+            // we must render from the in-memory stream, not the file on disk.
+            // This fixes the bug where redacted text was still visible until file reopen.
+            if (_hasInMemoryModifications)
+            {
+                _logger.LogInformation(">>> RenderCurrentPageAsync: Using in-memory stream (document has unsaved modifications)");
+                var docStream = _documentService.GetCurrentDocumentAsStream();
+                if (docStream != null)
+                {
+                    try
+                    {
+                        var memoryStream = new System.IO.MemoryStream();
+                        await docStream.CopyToAsync(memoryStream);
+                        memoryStream.Position = 0;
+                        docStream.Dispose();
+                        skBitmap = await _renderService.RenderPageFromStreamAsync(memoryStream, CurrentPageIndex);
+                    }
+                    catch (Exception streamEx)
+                    {
+                        _logger.LogWarning(streamEx, "Failed to render from in-memory stream, falling back to file");
+                    }
+                }
+            }
 
-            _logger.LogInformation(">>> RenderCurrentPageAsync: Setting CurrentPageImage");
-            CurrentPageImage = avaloniaBitmap;
+            // Fallback to file-based rendering if in-memory rendering failed or wasn't needed
+            if (skBitmap == null)
+            {
+                _logger.LogInformation(">>> RenderCurrentPageAsync: Calling _renderService.RenderPageAsync for page {PageIndex}", CurrentPageIndex);
+                skBitmap = await _renderService.RenderPageAsync(_currentFilePath, CurrentPageIndex);
+            }
+
+            using (skBitmap)
+            {
+                _logger.LogInformation(">>> RenderCurrentPageAsync: Converting to Avalonia bitmap");
+                var avaloniaBitmap = ToAvaloniaBitmap(skBitmap);
+
+                _logger.LogInformation(">>> RenderCurrentPageAsync: Setting CurrentPageImage");
+                CurrentPageImage = avaloniaBitmap;
+            }
 
             _logger.LogInformation(">>> RenderCurrentPageAsync: COMPLETE");
         }
@@ -1891,6 +1953,7 @@ public partial class MainWindowViewModel : ViewModelBase
             CurrentTextSelectionArea = new Rect();
             RedactionWorkflow.Reset();
             ClipboardHistory.Clear();
+            _hasInMemoryModifications = false;
 
             // Exit redaction mode if active
             if (IsRedactionMode)

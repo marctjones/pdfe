@@ -479,37 +479,4 @@ public partial class MainWindow : Window
             viewModel.CopyTextCommand.Execute().Subscribe();
         }
     }
-
-    private void RecentFilesMenu_SubmenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is not MenuItem menuItem || DataContext is not MainWindowViewModel viewModel)
-            return;
-
-        // Clear existing items
-        menuItem.Items.Clear();
-
-        if (viewModel.RecentFiles.Count == 0)
-        {
-            var noFilesItem = new MenuItem
-            {
-                Header = "No recent files",
-                IsEnabled = false
-            };
-            menuItem.Items.Add(noFilesItem);
-            return;
-        }
-
-        // Add menu items for each recent file (Issue #22: show basename, tooltip shows full path)
-        foreach (var filePath in viewModel.RecentFiles)
-        {
-            var item = new MenuItem
-            {
-                Header = System.IO.Path.GetFileName(filePath),
-                Command = viewModel.LoadRecentFileCommand,
-                CommandParameter = filePath
-            };
-            Avalonia.Controls.ToolTip.SetTip(item, filePath);
-            menuItem.Items.Add(item);
-        }
-    }
 }
