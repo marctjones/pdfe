@@ -16,10 +16,15 @@
 
   <ItemGroup>
     <!-- PDF Reading - for accurate letter positions -->
+    <PackageReference Include="Clipper2" Version="1.4.0" />
     <PackageReference Include="PdfPig" Version="0.1.11" />
 
     <!-- PDF Writing - for content stream modification -->
     <PackageReference Include="PDFsharp" Version="6.2.2" />
+
+    <!-- PDF Rendering (for partial glyph rasterization) -->
+    <PackageReference Include="PDFtoImage" Version="4.0.2" />
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
 
     <!-- Logging -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
