@@ -80,6 +80,8 @@ public class MainWindowViewModelTests
     {
         // Arrange
         var vm = CreateViewModel();
+        // Reset to 1.0 to ensure test isolation from persisted preferences
+        vm.ZoomLevel = 1.0;
         var initialZoom = vm.ZoomLevel;
 
         // Act
@@ -94,6 +96,8 @@ public class MainWindowViewModelTests
     {
         // Arrange
         var vm = CreateViewModel();
+        // Reset to 1.0 to ensure test isolation from persisted preferences
+        vm.ZoomLevel = 1.0;
         var initialZoom = vm.ZoomLevel;
 
         // Act
