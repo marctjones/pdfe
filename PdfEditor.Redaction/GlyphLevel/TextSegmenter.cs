@@ -78,10 +78,14 @@ public class TextSegmenter
             bool keep;
             double glyphX, glyphY, glyphWidth, glyphHeight;
 
+            GlyphOverlapType overlapType = GlyphOverlapType.None;
+
             if (match != null)
             {
-                // We have letter position info - check if in redaction area
-                keep = !IsLetterInRedactionArea(match.Letter.GlyphRectangle, redactionArea);
+                // We have letter position info - get detailed overlap info
+                var (shouldRemove, overlap) = GetLetterOverlapInfo(match.Letter.GlyphRectangle, redactionArea);
+                keep = !shouldRemove;
+                overlapType = overlap;
 
                 // Normalize coordinates - PdfPig can return swapped Left/Right or Bottom/Top for rotated text
                 var rect = match.Letter.GlyphRectangle;
@@ -106,8 +110,10 @@ public class TextSegmenter
                     i, textOperation.Text, glyphWidth);
             }
 
-            // Start new segment if keep status changed
-            if (currentSegment == null || currentSegment.Keep != keep)
+            // Start new segment if keep status or overlap type changed
+            // (we want separate segments for partial vs full overlap)
+            if (currentSegment == null || currentSegment.Keep != keep ||
+                (!keep && currentSegment.OverlapType != overlapType))
             {
                 if (currentSegment != null)
                 {
@@ -119,6 +125,7 @@ public class TextSegmenter
                     StartIndex = i,
                     EndIndex = i + 1,
                     Keep = keep,
+                    OverlapType = keep ? GlyphOverlapType.None : overlapType,
                     StartX = glyphX,
                     StartY = glyphY,
                     Width = glyphWidth,
@@ -174,17 +181,37 @@ public class TextSegmenter
     /// </summary>
     private bool IsLetterInRedactionArea(UglyToad.PdfPig.Core.PdfRectangle glyphRect, PdfRectangle redactionArea)
     {
+        var (shouldRemove, _) = GetLetterOverlapInfo(glyphRect, redactionArea);
+        return shouldRemove;
+    }
+
+    /// <summary>
+    /// Get detailed overlap information for a letter.
+    /// Returns whether to remove the letter and what type of overlap exists.
+    /// </summary>
+    /// <param name="glyphRect">The glyph's bounding box from PdfPig.</param>
+    /// <param name="redactionArea">The redaction area.</param>
+    /// <returns>Tuple of (shouldRemove, overlapType).</returns>
+    private (bool ShouldRemove, GlyphOverlapType OverlapType) GetLetterOverlapInfo(
+        UglyToad.PdfPig.Core.PdfRectangle glyphRect,
+        PdfRectangle redactionArea)
+    {
         // Normalize coordinates for rotated text (PdfPig can return Left > Right for 90° rotation)
-        double left = Math.Min(glyphRect.Left, glyphRect.Right);
-        double right = Math.Max(glyphRect.Left, glyphRect.Right);
-        double bottom = Math.Min(glyphRect.Bottom, glyphRect.Top);
-        double top = Math.Max(glyphRect.Bottom, glyphRect.Top);
+        var normalizedGlyph = PdfRectangle.FromPdfPig(glyphRect);
 
-        // Use letter center point for determination
-        double centerX = (left + right) / 2.0;
-        double centerY = (bottom + top) / 2.0;
+        // Get overlap type
+        var overlapType = redactionArea.GetOverlapType(normalizedGlyph);
 
-        return redactionArea.Contains(centerX, centerY);
+        // Current behavior: Use center point for determination
+        // This maintains backward compatibility
+        double centerX = (normalizedGlyph.Left + normalizedGlyph.Right) / 2.0;
+        double centerY = (normalizedGlyph.Bottom + normalizedGlyph.Top) / 2.0;
+        bool centerInArea = redactionArea.Contains(centerX, centerY);
+
+        // If center is in area, should remove (Full or Partial)
+        // If center is NOT in area but there's intersection, it's Partial but we currently keep it
+        // Future: Configuration option to control this behavior
+        return (centerInArea, overlapType);
     }
 }
 
@@ -208,6 +235,19 @@ public class TextSegment
     /// Whether to keep this segment (false means remove).
     /// </summary>
     public required bool Keep { get; init; }
+
+    /// <summary>
+    /// Type of overlap with redaction area.
+    /// For Keep=true segments, this is GlyphOverlapType.None.
+    /// For Keep=false segments, this is Full or Partial depending on coverage.
+    /// </summary>
+    public GlyphOverlapType OverlapType { get; set; } = GlyphOverlapType.None;
+
+    /// <summary>
+    /// Whether this segment is a candidate for rasterization (partial overlap).
+    /// When true, the text should be removed but the visible portion preserved as image.
+    /// </summary>
+    public bool IsPartialOverlap => OverlapType == GlyphOverlapType.Partial;
 
     /// <summary>
     /// X position of first character in this segment (PDF coordinates).
@@ -238,6 +278,17 @@ public class TextSegment
     /// The text of this segment.
     /// </summary>
     public string Text => OriginalText.Substring(StartIndex, EndIndex - StartIndex);
+
+    /// <summary>
+    /// Get the bounding box for this segment in PDF coordinates.
+    /// Useful for partial overlap rasterization.
+    /// </summary>
+    public PdfRectangle BoundingBox => new PdfRectangle(
+        StartX,
+        StartY,
+        StartX + Width,
+        StartY + Height
+    );
 
     #region CJK Support (Issue #174)
 
