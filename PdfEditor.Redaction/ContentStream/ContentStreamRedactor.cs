@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PdfEditor.Redaction.ContentStream.Building;
 using PdfEditor.Redaction.ContentStream.Parsing;
 using PdfEditor.Redaction.GlyphLevel;
+using PdfEditor.Redaction.PathClipping;
 using PdfSharp.Pdf;
 using UglyToad.PdfPig.Content;
 
@@ -38,6 +39,7 @@ internal class ContentStreamRedactor
     private readonly IContentStreamParser _parser;
     private readonly IContentStreamBuilder _builder;
     private readonly GlyphRemover? _glyphRemover;
+    private readonly PathRedactor _pathRedactor;
     private readonly ILogger _logger;
 
     public ContentStreamRedactor(
@@ -49,6 +51,7 @@ internal class ContentStreamRedactor
         _parser = parser;
         _builder = builder;
         _glyphRemover = glyphRemover;
+        _pathRedactor = new PathRedactor(logger);
         _logger = logger;
     }
 
@@ -148,6 +151,37 @@ internal class ContentStreamRedactor
                     });
                 }
             }
+
+            // Issue #192: Remove image XObjects that intersect with redaction areas
+            modifiedOps = modifiedOps
+                .Where(op =>
+                {
+                    // Keep state operations (q, Q, cm, etc.) - they don't represent visible content
+                    if (op is StateOperation || op is TextStateOperation)
+                        return true;
+
+                    // For images, remove entirely if they intersect with any redaction area
+                    if (op is ImageOperation)
+                    {
+                        var shouldRemove = redactionAreas.Any(area => op.IntersectsWith(area));
+                        if (shouldRemove)
+                        {
+                            _logger.LogDebug("Removing ImageOperation at ({L:F2},{B:F2},{R:F2},{T:F2}) - intersects with redaction area",
+                                op.BoundingBox.Left, op.BoundingBox.Bottom, op.BoundingBox.Right, op.BoundingBox.Top);
+                        }
+                        return !shouldRemove;
+                    }
+
+                    // Keep all other operations (paths handled below, TextOperations already modified)
+                    return true;
+                })
+                .ToList();
+
+            // Issue #197: Apply partial shape clipping to paths
+            // Instead of removing entire paths, use polygon clipping to remove only the intersecting portion
+            _logger.LogDebug("Applying partial shape clipping to {PathCount} path operations",
+                modifiedOps.OfType<PathOperation>().Count());
+            modifiedOps = _pathRedactor.ProcessOperations(modifiedOps, redactionAreas);
 
             // Build new content stream from modified operations
             newContentBytes = _builder.Build(modifiedOps);
