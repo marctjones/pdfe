@@ -198,4 +198,42 @@ public class PartialGlyphRasterizerTests
     }
 
     #endregion
+
+    #region Clipping/Masking Tests (Issue #208)
+
+    [Fact]
+    public void RenderGlyphWithRedactionMask_WithInvalidPdf_ReturnsNull()
+    {
+        // Arrange - invalid PDF bytes (just "PDF" header, not a real PDF)
+        var pdfBytes = new byte[] { 0x25, 0x50, 0x44, 0x46 };
+        using var rasterizer = new PartialGlyphRasterizer(pdfBytes, 0, 792.0);
+
+        var glyphBounds = new PdfRectangle(100, 700, 120, 720);
+        var redactionArea = new PdfRectangle(110, 700, 130, 720);
+
+        // Act
+        var result = rasterizer.RenderGlyphWithRedactionMask(glyphBounds, redactionArea);
+
+        // Assert - should gracefully return null for invalid PDF
+        result.Should().BeNull("Invalid PDF should return null, not throw");
+    }
+
+    [Fact]
+    public void RenderGlyphRegion_WithInvalidPdf_ReturnsNull()
+    {
+        // Arrange - invalid PDF bytes
+        var pdfBytes = new byte[] { 0x25, 0x50, 0x44, 0x46 };
+        using var rasterizer = new PartialGlyphRasterizer(pdfBytes, 0, 792.0);
+
+        var glyphBounds = new PdfRectangle(100, 700, 120, 720);
+        var redactionArea = new PdfRectangle(110, 700, 130, 720);
+
+        // Act
+        var result = rasterizer.RenderGlyphRegion(glyphBounds, redactionArea);
+
+        // Assert
+        result.Should().BeNull("Invalid PDF should return null, not throw");
+    }
+
+    #endregion
 }
