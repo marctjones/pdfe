@@ -159,6 +159,37 @@ Run 'pdfer <command> --help' for more information on a command.");
                 }
                 pagesSpec = args[++i];
             }
+            else if (arg == "--preserve-partial-glyphs")
+            {
+                options.PreservePartialGlyphsAsImages = true;
+            }
+            else if (arg == "--partial-glyph-dpi")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    return PrintError("--partial-glyph-dpi requires a number");
+                }
+                if (!int.TryParse(args[++i], out var dpi) || dpi < 72 || dpi > 1200)
+                {
+                    return PrintError("--partial-glyph-dpi must be between 72 and 1200");
+                }
+                options.PartialGlyphRasterizationDpi = dpi;
+            }
+            else if (arg == "--glyph-strategy")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    return PrintError("--glyph-strategy requires a value (center, any, full)");
+                }
+                var strategy = args[++i].ToLowerInvariant();
+                options.GlyphRemovalStrategy = strategy switch
+                {
+                    "center" => GlyphRemovalStrategy.CenterPoint,
+                    "any" => GlyphRemovalStrategy.AnyOverlap,
+                    "full" => GlyphRemovalStrategy.FullyContained,
+                    _ => throw new ArgumentException($"Unknown glyph strategy: {strategy}")
+                };
+            }
             else if (!arg.StartsWith("-"))
             {
                 // Positional argument
@@ -405,6 +436,15 @@ OPTIONS:
         --json                Output results as JSON
         --verbose             Show detailed processing information
     -h, --help                Show this help
+
+PARTIAL GLYPH OPTIONS (experimental):
+        --preserve-partial-glyphs     Preserve visible portions of partially overlapping
+                                      glyphs as rasterized images (default: off)
+        --partial-glyph-dpi <dpi>     DPI for rasterizing partial glyphs (72-1200, default: 300)
+        --glyph-strategy <strategy>   How to decide if glyph should be removed:
+                                      - center: Remove if center point in area (default)
+                                      - any: Remove if any part overlaps area
+                                      - full: Remove only if fully inside area
 
 EXAMPLES:
     # Redact a single term

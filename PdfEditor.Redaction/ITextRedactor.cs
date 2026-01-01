@@ -157,6 +157,70 @@ public class RedactionOptions
     /// See issue #158: Draw redaction boxes without transparency for PDF/A
     /// </summary>
     public bool RemovePdfATransparency { get; set; } = true;
+
+    #region Partial Glyph Redaction (Issue #199)
+
+    /// <summary>
+    /// When true, glyphs that partially overlap the redaction area are:
+    /// 1. Removed from the text stream (for security - text extraction won't find them)
+    /// 2. Preserved as rasterized images (for visual appearance of non-redacted portions)
+    ///
+    /// When false (default), the current center-point behavior applies:
+    /// - Glyph is removed entirely if its center is inside the redaction area
+    /// - Glyph is kept entirely if its center is outside the redaction area
+    ///
+    /// Default: false (backward compatible, current behavior)
+    /// See issue #199: Partial glyph redaction - preserve visible portion as rasterized image
+    /// </summary>
+    public bool PreservePartialGlyphsAsImages { get; set; } = false;
+
+    /// <summary>
+    /// DPI (dots per inch) for rasterizing partial glyphs when PreservePartialGlyphsAsImages is true.
+    /// Higher values produce better quality but larger file sizes.
+    ///
+    /// Recommended values:
+    /// - 150 DPI: Fast, suitable for screen viewing
+    /// - 300 DPI: Standard, good for most printing (default)
+    /// - 600 DPI: High quality, archival/professional printing
+    ///
+    /// Default: 300
+    /// </summary>
+    public int PartialGlyphRasterizationDpi { get; set; } = 300;
+
+    /// <summary>
+    /// Strategy for determining when a glyph should be removed during redaction.
+    /// See issue #206: Detect glyphs with partial overlap of redaction area
+    /// </summary>
+    public GlyphRemovalStrategy GlyphRemovalStrategy { get; set; } = GlyphRemovalStrategy.CenterPoint;
+
+    #endregion
+}
+
+/// <summary>
+/// Strategy for determining when a glyph should be removed during redaction.
+/// </summary>
+public enum GlyphRemovalStrategy
+{
+    /// <summary>
+    /// Remove glyph if its center point is inside the redaction area.
+    /// This is the current/default behavior for backward compatibility.
+    /// Glyphs at edges may be partially visible or partially hidden.
+    /// </summary>
+    CenterPoint,
+
+    /// <summary>
+    /// Remove glyph if ANY part of it intersects the redaction area.
+    /// Most aggressive - ensures no part of any glyph is visible in the redacted region.
+    /// May remove glyphs that are mostly outside the area.
+    /// </summary>
+    AnyOverlap,
+
+    /// <summary>
+    /// Remove glyph only if it's FULLY contained within the redaction area.
+    /// Most conservative - glyphs at edges remain completely visible.
+    /// May leave partial glyphs visible inside the redacted region.
+    /// </summary>
+    FullyContained
 }
 
 /// <summary>
