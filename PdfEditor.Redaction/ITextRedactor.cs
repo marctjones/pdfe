@@ -259,6 +259,70 @@ public readonly record struct PdfRectangle(double Left, double Bottom, double Ri
     {
         return x >= Left && x <= Right && y >= Bottom && y <= Top;
     }
+
+    /// <summary>
+    /// Check if this rectangle fully contains another rectangle.
+    /// </summary>
+    public bool Contains(PdfRectangle other)
+    {
+        return Left <= other.Left &&
+               Right >= other.Right &&
+               Bottom <= other.Bottom &&
+               Top >= other.Top;
+    }
+
+    /// <summary>
+    /// Get the type of overlap between this rectangle (as redaction area) and a glyph.
+    /// </summary>
+    /// <param name="glyph">The glyph bounding box to check.</param>
+    /// <returns>The type of overlap.</returns>
+    public GlyphOverlapType GetOverlapType(PdfRectangle glyph)
+    {
+        if (!IntersectsWith(glyph))
+            return GlyphOverlapType.None;
+
+        if (Contains(glyph))
+            return GlyphOverlapType.Full;
+
+        return GlyphOverlapType.Partial;
+    }
+
+    /// <summary>
+    /// Convert from PdfPig's PdfRectangle format (normalizing swapped coordinates for rotated text).
+    /// </summary>
+    public static PdfRectangle FromPdfPig(UglyToad.PdfPig.Core.PdfRectangle rect)
+    {
+        // Normalize for rotated text where Left > Right or Bottom > Top
+        double left = Math.Min(rect.Left, rect.Right);
+        double right = Math.Max(rect.Left, rect.Right);
+        double bottom = Math.Min(rect.Bottom, rect.Top);
+        double top = Math.Max(rect.Bottom, rect.Top);
+        return new PdfRectangle(left, bottom, right, top);
+    }
+}
+
+/// <summary>
+/// Describes how a glyph overlaps with a redaction area.
+/// </summary>
+public enum GlyphOverlapType
+{
+    /// <summary>
+    /// Glyph does not intersect with redaction area at all.
+    /// Action: Keep the glyph as-is.
+    /// </summary>
+    None,
+
+    /// <summary>
+    /// Glyph partially overlaps redaction area (intersects but not fully contained).
+    /// Action: Candidate for rasterization - remove text but preserve visible portion as image.
+    /// </summary>
+    Partial,
+
+    /// <summary>
+    /// Glyph is fully contained within redaction area.
+    /// Action: Remove entirely from content stream.
+    /// </summary>
+    Full
 }
 
 /// <summary>
