@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
-using PdfSharp.Pdf;
-using PdfSharp.Pdf.IO;
-using PdfSharp.Pdf.Advanced;
+using Pdfe.Core.Document;
+using Pdfe.Core.Primitives;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -41,33 +40,46 @@ public class SignatureVerificationService
 
         try
         {
-            // We use PdfSharp to open the document and find signature dictionaries
-            using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import);
-            
+            // We use Pdfe.Core to open the document and find signature dictionaries
+            using var document = PdfDocument.Open(pdfPath);
+
             // 1. Find the AcroForm dictionary
-            var root = document.Internals.Catalog;
-            var acroForm = root.Elements.GetDictionary("/AcroForm");
-            
-            if (acroForm == null)
+            var acroFormObj = document.Catalog.GetOptional("AcroForm");
+            if (acroFormObj == null)
             {
                 _logger.LogInformation("No AcroForm found, document has no signatures.");
                 return results;
             }
 
+            var acroForm = document.Resolve(acroFormObj) as PdfDictionary;
+            if (acroForm == null)
+            {
+                _logger.LogInformation("AcroForm is not a dictionary.");
+                return results;
+            }
+
             // 2. Get Fields array
-            var fields = acroForm.Elements.GetArray("/Fields");
-            if (fields == null)
+            var fieldsObj = acroForm.GetOptional("Fields");
+            if (fieldsObj == null)
             {
                 _logger.LogInformation("No fields found in AcroForm.");
+                return results;
+            }
+
+            var fields = document.Resolve(fieldsObj) as PdfArray;
+            if (fields == null)
+            {
+                _logger.LogInformation("Fields is not an array.");
                 return results;
             }
 
             // 3. Iterate fields to find signatures
             foreach (var item in fields)
             {
-                if (item is PdfReference fieldRef && fieldRef.Value is PdfDictionary fieldDict)
+                var fieldDict = document.Resolve(item) as PdfDictionary;
+                if (fieldDict != null)
                 {
-                    CheckFieldForSignature(fieldDict, pdfPath, results);
+                    CheckFieldForSignature(document, fieldDict, pdfPath, results);
                 }
             }
         }
@@ -84,20 +96,27 @@ public class SignatureVerificationService
         return results;
     }
 
-    private void CheckFieldForSignature(PdfDictionary fieldDict, string pdfPath, List<SignatureVerificationResult> results)
+    private void CheckFieldForSignature(PdfDocument document, PdfDictionary fieldDict, string pdfPath, List<SignatureVerificationResult> results)
     {
         // Check if it's a signature field (FT = Sig)
-        var type = fieldDict.Elements.GetName("/FT");
-        if (type != "/Sig") return;
+        var type = fieldDict.GetNameOrNull("FT");
+        if (type != "Sig") return;
 
-        var name = fieldDict.Elements.GetString("/T");
+        var name = fieldDict.GetStringOrNull("T") ?? "Unknown";
         _logger.LogInformation("Found signature field: {Name}", name);
 
         // Get the signature value dictionary (V)
-        var valueDict = fieldDict.Elements.GetDictionary("/V");
-        if (valueDict == null)
+        var valueObj = fieldDict.GetOptional("V");
+        if (valueObj == null)
         {
             _logger.LogWarning("Signature field {Name} has no value dictionary (unsigned)", name);
+            return;
+        }
+
+        var valueDict = document.Resolve(valueObj) as PdfDictionary;
+        if (valueDict == null)
+        {
+            _logger.LogWarning("Signature field {Name} value is not a dictionary", name);
             return;
         }
 
@@ -106,8 +125,9 @@ public class SignatureVerificationService
         try
         {
             // 1. Get ByteRange
-            var byteRangeArray = valueDict.Elements.GetArray("/ByteRange");
-            if (byteRangeArray == null || byteRangeArray.Elements.Count != 4)
+            var byteRangeObj = valueDict.GetOptional("ByteRange");
+            var byteRangeArray = byteRangeObj != null ? document.Resolve(byteRangeObj) as PdfArray : null;
+            if (byteRangeArray == null || byteRangeArray.Count != 4)
             {
                 result.IsValid = false;
                 result.StatusMessage = "Invalid or missing ByteRange";
@@ -116,7 +136,7 @@ public class SignatureVerificationService
             }
 
             // 2. Get Contents (the PKCS#7 signature)
-            var contents = valueDict.Elements.GetString("/Contents");
+            var contents = valueDict.GetStringOrNull("Contents");
             if (string.IsNullOrEmpty(contents))
             {
                 result.IsValid = false;
