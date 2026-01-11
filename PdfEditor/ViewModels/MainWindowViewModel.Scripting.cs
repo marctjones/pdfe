@@ -111,6 +111,7 @@ public partial class MainWindowViewModel
         _currentFilePath = filePath;
         FileState.SetDocument(filePath);
         RedactionWorkflow.Reset();
+        _pendingTextRedactions.Clear();  // Issue #190: Clear pending text redactions
 
         // Issue #93: Use timeout to prevent hangs on malformed PDFs
         if (LoadDocumentTimeoutSeconds > 0)
@@ -147,8 +148,19 @@ public partial class MainWindowViewModel
     }
 
     /// <summary>
+    /// List of text redaction requests for the current document.
+    /// These are applied as a batch when ApplyRedactionsCommand is called.
+    /// Issue #190: Uses file-based TextRedactor API to bypass coordinate conversion issues.
+    /// </summary>
+    private readonly List<string> _pendingTextRedactions = new();
+
+    /// <summary>
     /// Redact all occurrences of the specified text on all pages (for Roslyn scripts).
     /// Usage: await RedactTextCommand.Execute("SECRET")
+    ///
+    /// Issue #190 FIX: This now uses the file-based TextRedactor API (like CLI) instead
+    /// of the coordinate-based workflow. The coordinate conversion was causing failures
+    /// on corpus PDFs that work fine with CLI redaction.
     /// </summary>
     private async Task RedactTextViaScriptAsync(string text)
     {
@@ -160,84 +172,26 @@ public partial class MainWindowViewModel
             throw new ArgumentException("Text to redact cannot be empty", nameof(text));
         }
 
-        if (!_documentService.IsDocumentLoaded || _searchService == null)
+        if (!_documentService.IsDocumentLoaded)
         {
             _logger.LogError("[SCRIPT] RedactTextCommand: No document loaded");
             throw new InvalidOperationException("No document loaded. Call LoadDocumentCommand first.");
         }
 
-        // Use search service to find all occurrences of the text
-        var matches = _searchService.Search(
-            _currentFilePath,
-            text,
-            caseSensitive: false,
-            wholeWordsOnly: false,
-            useRegex: false);
+        // Issue #190 FIX: Add to pending text redactions list
+        // These will be applied via TextRedactor.RedactText() API when ApplyRedactions is called
+        _pendingTextRedactions.Add(text);
 
-        _logger.LogInformation("[SCRIPT] RedactTextCommand: Found {MatchCount} occurrences of '{Text}'",
-            matches.Count, text);
-
-        if (matches.Count == 0)
-        {
-            _logger.LogWarning("[SCRIPT] RedactTextCommand: No matches found for '{Text}'", text);
-            return;
-        }
-
-        // Get page height for coordinate conversion (needed for all pages)
-        var pageHeights = new double[TotalPages];
-        for (int i = 0; i < TotalPages; i++)
-        {
-            pageHeights[i] = _documentService.GetPageHeight(i);
-        }
-
-        // Mark each match as a redaction area
-        int markedCount = 0;
-        foreach (var match in matches)
-        {
-            try
-            {
-                // Convert search match (PDF coordinates) to redaction area (screen coordinates)
-                var pageHeight = pageHeights[match.PageIndex];
-
-                // Convert Y from PDF (bottom-left) to Avalonia (top-left)
-                // match.Y = BoundingBox.Bottom (lower Y value in PDF coords)
-                // match.Height = height of the bounding box
-                // Top in PDF coords = match.Y + match.Height
-                // avaloniaY = pageHeight - Top = pageHeight - (match.Y + match.Height)
-                var avaloniaY = pageHeight - match.Y - match.Height;
-
-                // Scale to screen coordinates (150 DPI render = 2.083x PDF 72 DPI)
-                var dpiScale = 150.0 / 72.0;
-                var screenRect = new Avalonia.Rect(
-                    match.X * dpiScale,
-                    avaloniaY * dpiScale,
-                    match.Width * dpiScale,
-                    match.Height * dpiScale
-                );
-
-                // Extract preview text
-                string previewText = match.MatchedText ?? string.Empty;
-
-                // Mark the area (page numbers are 1-based for display)
-                RedactionWorkflow.MarkArea(match.PageIndex + 1, screenRect, previewText);
-                markedCount++;
-
-                _logger.LogDebug("[SCRIPT] Marked redaction on page {Page}: '{Text}' at ({X:F1},{Y:F1},{W:F1}x{H:F1})",
-                    match.PageIndex + 1, previewText,
-                    screenRect.X, screenRect.Y, screenRect.Width, screenRect.Height);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[SCRIPT] Failed to mark redaction for match on page {Page}", match.PageIndex + 1);
-            }
-        }
+        // Also add a placeholder to PendingRedactions for tracking/display purposes
+        // This uses a dummy area since we're using text-based redaction now
+        RedactionWorkflow.MarkArea(1, new Avalonia.Rect(0, 0, 1, 1), text);
 
         FileState.PendingRedactionsCount = RedactionWorkflow.PendingCount;
         this.RaisePropertyChanged(nameof(SaveButtonText));
         this.RaisePropertyChanged(nameof(StatusBarText));
 
-        _logger.LogInformation("[SCRIPT] RedactTextCommand completed: Marked {MarkedCount}/{TotalCount} redactions",
-            markedCount, matches.Count);
+        _logger.LogInformation("[SCRIPT] RedactTextCommand: Queued '{Text}' for text-based redaction (bypasses coordinate conversion)",
+            text);
 
         await Task.CompletedTask;
     }
@@ -246,6 +200,8 @@ public partial class MainWindowViewModel
     /// Apply all pending redactions to the in-memory document (for Roslyn scripts).
     /// This modifies the document but does not save it. Use SaveDocumentCommand to save.
     /// Usage: await ApplyRedactionsCommand.Execute()
+    ///
+    /// Issue #190 FIX: Text redactions now use file-based TextRedactor API.
     /// </summary>
     private async Task ApplyRedactionsViaScriptAsync()
     {
@@ -257,51 +213,25 @@ public partial class MainWindowViewModel
             throw new InvalidOperationException("No document loaded. Call LoadDocumentCommand first.");
         }
 
-        if (RedactionWorkflow.PendingCount == 0)
+        if (_pendingTextRedactions.Count == 0 && RedactionWorkflow.PendingCount == 0)
         {
             _logger.LogWarning("[SCRIPT] ApplyRedactionsCommand: No pending redactions to apply");
             return;
         }
 
-        try
-        {
-            _logger.LogInformation("[SCRIPT] Applying {Count} redactions to in-memory document",
-                RedactionWorkflow.PendingCount);
+        // Issue #190 FIX: For scripting, we use file-based TextRedactor API
+        // This bypasses coordinate conversion issues entirely
+        // The actual redaction happens in SaveDocumentViaScriptAsync
+        _logger.LogInformation("[SCRIPT] ApplyRedactionsCommand: {Count} text redactions queued, will be applied on save",
+            _pendingTextRedactions.Count);
 
-            // Get current document
-            var document = _documentService.GetCurrentDocument();
-            if (document == null)
-            {
-                _logger.LogError("[SCRIPT] ApplyRedactionsCommand: Document is null");
-                throw new InvalidOperationException("Document is null");
-            }
+        // Mark as applied for tracking
+        RedactionWorkflow.MoveToApplied();
+        FileState.PendingRedactionsCount = 0;
+        this.RaisePropertyChanged(nameof(SaveButtonText));
+        this.RaisePropertyChanged(nameof(StatusBarText));
 
-            // Apply each pending redaction
-            foreach (var pending in RedactionWorkflow.PendingRedactions.ToList())
-            {
-                _logger.LogDebug("[SCRIPT] Applying redaction on page {Page}", pending.PageNumber);
-
-                // pending.PageNumber is 1-based (for display), convert to 0-based for array access
-                var pageIndex = pending.PageNumber - 1;
-                var page = document.Pages[pageIndex];
-
-                // pending.Area is in 150 DPI image pixels (screen coordinates)
-                _redactionService.RedactArea(page, pending.Area, _currentFilePath, renderDpi: 150);
-            }
-
-            // Move redactions to applied list
-            RedactionWorkflow.MoveToApplied();
-            FileState.PendingRedactionsCount = 0;
-            this.RaisePropertyChanged(nameof(SaveButtonText));
-            this.RaisePropertyChanged(nameof(StatusBarText));
-
-            _logger.LogInformation("[SCRIPT] ApplyRedactionsCommand completed successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[SCRIPT] ApplyRedactionsCommand failed");
-            throw;
-        }
+        _logger.LogInformation("[SCRIPT] ApplyRedactionsCommand completed - redactions will be applied on save");
 
         await Task.CompletedTask;
     }
@@ -310,6 +240,8 @@ public partial class MainWindowViewModel
     /// Save the document to the specified path (for Roslyn scripts).
     /// If redactions are pending, apply them first, then save.
     /// Usage: await SaveDocumentCommand.Execute("/path/to/output.pdf")
+    ///
+    /// Issue #190 FIX: Text redactions now use file-based TextRedactor API.
     /// </summary>
     private async Task SaveDocumentViaScriptAsync(string filePath)
     {
@@ -329,32 +261,75 @@ public partial class MainWindowViewModel
 
         try
         {
-            // Apply any pending redactions before saving (like GUI workflow does)
-            if (RedactionWorkflow.PendingCount > 0)
+            // Issue #190 FIX: Apply text redactions using file-based API
+            // This bypasses the coordinate conversion that was causing failures
+            if (_pendingTextRedactions.Count > 0)
             {
-                _logger.LogInformation("[SCRIPT] Applying {Count} pending redactions before save", RedactionWorkflow.PendingCount);
-                await ApplyRedactionsViaScriptAsync();
-            }
+                _logger.LogInformation("[SCRIPT] Applying {Count} text redactions using file-based API",
+                    _pendingTextRedactions.Count);
 
-            // Get current document
-            var document = _documentService.GetCurrentDocument();
-            if (document == null)
+                // Use sequential file-based redaction (like CLI)
+                var currentInput = _currentFilePath;
+                var tempDir = System.IO.Path.GetTempPath();
+
+                for (int i = 0; i < _pendingTextRedactions.Count; i++)
+                {
+                    var text = _pendingTextRedactions[i];
+                    var isLast = (i == _pendingTextRedactions.Count - 1);
+                    var currentOutput = isLast ? filePath : System.IO.Path.Combine(tempDir, $"pdfe_script_redact_{i}_{Guid.NewGuid():N}.pdf");
+
+                    _logger.LogInformation("[SCRIPT] Redacting '{Text}' ({Current}/{Total})",
+                        text, i + 1, _pendingTextRedactions.Count);
+
+                    var result = _redactionService.RedactText(currentInput, currentOutput, text, caseSensitive: false);
+
+                    if (!result.Success)
+                    {
+                        _logger.LogError("[SCRIPT] Redaction failed for '{Text}': {Error}", text, result.ErrorMessage);
+                        throw new InvalidOperationException($"Redaction failed for '{text}': {result.ErrorMessage}");
+                    }
+
+                    _logger.LogInformation("[SCRIPT] Redacted {Count} occurrences of '{Text}'",
+                        result.RedactionCount, text);
+
+                    // Clean up intermediate files
+                    if (!isLast && currentInput != _currentFilePath && System.IO.File.Exists(currentInput))
+                    {
+                        try { System.IO.File.Delete(currentInput); } catch { }
+                    }
+
+                    currentInput = currentOutput;
+                }
+
+                // Clear pending text redactions
+                _pendingTextRedactions.Clear();
+
+                // Clear workflow tracking
+                RedactionWorkflow.MoveToApplied();
+                FileState.PendingRedactionsCount = 0;
+            }
+            else
             {
-                _logger.LogError("[SCRIPT] SaveDocumentCommand: Document is null");
-                throw new InvalidOperationException("Document is null");
-            }
+                // No text redactions - save document directly
+                var document = _documentService.GetCurrentDocument();
+                if (document == null)
+                {
+                    _logger.LogError("[SCRIPT] SaveDocumentCommand: Document is null");
+                    throw new InvalidOperationException("Document is null");
+                }
 
-            // Save the document
-            _logger.LogInformation("[SCRIPT] Saving PDF to: {Path}", filePath);
-            document.Save(filePath);
+                _logger.LogInformation("[SCRIPT] Saving PDF to: {Path}", filePath);
+                document.Save(filePath);
+            }
 
             // Update current file path to point to the saved file
             // This ensures subsequent operations (like text extraction) use the new file
-            // Bug fix: Without this, ExtractAllText would read from the OLD file path
             _currentFilePath = filePath;
             FileState.SetDocument(filePath);
             this.RaisePropertyChanged(nameof(DocumentName));
             this.RaisePropertyChanged(nameof(FilePath));
+            this.RaisePropertyChanged(nameof(SaveButtonText));
+            this.RaisePropertyChanged(nameof(StatusBarText));
 
             _logger.LogInformation("[SCRIPT] SaveDocumentCommand completed successfully, current path updated to: {Path}", filePath);
 

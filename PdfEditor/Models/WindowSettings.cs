@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using PdfEditor.Services;
 
 namespace PdfEditor.Models;
 
@@ -11,6 +12,7 @@ namespace PdfEditor.Models;
 /// Saves window position, size, and state.
 ///
 /// See Issue #23: Save and restore window position and size
+/// Uses AppPaths for cross-platform storage locations (Issues #265, #266, #267).
 /// </summary>
 public class WindowSettings
 {
@@ -20,11 +22,8 @@ public class WindowSettings
     public double Height { get; set; } = 800;
     public bool IsMaximized { get; set; }
 
-    private static readonly string SettingsFolder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "PdfEditor");
-
-    private static readonly string SettingsPath = Path.Combine(SettingsFolder, "window.json");
+    // Use AppPaths for cross-platform correct paths
+    private static string SettingsPath => AppPaths.WindowSettingsPath;
 
     /// <summary>
     /// Load settings from disk, or return default settings if not found.
@@ -58,11 +57,7 @@ public class WindowSettings
     {
         try
         {
-            if (!Directory.Exists(SettingsFolder))
-            {
-                Directory.CreateDirectory(SettingsFolder);
-            }
-
+            // AppPaths.ConfigDir ensures directory exists
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(this, options);
             File.WriteAllText(SettingsPath, json);

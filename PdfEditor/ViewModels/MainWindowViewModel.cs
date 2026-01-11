@@ -616,6 +616,17 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public async Task LoadDocumentAsync(string filePath)
     {
+        // Validate input
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ArgumentException("File path cannot be null or empty", nameof(filePath));
+        }
+
+        if (!System.IO.File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"PDF file not found: {filePath}", filePath);
+        }
+
         _logger.LogInformation(">>> STEP 1: LoadDocumentAsync START for: {FilePath}", filePath);
 
         try
@@ -1955,6 +1966,12 @@ public partial class MainWindowViewModel : ViewModelBase
             ClipboardHistory.Clear();
             _hasInMemoryModifications = false;
 
+            // Clear search state
+            SearchText = string.Empty;
+            SearchMatches.Clear();
+            CurrentSearchMatchIndex = -1;
+            IsSearchVisible = false;
+
             // Exit redaction mode if active
             if (IsRedactionMode)
             {
@@ -2365,10 +2382,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var recentFilesPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "PdfEditor",
-                "recent.txt");
+            // Use AppPaths for cross-platform correct paths (Issues #265, #266, #267)
+            var recentFilesPath = AppPaths.RecentFilesPath;
 
             if (System.IO.File.Exists(recentFilesPath))
             {
@@ -2429,14 +2444,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         try
         {
-            var appDataPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "PdfEditor");
-
-            System.IO.Directory.CreateDirectory(appDataPath);
-
-            var recentFilesPath = System.IO.Path.Combine(appDataPath, "recent.txt");
-            System.IO.File.WriteAllLines(recentFilesPath, RecentFiles);
+            // Use AppPaths for cross-platform correct paths (Issues #265, #266, #267)
+            // AppPaths.DataDir ensures directory exists
+            System.IO.File.WriteAllLines(AppPaths.RecentFilesPath, RecentFiles);
         }
         catch (Exception ex)
         {
@@ -2471,10 +2481,8 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         try
         {
-            var zoomFilePath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "PdfEditor",
-                "zoom.txt");
+            // Use AppPaths for cross-platform correct paths (Issues #265, #266, #267)
+            var zoomFilePath = AppPaths.ZoomSettingsPath;
 
             if (System.IO.File.Exists(zoomFilePath))
             {
@@ -2501,14 +2509,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         try
         {
-            var appDataPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "PdfEditor");
-
-            System.IO.Directory.CreateDirectory(appDataPath);
-
-            var zoomFilePath = System.IO.Path.Combine(appDataPath, "zoom.txt");
-            System.IO.File.WriteAllText(zoomFilePath,
+            // Use AppPaths for cross-platform correct paths (Issues #265, #266, #267)
+            // AppPaths.ConfigDir ensures directory exists
+            System.IO.File.WriteAllText(AppPaths.ZoomSettingsPath,
                 ZoomLevel.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         catch (Exception ex)
