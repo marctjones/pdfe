@@ -203,12 +203,58 @@ public class RedactionEdgeCaseTests : IDisposable
         // This test is kept for documentation purposes.
         Assert.True(true);
     }
-    [Fact(Skip = "XObject image redaction is a known limitation")]
-    public void Test_RedactImage_RemovesXObjectResource()
+    [Fact]
+    public void Test_RedactImage_RemovesXObjectDoOperator()
     {
-        // Skipped: XObject image redaction is not supported.
-        // The glyph-level redaction engine focuses on text content.
-        Assert.True(true);
+        // Test that XObject images are removed when they intersect with redaction area.
+        // Issue #192: XObject image redaction is supported via the Do operator.
+
+        // Arrange
+        var pdfPath = CreatePdfWithImageXObject("xobject_image_test.pdf");
+        _tempFiles.Add(pdfPath);
+
+        var service = CreateRedactionService();
+
+        // The image is placed at (100, 100) with 100x100 size via "100 0 0 100 100 100 cm"
+        // So the bounding box is (100, 100) to (200, 200) in PDF coordinates (bottom-left origin)
+        //
+        // For a default page height of 792 points:
+        // - PDF Y=100 to Y=200 corresponds to Avalonia Y=(792-200)=592 to Y=(792-100)=692
+        // - Create a redaction area that covers the image in Avalonia coordinates
+        var redactionArea = new Rect(90, 580, 120, 130); // Covers the image area (PDF 100-200 Y range)
+
+        // Load the original PDF to verify it has the Do operator
+        using var originalDoc = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        var originalContent = GetContentString(originalDoc.Pages[0]);
+        originalContent.Should().Contain("/Img1 Do", "Original PDF should contain the image XObject reference");
+
+        // Act - Apply redaction
+        var outputPath = Path.Combine(Path.GetTempPath(), "xobject_redacted.pdf");
+        _tempFiles.Add(outputPath);
+
+        service.RedactArea(originalDoc.Pages[0], redactionArea, pdfPath);
+        originalDoc.Save(outputPath);
+
+        // Assert - Verify the Do operator is removed
+        using var redactedDoc = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
+        var redactedContent = GetContentString(redactedDoc.Pages[0]);
+
+        // The image should be removed (no more /Img1 Do)
+        redactedContent.Should().NotContain("/Img1 Do",
+            "Redacted PDF should not contain the image XObject reference - it should be removed");
+    }
+
+    private string GetContentString(PdfPage page)
+    {
+        using var ms = new MemoryStream();
+        foreach (var item in page.Contents.Elements)
+        {
+            if (item is PdfReference pdfRef && pdfRef.Value is PdfDictionary dict && dict.Stream != null)
+            {
+                ms.Write(dict.Stream.Value, 0, dict.Stream.Value.Length);
+            }
+        }
+        return System.Text.Encoding.Latin1.GetString(ms.ToArray());
     }
 
     private string CreatePdfWithRotation(string fileName, int rotation)

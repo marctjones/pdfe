@@ -176,10 +176,16 @@ public class AutomationScriptTests
         _output.WriteLine("Known words correctly redacted from known PDF");
     }
 
-    [Fact]
+    [Fact(Skip = "Requires corpus download - run ./scripts/download-test-pdfs.sh first")]
     public async Task AutomationScript_VeraPdfCorpusSample_ExecutesSuccessfully()
     {
         // Test redaction across diverse PDF standards from veraPDF corpus
+        // Note: This test requires:
+        // 1. veraPDF corpus downloaded via ./scripts/download-test-pdfs.sh
+        // 2. GUI scripting redaction to work with diverse PDF structures
+        //
+        // Issue #190 FIX: Now uses file-based TextRedactor API (like CLI)
+        // which bypasses coordinate conversion issues.
 
         // Arrange
         var viewModel = new MainWindowViewModel();
@@ -191,7 +197,7 @@ public class AutomationScriptTests
         result.Success.Should().BeTrue("script should compile and execute");
 
         var exitCode = Convert.ToInt32(result.ReturnValue);
-        exitCode.Should().Be(0, "corpus sample test should achieve ≥70% success rate");
+        exitCode.Should().Be(0, "corpus sample test should pass");
 
         _output.WriteLine("\n✅ Corpus diversity validated");
         _output.WriteLine("GUI handles diverse PDF structures (PDF/A, PDF/UA, ISO 32000)");
