@@ -69,3 +69,8 @@ run_output.txt
 
 # Screenshots (temporary debug files)
 screenshots/
+
+# IdlerGear daemon files (don't commit)
+.idlergear/daemon.sock
+.idlergear/daemon.pid
+.idlergear/sync/
