@@ -169,6 +169,11 @@ public sealed class PdfString : PdfObject, IEquatable<PdfString>
     public override string ToString() => IsHex ? ToHexString() : ToLiteralString();
 
     /// <summary>
+    /// Create a PdfString from text (literal string).
+    /// </summary>
+    public static PdfString FromText(string text) => new(text, isHex: false);
+
+    /// <summary>
     /// Create a PdfString from a hex-encoded string (without angle brackets).
     /// </summary>
     public static PdfString FromHex(string hex)

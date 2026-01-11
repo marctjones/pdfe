@@ -1,5 +1,6 @@
 using Pdfe.Core.Parsing;
 using Pdfe.Core.Primitives;
+using Pdfe.Core.Writing;
 
 namespace Pdfe.Core.Document;
 
@@ -389,6 +390,61 @@ public class PdfDocument : IDisposable
     /// Get document metadata producer.
     /// </summary>
     public string? Producer => Info?.GetStringOrNull("Producer");
+
+    #region Save Methods
+
+    /// <summary>
+    /// Save the document to a stream.
+    /// </summary>
+    public void Save(Stream outputStream)
+    {
+        var writer = new PdfDocumentWriter(this);
+        writer.Write(outputStream);
+    }
+
+    /// <summary>
+    /// Save the document to a byte array.
+    /// </summary>
+    public byte[] SaveToBytes()
+    {
+        using var ms = new MemoryStream();
+        Save(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Save the document to a file.
+    /// </summary>
+    public void Save(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
+        Save(fs);
+    }
+
+    /// <summary>
+    /// Get all objects in the document (for writing).
+    /// </summary>
+    internal IEnumerable<(int ObjectNumber, int Generation, PdfObject Object)> GetAllObjects()
+    {
+        foreach (var kvp in _xref)
+        {
+            if (kvp.Value.InUse)
+            {
+                var obj = GetObject(kvp.Key);
+                yield return (kvp.Key, kvp.Value.Generation, obj);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get the catalog reference for writing.
+    /// </summary>
+    internal PdfReference GetCatalogReference()
+    {
+        return Trailer.Get<PdfReference>("Root");
+    }
+
+    #endregion
 
     /// <inheritdoc />
     public void Dispose()
