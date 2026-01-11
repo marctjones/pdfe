@@ -1,3 +1,4 @@
+using Pdfe.Core.Content;
 using Pdfe.Core.Graphics;
 using Pdfe.Core.Primitives;
 using Pdfe.Core.Text;
@@ -60,6 +61,17 @@ public class PdfPage
             var extractor = new TextExtractor(this);
             return extractor.ExtractLetters();
         }
+    }
+
+    /// <summary>
+    /// Get all words extracted from the page.
+    /// A word is a sequence of letters separated by whitespace.
+    /// </summary>
+    /// <returns>List of words with their letters and bounding boxes.</returns>
+    public IReadOnlyList<Word> GetWords()
+    {
+        var extractor = new TextExtractor(this);
+        return extractor.ExtractWords();
     }
 
     /// <summary>
@@ -189,6 +201,29 @@ public class PdfPage
     {
         _graphics ??= new PdfGraphics(this);
         return _graphics;
+    }
+
+    /// <summary>
+    /// Get the content stream as a parsed ContentStream object.
+    /// </summary>
+    public ContentStream GetContentStream()
+    {
+        var bytes = GetContentStreamBytes();
+        if (bytes.Length == 0)
+            return new ContentStream();
+
+        var parser = new ContentStreamParser(bytes, this);
+        return parser.Parse();
+    }
+
+    /// <summary>
+    /// Set the content stream from a ContentStream object.
+    /// </summary>
+    public void SetContentStream(ContentStream content)
+    {
+        var writer = new ContentStreamWriter();
+        var bytes = writer.Write(content);
+        SetContentStreamBytes(bytes);
     }
 
     /// <summary>
@@ -392,4 +427,13 @@ public readonly record struct PdfRectangle(double Left, double Bottom, double Ri
 
     /// <inheritdoc />
     public override string ToString() => $"[{Left:F2}, {Bottom:F2}, {Right:F2}, {Top:F2}]";
+}
+
+/// <summary>
+/// A point in PDF coordinates (bottom-left origin).
+/// </summary>
+public readonly record struct PdfPoint(double X, double Y)
+{
+    /// <inheritdoc />
+    public override string ToString() => $"({X:F2}, {Y:F2})";
 }

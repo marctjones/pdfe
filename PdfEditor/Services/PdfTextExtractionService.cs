@@ -1,19 +1,18 @@
 using Avalonia;
 using Microsoft.Extensions.Logging;
+using Pdfe.Core.Document;
+using Pdfe.Core.Text;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
-using UglyToad.PdfPig.Core;
 
 namespace PdfEditor.Services;
 
 /// <summary>
 /// Service for extracting text from PDF pages
-/// Uses PdfPig (Apache 2.0 License) for text extraction
+/// Uses Pdfe.Core for text extraction
 /// </summary>
 public class PdfTextExtractionService
 {
@@ -38,16 +37,16 @@ public class PdfTextExtractionService
 
         try
         {
-            using var document = PdfDocument.Open(pdfStream);
+            using var document = PdfDocument.Open(pdfStream, ownsStream: false);
 
-            if (pageIndex < 0 || pageIndex >= document.NumberOfPages)
+            if (pageIndex < 0 || pageIndex >= document.PageCount)
             {
                 _logger.LogWarning("Invalid page index: {PageIndex}, total pages: {TotalPages}",
-                    pageIndex, document.NumberOfPages);
+                    pageIndex, document.PageCount);
                 return string.Empty;
             }
 
-            var page = document.GetPage(pageIndex + 1); // PdfPig uses 1-based indexing
+            var page = document.GetPage(pageIndex + 1); // 1-based indexing
             var text = page.Text;
 
             _logger.LogInformation("Extracted {Length} characters from page {PageIndex}",
@@ -85,9 +84,9 @@ public class PdfTextExtractionService
             using var document = PdfDocument.Open(pdfPath);
             var allText = new StringBuilder();
 
-            for (int i = 0; i < document.NumberOfPages; i++)
+            for (int i = 0; i < document.PageCount; i++)
             {
-                var page = document.GetPage(i + 1); // PdfPig uses 1-based indexing
+                var page = document.GetPage(i + 1); // 1-based indexing
                 var pageText = page.Text;
 
                 if (!string.IsNullOrWhiteSpace(pageText))
@@ -99,7 +98,7 @@ public class PdfTextExtractionService
 
             var result = allText.ToString();
             _logger.LogInformation("Extracted {Length} total characters from {PageCount} pages",
-                result.Length, document.NumberOfPages);
+                result.Length, document.PageCount);
 
             return result;
         }
@@ -126,16 +125,16 @@ public class PdfTextExtractionService
 
         try
         {
-            using var document = PdfDocument.Open(pdfStream);
+            using var document = PdfDocument.Open(pdfStream, ownsStream: false);
 
-            if (pageIndex < 0 || pageIndex >= document.NumberOfPages)
+            if (pageIndex < 0 || pageIndex >= document.PageCount)
             {
                 _logger.LogWarning("Invalid page index: {PageIndex}, total pages: {TotalPages}",
-                    pageIndex, document.NumberOfPages);
+                    pageIndex, document.PageCount);
                 return string.Empty;
             }
 
-            var page = document.GetPage(pageIndex + 1); // PdfPig uses 1-based indexing
+            var page = document.GetPage(pageIndex + 1); // 1-based indexing
 
             // Get words from page (we'll iterate their letters for character-level selection)
             var words = page.GetWords();
@@ -147,7 +146,7 @@ public class PdfTextExtractionService
             var (left, bottom, right, top) = CoordinateConverter.ImageSelectionToPdfCoords(
                 area, pageHeight, renderDpi);
 
-            var pdfRect = new UglyToad.PdfPig.Core.PdfRectangle(left, bottom, right, top);
+            var pdfRect = new PdfRectangle(left, bottom, right, top);
 
             _logger.LogInformation(
                 "Coordinate conversion via CoordinateConverter.ImageSelectionToPdfCoords: " +
@@ -276,7 +275,7 @@ public class PdfTextExtractionService
     /// <summary>
     /// Check if two rectangles intersect (kept for potential future use)
     /// </summary>
-    private bool Intersects(PdfRectangle a, PdfRectangle b)
+    private static bool Intersects(PdfRectangle a, PdfRectangle b)
     {
         return !(a.Right < b.Left || a.Left > b.Right ||
                  a.Top < b.Bottom || a.Bottom > b.Top);
@@ -303,7 +302,7 @@ public class PdfTextExtractionService
     /// <param name="letterBox">The bounding box of the letter (glyph rectangle)</param>
     /// <param name="selection">The selection rectangle in PDF coordinates</param>
     /// <returns>True if the letter's center is inside the selection</returns>
-    private bool IsLetterCenterInSelection(PdfRectangle letterBox, PdfRectangle selection)
+    private static bool IsLetterCenterInSelection(PdfRectangle letterBox, PdfRectangle selection)
     {
         // Calculate the center point of the letter
         var centerX = (letterBox.Left + letterBox.Right) / 2.0;

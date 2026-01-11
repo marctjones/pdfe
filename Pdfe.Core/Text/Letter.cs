@@ -49,6 +49,16 @@ public class Letter
     /// </summary>
     public int CharacterCode { get; }
 
+    /// <summary>
+    /// The baseline start point of the glyph.
+    /// </summary>
+    public PdfPoint StartBaseLine => new(StartX, StartY);
+
+    /// <summary>
+    /// The baseline end point of the glyph.
+    /// </summary>
+    public PdfPoint EndBaseLine => new(StartX + Width, StartY);
+
     public Letter(
         string value,
         PdfRectangle glyphRectangle,

@@ -64,6 +64,81 @@ public class TextExtractor
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Extract words from the page. Words are sequences of letters
+    /// separated by whitespace or large gaps.
+    /// </summary>
+    public IReadOnlyList<Word> ExtractWords()
+    {
+        var letters = ExtractLetters();
+        if (letters.Count == 0)
+            return Array.Empty<Word>();
+
+        var words = new List<Word>();
+        var currentWordLetters = new List<Letter>();
+
+        // Threshold for word separation (in points)
+        // Typical space width is ~3-4 points at 12pt font
+        const double wordGapThreshold = 3.0;
+        const double lineGapThreshold = 5.0;
+
+        Letter? prevLetter = null;
+
+        foreach (var letter in letters)
+        {
+            bool startNewWord = false;
+
+            if (prevLetter != null)
+            {
+                // Check for line break
+                var yDiff = Math.Abs(letter.StartY - prevLetter.StartY);
+                if (yDiff > lineGapThreshold)
+                {
+                    startNewWord = true;
+                }
+                else
+                {
+                    // Check for horizontal gap
+                    var gap = letter.GlyphRectangle.Left - prevLetter.GlyphRectangle.Right;
+                    if (gap > wordGapThreshold)
+                    {
+                        startNewWord = true;
+                    }
+                }
+            }
+
+            // Check if letter is whitespace
+            if (letter.Value.Length == 1 && char.IsWhiteSpace(letter.Value[0]))
+            {
+                // Don't add whitespace to words, but end current word
+                if (currentWordLetters.Count > 0)
+                {
+                    words.Add(new Word(currentWordLetters.ToArray()));
+                    currentWordLetters.Clear();
+                }
+                prevLetter = letter;
+                continue;
+            }
+
+            if (startNewWord && currentWordLetters.Count > 0)
+            {
+                words.Add(new Word(currentWordLetters.ToArray()));
+                currentWordLetters.Clear();
+            }
+
+            currentWordLetters.Add(letter);
+            prevLetter = letter;
+        }
+
+        // Don't forget the last word
+        if (currentWordLetters.Count > 0)
+        {
+            words.Add(new Word(currentWordLetters.ToArray()));
+        }
+
+        return words;
+    }
+
     private void ParseContentStream()
     {
         var content = Encoding.Latin1.GetString(_contentStream);
