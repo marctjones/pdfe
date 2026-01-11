@@ -60,12 +60,72 @@ public class GlyphRemover
         _logger.LogInformation("Identified {Count} text blocks, {ReconstructedCount} will be reconstructed",
             textBlocks.Count, textBlocks.Count(b => b.HasReconstructedText));
 
-        // PHASE 2: Build output, filtering operations from reconstructed blocks
+        // PHASE 2: Pre-analyze blocks to determine:
+        // 1. Which blocks will have remaining content (not entirely redacted)
+        // 2. Which blocks have kept-as-is TextOps (need original state ops)
+        var blocksWithContent = new HashSet<TextBlockInfo>();
+        var blocksWithKeptAsIsTextOps = new HashSet<TextBlockInfo>();
+
+        foreach (var block in textBlocks.Where(b => b.HasReconstructedText))
+        {
+            var textOpsInBlock = operations
+                .Where(o => block.Contains(o.StreamPosition))
+                .OfType<TextOperation>()
+                .ToList();
+
+            foreach (var textOp in textOpsInBlock)
+            {
+                var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
+
+                // Check if this TextOp has any letters NOT in the redaction area
+                bool hasKeptAsIsLetters = letterMatches.Any(match =>
+                {
+                    var rect = match.Letter.GlyphRectangle;
+                    double centerX = (rect.Left + rect.Right) / 2.0;
+                    double centerY = (rect.Bottom + rect.Top) / 2.0;
+                    return !redactionArea.Contains(centerX, centerY);
+                });
+
+                // Check if this TextOp doesn't intersect at all (entirely kept-as-is)
+                bool hasIntersectingLetters = letterMatches.Any(match =>
+                {
+                    var rect = match.Letter.GlyphRectangle;
+                    double centerX = (rect.Left + rect.Right) / 2.0;
+                    double centerY = (rect.Bottom + rect.Top) / 2.0;
+                    return redactionArea.Contains(centerX, centerY);
+                });
+
+                if (hasKeptAsIsLetters)
+                {
+                    // This block has remaining content
+                    blocksWithContent.Add(block);
+                }
+
+                if (!hasIntersectingLetters)
+                {
+                    // This TextOp is entirely kept-as-is (no intersection)
+                    // We need original state ops for it
+                    blocksWithKeptAsIsTextOps.Add(block);
+                    blocksWithContent.Add(block);
+                }
+            }
+        }
+
+        // PHASE 3: Build output, filtering operations from reconstructed blocks
+        // Key insight for Issue #270 fix:
+        // - TextOperations that DON'T intersect redaction area should be kept as-is
+        //   (with their original positioning) to avoid content shift
+        // - TextOperations that DO intersect are reconstructed with new BT/ET blocks
+        // - For mixed blocks: keep original structure for non-intersecting text,
+        //   then append reconstructed segments AFTER the original ET
         var modifiedOperations = new List<PdfOperation>();
         int textOpsFound = 0;
         int operationsReconstructed = 0;
         int operationsSkippedFromReconstructedBlocks = 0;
         int operationsKeptAsIs = 0;
+
+        // Track deferred reconstructed operations per block (output after block's ET)
+        var deferredReconstructedOps = new Dictionary<TextBlockInfo, List<PdfOperation>>();
 
         foreach (var operation in operations)
         {
@@ -74,14 +134,42 @@ public class GlyphRemover
 
             if (containingBlock != null && containingBlock.HasReconstructedText)
             {
-                // This operation is inside a text block that will be reconstructed
-                // We must reconstruct ALL TextOperations in this block, not just intersecting ones
+                // Check if this block will have any remaining content
+                if (!blocksWithContent.Contains(containingBlock))
+                {
+                    // This entire block will be empty after redaction - skip all operations
+                    operationsSkippedFromReconstructedBlocks++;
+                    continue;
+                }
+
+                // This operation is inside a text block that has SOME text needing redaction
                 if (operation is TextOperation textOp)
                 {
-                    // Reconstruct this text operation
                     textOpsFound++;
                     var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
 
+                    // CRITICAL FIX (Issue #270): Check if THIS specific TextOperation has letters in redaction area
+                    // If not, we should NOT reconstruct it - preserve original positioning to avoid content shift
+                    bool hasIntersectingLetters = letterMatches.Any(match =>
+                    {
+                        var rect = match.Letter.GlyphRectangle;
+                        double centerX = (rect.Left + rect.Right) / 2.0;
+                        double centerY = (rect.Bottom + rect.Top) / 2.0;
+                        return redactionArea.Contains(centerX, centerY);
+                    });
+
+                    if (!hasIntersectingLetters)
+                    {
+                        // This TextOperation doesn't intersect the redaction area
+                        // Keep it as-is to preserve original positioning (avoid content shift)
+                        modifiedOperations.Add(operation);
+                        operationsKeptAsIs++;
+                        _logger.LogDebug("Keeping TextOp '{Text}' as-is (no intersecting letters)",
+                            textOp.Text.Length > 30 ? textOp.Text.Substring(0, 30) + "..." : textOp.Text);
+                        continue;
+                    }
+
+                    // This TextOperation intersects the redaction area - needs reconstruction
                     // Update bbox with real positions if we have letter matches
                     if (letterMatches.Count > 0)
                     {
@@ -106,9 +194,17 @@ public class GlyphRemover
                         // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
                         var reconstructed = _operationReconstructor.ReconstructWithPositioning(
                             segments, textOp, pageRotation, mediaBoxWidth, mediaBoxHeight);
-                        modifiedOperations.AddRange(reconstructed);
+
+                        // CRITICAL FIX (Issue #270): Defer reconstructed ops until after ET
+                        // to avoid outputting BT inside existing BT block
+                        if (!deferredReconstructedOps.ContainsKey(containingBlock))
+                        {
+                            deferredReconstructedOps[containingBlock] = new List<PdfOperation>();
+                        }
+                        deferredReconstructedOps[containingBlock].AddRange(reconstructed);
+
                         operationsReconstructed++;
-                        _logger.LogInformation("Reconstructed TextOp '{Text}' into {Count} segments",
+                        _logger.LogInformation("Deferred reconstruction of TextOp '{Text}' into {Count} segments",
                             textOp.Text.Length > 30 ? textOp.Text.Substring(0, 30) + "..." : textOp.Text,
                             segments.Count);
                     }
@@ -120,9 +216,41 @@ public class GlyphRemover
                 }
                 else
                 {
-                    // Skip - this operation is part of a reconstructed block but not a TextOperation
-                    // (Could be BT, ET, Tf, Tm, Tc, Tw, etc.)
-                    operationsSkippedFromReconstructedBlocks++;
+                    // State operation (BT, ET, Tf, Tm, etc.)
+                    // Only keep original state ops if block has kept-as-is TextOps that need them
+                    if (blocksWithKeptAsIsTextOps.Contains(containingBlock))
+                    {
+                        modifiedOperations.Add(operation);
+                        operationsKeptAsIs++;
+
+                        // If this is ET and we have deferred reconstructed ops for this block,
+                        // output them now (after the original block ends)
+                        if (operation is TextStateOperation tso && tso.Operator == "ET")
+                        {
+                            if (deferredReconstructedOps.TryGetValue(containingBlock, out var deferred) && deferred.Count > 0)
+                            {
+                                modifiedOperations.AddRange(deferred);
+                                _logger.LogDebug("Output {Count} deferred reconstructed operations after ET", deferred.Count);
+                                deferred.Clear();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // No kept-as-is TextOps - skip original state ops
+                        // But if this is ET and we have deferred ops, output them now
+                        operationsSkippedFromReconstructedBlocks++;
+
+                        if (operation is TextStateOperation tso && tso.Operator == "ET")
+                        {
+                            if (deferredReconstructedOps.TryGetValue(containingBlock, out var deferred) && deferred.Count > 0)
+                            {
+                                modifiedOperations.AddRange(deferred);
+                                _logger.LogDebug("Output {Count} deferred reconstructed operations (no kept-as-is TextOps)", deferred.Count);
+                                deferred.Clear();
+                            }
+                        }
+                    }
                 }
             }
             else
@@ -305,3 +433,4 @@ internal class TextBlockInfo
     public bool Contains(int streamPosition) =>
         streamPosition >= BtStreamPosition && streamPosition <= EtStreamPosition;
 }
+
