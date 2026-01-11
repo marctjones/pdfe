@@ -1,4 +1,5 @@
 using Pdfe.Core.Primitives;
+using Pdfe.Core.Text;
 
 namespace Pdfe.Core.Document;
 
@@ -29,6 +30,35 @@ public class PdfPage
     /// The underlying page dictionary.
     /// </summary>
     public PdfDictionary Dictionary => _pageDict;
+
+    /// <summary>
+    /// The document this page belongs to.
+    /// </summary>
+    public PdfDocument Document => _document;
+
+    /// <summary>
+    /// Get the extracted text content from the page.
+    /// </summary>
+    public string Text
+    {
+        get
+        {
+            var extractor = new TextExtractor(this);
+            return extractor.ExtractText();
+        }
+    }
+
+    /// <summary>
+    /// Get all letters extracted from the page with position information.
+    /// </summary>
+    public IReadOnlyList<Letter> Letters
+    {
+        get
+        {
+            var extractor = new TextExtractor(this);
+            return extractor.ExtractLetters();
+        }
+    }
 
     /// <summary>
     /// Page width in points.
