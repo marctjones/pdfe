@@ -1,3 +1,4 @@
+using Pdfe.Core.Graphics;
 using Pdfe.Core.Primitives;
 using Pdfe.Core.Text;
 
@@ -10,6 +11,7 @@ public class PdfPage
 {
     private readonly PdfDocument _document;
     private readonly PdfDictionary _pageDict;
+    private PdfGraphics? _graphics;
 
     /// <summary>
     /// The 1-based page number.
@@ -138,6 +140,55 @@ public class PdfPage
         }
 
         return Array.Empty<byte>();
+    }
+
+    /// <summary>
+    /// Sets the content stream bytes for this page.
+    /// </summary>
+    public void SetContentStreamBytes(byte[] data)
+    {
+        var contentsObj = _pageDict.GetOptional("Contents");
+
+        if (contentsObj == null)
+        {
+            // Create a new content stream
+            var newStream = new PdfStream(data);
+            // For now, store directly in page dictionary (simplified)
+            // A full implementation would create a new indirect object
+            _pageDict["Contents"] = newStream;
+            return;
+        }
+
+        contentsObj = _document.Resolve(contentsObj);
+
+        if (contentsObj is PdfStream stream)
+        {
+            // Update existing stream (also updates encoded data and length)
+            stream.DecodedData = data;
+        }
+        else if (contentsObj is PdfArray array && array.Count > 0)
+        {
+            // Update first stream in array
+            var firstRef = array[0];
+            var resolved = _document.Resolve(firstRef);
+            if (resolved is PdfStream firstStream)
+            {
+                // Update first stream (removes filters too)
+                firstStream.DecodedData = data;
+                // Clear other streams in the array if present
+                while (array.Count > 1)
+                    array.RemoveAt(array.Count - 1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a graphics context for drawing on this page.
+    /// </summary>
+    public PdfGraphics GetGraphics()
+    {
+        _graphics ??= new PdfGraphics(this);
+        return _graphics;
     }
 
     /// <summary>
