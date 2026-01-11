@@ -1,4 +1,8 @@
-# PdfEditor
+<p align="center">
+  <img src="PdfEditor/Assets/pdfe_logo.svg" alt="PDFE Logo" width="128" height="128">
+</p>
+
+# PdfEditor (PDFE)
 
 A cross-platform desktop PDF editor built with **C# + .NET 8 + Avalonia UI** featuring TRUE content-level redaction.
 
