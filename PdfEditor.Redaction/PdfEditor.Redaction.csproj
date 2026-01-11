@@ -15,16 +15,20 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- PDF Reading - for accurate letter positions -->
+    <!-- Pdfe Framework (v2.0 - replacing PdfPig/PDFsharp/PDFtoImage) -->
+    <ProjectReference Include="..\Pdfe.Core\Pdfe.Core.csproj" />
+    <ProjectReference Include="..\Pdfe.Rendering\Pdfe.Rendering.csproj" />
+
+    <!-- Clipper2 for polygon operations -->
     <PackageReference Include="Clipper2" Version="1.4.0" />
+
+    <!-- SkiaSharp for image handling -->
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+
+    <!-- Legacy dependencies - to be removed after migration -->
     <PackageReference Include="PdfPig" Version="0.1.11" />
-
-    <!-- PDF Writing - for content stream modification -->
     <PackageReference Include="PDFsharp" Version="6.2.2" />
-
-    <!-- PDF Rendering (for partial glyph rasterization) -->
     <PackageReference Include="PDFtoImage" Version="4.0.2" />
-    <PackageReference Include="SkiaSharp" Version="2.88.8" />
 
     <!-- Logging -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />

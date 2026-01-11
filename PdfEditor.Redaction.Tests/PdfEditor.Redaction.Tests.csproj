@@ -24,7 +24,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="PDFsharp" Version="6.2.2" />
     <PackageReference Include="PdfPig" Version="0.1.11" />
-    <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
     <PackageReference Include="PDFtoImage" Version="4.0.2" />
   </ItemGroup>
 
