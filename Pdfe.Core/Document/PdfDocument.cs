@@ -16,6 +16,7 @@ public class PdfDocument : IDisposable
     private readonly Dictionary<int, PdfObject> _objectCache;
     private readonly PdfParser _parser;
     private readonly StreamDecompressor _decompressor;
+    private PageCollection? _pages;
 
     /// <summary>
     /// The trailer dictionary.
@@ -46,6 +47,19 @@ public class PdfDocument : IDisposable
     /// Information dictionary (metadata).
     /// </summary>
     public PdfDictionary? Info { get; }
+
+    /// <summary>
+    /// Collection of pages in the document.
+    /// Provides methods for adding, removing, and reordering pages.
+    /// </summary>
+    public PageCollection Pages
+    {
+        get
+        {
+            _pages ??= new PageCollection(this);
+            return _pages;
+        }
+    }
 
     private PdfDocument(
         Stream stream,
