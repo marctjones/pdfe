@@ -4,6 +4,7 @@ using PdfEditor.Redaction.ContentStream;
 using PdfEditor.Redaction.ContentStream.Building;
 using PdfEditor.Redaction.ContentStream.Parsing;
 using PdfEditor.Redaction.GlyphLevel;
+using PdfEditor.Redaction.ImageRedaction;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.Advanced;
 using PdfSharp.Pdf.IO;
@@ -23,6 +24,7 @@ public class TextRedactor : ITextRedactor
     private readonly GlyphRemover? _glyphRemover;
     private readonly ContentStreamRedactor _contentStreamRedactor;
     private readonly AnnotationRedactor _annotationRedactor;
+    private readonly ImageRedactor _imageRedactor;
     private readonly ILogger<TextRedactor> _logger;
 
     /// <summary>
@@ -59,6 +61,7 @@ public class TextRedactor : ITextRedactor
         _logger = logger;
         _contentStreamRedactor = new ContentStreamRedactor(parser, builder, _glyphRemover, logger);
         _annotationRedactor = new AnnotationRedactor();
+        _imageRedactor = new ImageRedactor(logger);
     }
 
     /// <summary>
@@ -84,6 +87,7 @@ public class TextRedactor : ITextRedactor
         _logger = logger;
         _contentStreamRedactor = new ContentStreamRedactor(parser, builder, _glyphRemover, logger);
         _annotationRedactor = new AnnotationRedactor();
+        _imageRedactor = new ImageRedactor(logger);
     }
 
     /// <inheritdoc />
@@ -486,7 +490,8 @@ public class TextRedactor : ITextRedactor
         // Delegate to ContentStreamRedactor for core redaction logic (with Form XObject support)
         // NOTE: Content stream areas are for operation-level matching, visual areas are for letter-level matching
         // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation in glyph-level redaction
-        var (newContentBytes, details, formXObjectResults) = _contentStreamRedactor.RedactContentStreamWithFormXObjects(
+        // Issue #269: Track image operations removed for reporting
+        var (newContentBytes, details, formXObjectResults, imageOpsRemoved) = _contentStreamRedactor.RedactContentStreamWithFormXObjects(
             contentBytes,
             contentStreamPageHeight,
             contentStreamAreas,
@@ -497,6 +502,12 @@ public class TextRedactor : ITextRedactor
             rotation,        // Page rotation for coordinate transformation
             mediaBox.Width,  // MediaBox width for coordinate transformation
             mediaBox.Height); // MediaBox height for coordinate transformation
+
+        // Log image operations removed for debugging
+        if (imageOpsRemoved > 0)
+        {
+            _logger.LogInformation("Removed {Count} image operations from page {Page}", imageOpsRemoved, pageNumber);
+        }
 
         // Replace page content
         ReplacePageContent(page, newContentBytes);
@@ -805,7 +816,7 @@ public class TextRedactor : ITextRedactor
             }
 
             // Delegate to ContentStreamRedactor for core redaction logic
-            var (newContentBytes, details) = _contentStreamRedactor.RedactContentStream(
+            var (newContentBytes, details, imageOpsRemoved) = _contentStreamRedactor.RedactContentStream(
                 contentBytes,
                 pageHeight,
                 redactionAreas,
@@ -814,6 +825,17 @@ public class TextRedactor : ITextRedactor
 
             // Update page number in details
             var updatedDetails = details.Select(d => d with { PageNumber = pageNumber }).ToList();
+
+            // Issue #276: Apply partial image redaction to XObject images
+            // This must happen BEFORE replacing page content since XObjects are in page resources
+            if (options.RedactImagesPartially)
+            {
+                var xObjectsRedacted = RedactPageXObjectImages(page, contentBytes, pageHeight, redactionAreas);
+                if (xObjectsRedacted > 0)
+                {
+                    _logger.LogDebug("Partially redacted {Count} XObject images on page", xObjectsRedacted);
+                }
+            }
 
             // Replace page content
             ReplacePageContent(page, newContentBytes);
@@ -834,7 +856,7 @@ public class TextRedactor : ITextRedactor
                 DrawRedactionMarkers(page, redactionAreas, options.MarkerColor);
             }
 
-            return PageRedactionResult.Succeeded(updatedDetails);
+            return PageRedactionResult.Succeeded(updatedDetails, imageOpsRemoved);
         }
         catch (Exception ex)
         {
@@ -910,6 +932,60 @@ public class TextRedactor : ITextRedactor
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to remove transparency from PDF/A-1 file");
+        }
+    }
+
+    /// <summary>
+    /// Redact portions of XObject images on a page that intersect with redaction areas.
+    /// Issue #276: Partial image redaction.
+    /// </summary>
+    /// <param name="page">The PDF page.</param>
+    /// <param name="contentBytes">The page content stream bytes.</param>
+    /// <param name="pageHeight">Page height in points.</param>
+    /// <param name="redactionAreas">Areas to redact.</param>
+    /// <returns>Number of XObject images that were modified.</returns>
+    private int RedactPageXObjectImages(
+        PdfPage page,
+        byte[] contentBytes,
+        double pageHeight,
+        List<PdfRectangle> redactionAreas)
+    {
+        try
+        {
+            // Parse content stream to find image operations
+            var operations = _parser.Parse(contentBytes, pageHeight);
+            var imageOps = operations.OfType<ImageOperation>().ToList();
+
+            if (imageOps.Count == 0)
+            {
+                _logger.LogDebug("No image operations found on page");
+                return 0;
+            }
+
+            int redactedCount = 0;
+
+            foreach (var imageOp in imageOps)
+            {
+                // Check if this image intersects with any redaction area
+                if (!redactionAreas.Any(area => imageOp.IntersectsWith(area)))
+                {
+                    continue;
+                }
+
+                // Apply partial redaction to this XObject image
+                if (_imageRedactor.RedactXObjectImage(page, imageOp, redactionAreas))
+                {
+                    redactedCount++;
+                    _logger.LogDebug("Partially redacted XObject image '{Name}'", imageOp.XObjectName);
+                }
+            }
+
+            return redactedCount;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to redact XObject images on page");
+            return 0;
         }
     }
 }
