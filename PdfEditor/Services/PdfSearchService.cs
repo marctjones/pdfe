@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
+using Pdfe.Core.Document;
+using Pdfe.Core.Text;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -63,11 +63,11 @@ public class PdfSearchService
             using var document = PdfDocument.Open(pdfPath);
 
             _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages",
-                searchTerm, document.NumberOfPages);
+                searchTerm, document.PageCount);
 
-            for (int i = 0; i < document.NumberOfPages; i++)
+            for (int i = 0; i < document.PageCount; i++)
             {
-                var page = document.GetPage(i + 1); // PdfPig uses 1-based indexing
+                var page = document.GetPage(i + 1); // Pdfe.Core uses 1-based indexing
                 var pageMatches = SearchInPage(page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, i);
                 matches.AddRange(pageMatches);
             }
@@ -87,7 +87,7 @@ public class PdfSearchService
     /// Search for text in a specific page
     /// </summary>
     public List<SearchMatch> SearchInPage(
-        Page page,
+        PdfPage page,
         string searchTerm,
         bool caseSensitive = false,
         bool wholeWordsOnly = false,
