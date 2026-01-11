@@ -41,6 +41,7 @@ public class GlyphRemover
     /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
     /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
     /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
+    /// <param name="glyphRemovalStrategy">Strategy for determining when to remove glyphs. Default: AnyOverlap.</param>
     /// <returns>List of modified operations with redacted text removed.</returns>
     public List<PdfOperation> ProcessOperations(
         List<PdfOperation> operations,
@@ -48,7 +49,8 @@ public class GlyphRemover
         PdfRectangle redactionArea,
         int pageRotation = 0,
         double mediaBoxWidth = 612,
-        double mediaBoxHeight = 792)
+        double mediaBoxHeight = 792,
+        GlyphRemovalStrategy glyphRemovalStrategy = GlyphRemovalStrategy.AnyOverlap)
     {
         _logger.LogInformation("=== STARTING OPERATION PROCESSING ===");
         _logger.LogInformation("Total operations: {Count}, Redaction area: ({L:F2},{B:F2})-({R:F2},{T:F2})",
@@ -56,7 +58,7 @@ public class GlyphRemover
 
         // PHASE 1: Identify text blocks and mark those with reconstructed text
         // Pass letters for accurate intersection testing using actual PdfPig positions
-        var textBlocks = IdentifyTextBlocks(operations, redactionArea, letters);
+        var textBlocks = IdentifyTextBlocks(operations, redactionArea, letters, glyphRemovalStrategy);
         _logger.LogInformation("Identified {Count} text blocks, {ReconstructedCount} will be reconstructed",
             textBlocks.Count, textBlocks.Count(b => b.HasReconstructedText));
 
@@ -77,23 +79,13 @@ public class GlyphRemover
             {
                 var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
 
-                // Check if this TextOp has any letters NOT in the redaction area
+                // Check if this TextOp has any letters NOT in the redaction area (using strategy)
                 bool hasKeptAsIsLetters = letterMatches.Any(match =>
-                {
-                    var rect = match.Letter.GlyphRectangle;
-                    double centerX = (rect.Left + rect.Right) / 2.0;
-                    double centerY = (rect.Bottom + rect.Top) / 2.0;
-                    return !redactionArea.Contains(centerX, centerY);
-                });
+                    !ShouldRemoveLetter(match.Letter, redactionArea, glyphRemovalStrategy));
 
                 // Check if this TextOp doesn't intersect at all (entirely kept-as-is)
                 bool hasIntersectingLetters = letterMatches.Any(match =>
-                {
-                    var rect = match.Letter.GlyphRectangle;
-                    double centerX = (rect.Left + rect.Right) / 2.0;
-                    double centerY = (rect.Bottom + rect.Top) / 2.0;
-                    return redactionArea.Contains(centerX, centerY);
-                });
+                    ShouldRemoveLetter(match.Letter, redactionArea, glyphRemovalStrategy));
 
                 if (hasKeptAsIsLetters)
                 {
@@ -150,13 +142,9 @@ public class GlyphRemover
 
                     // CRITICAL FIX (Issue #270): Check if THIS specific TextOperation has letters in redaction area
                     // If not, we should NOT reconstruct it - preserve original positioning to avoid content shift
+                    // Uses the glyph removal strategy to determine what "intersects" means
                     bool hasIntersectingLetters = letterMatches.Any(match =>
-                    {
-                        var rect = match.Letter.GlyphRectangle;
-                        double centerX = (rect.Left + rect.Right) / 2.0;
-                        double centerY = (rect.Bottom + rect.Top) / 2.0;
-                        return redactionArea.Contains(centerX, centerY);
-                    });
+                        ShouldRemoveLetter(match.Letter, redactionArea, glyphRemovalStrategy));
 
                     if (!hasIntersectingLetters)
                     {
@@ -187,7 +175,7 @@ public class GlyphRemover
                         };
                     }
 
-                    var segments = _textSegmenter.BuildSegments(textOp, letterMatches, redactionArea);
+                    var segments = _textSegmenter.BuildSegments(textOp, letterMatches, redactionArea, glyphRemovalStrategy);
 
                     if (segments.Count > 0)
                     {
@@ -298,7 +286,8 @@ public class GlyphRemover
     private List<TextBlockInfo> IdentifyTextBlocks(
         List<PdfOperation> operations,
         PdfRectangle redactionArea,
-        IReadOnlyList<Letter> letters)
+        IReadOnlyList<Letter> letters,
+        GlyphRemovalStrategy strategy)
     {
         var blocks = new List<TextBlockInfo>();
         var btStack = new Stack<int>();  // Track BT positions (handles nested BT in malformed PDFs)
@@ -325,24 +314,22 @@ public class GlyphRemover
 
                     // Check if any TextOperation has letters intersecting the redaction area
                     // Use actual letter positions from PdfPig, not the parsed bounding boxes
+                    // Use the glyph removal strategy to determine what "intersects" means
                     bool hasReconstructedText = false;
                     foreach (var textOp in textOpsInBlock)
                     {
                         // Find matching letters for this operation
                         var letterMatches = _letterFinder.FindOperationLetters(textOp, letters);
 
-                        // Check if any matched letter's center is in the redaction area
+                        // Check if any matched letter should be removed based on strategy
                         foreach (var match in letterMatches)
                         {
-                            var rect = match.Letter.GlyphRectangle;
-                            double centerX = (rect.Left + rect.Right) / 2.0;
-                            double centerY = (rect.Bottom + rect.Top) / 2.0;
-
-                            if (redactionArea.Contains(centerX, centerY))
+                            if (ShouldRemoveLetter(match.Letter, redactionArea, strategy))
                             {
                                 hasReconstructedText = true;
-                                _logger.LogDebug("Letter '{Letter}' at ({X:F2},{Y:F2}) intersects redaction area",
-                                    match.Letter.Value, centerX, centerY);
+                                var rect = match.Letter.GlyphRectangle;
+                                _logger.LogDebug("Letter '{Letter}' at ({X:F2},{Y:F2}) intersects redaction area (strategy: {Strategy})",
+                                    match.Letter.Value, (rect.Left + rect.Right) / 2.0, (rect.Bottom + rect.Top) / 2.0, strategy);
                                 break;
                             }
                         }
@@ -365,6 +352,30 @@ public class GlyphRemover
         }
 
         return blocks;
+    }
+
+    /// <summary>
+    /// Determine if a letter should be removed based on the glyph removal strategy.
+    /// </summary>
+    private bool ShouldRemoveLetter(Letter letter, PdfRectangle redactionArea, GlyphRemovalStrategy strategy)
+    {
+        var rect = letter.GlyphRectangle;
+        var normalizedGlyph = PdfRectangle.FromPdfPig(rect);
+        var overlapType = redactionArea.GetOverlapType(normalizedGlyph);
+
+        return strategy switch
+        {
+            // AnyOverlap: Remove if ANY part intersects (most secure)
+            GlyphRemovalStrategy.AnyOverlap => overlapType != GlyphOverlapType.None,
+
+            // FullyContained: Remove only if glyph is entirely inside redaction area
+            GlyphRemovalStrategy.FullyContained => overlapType == GlyphOverlapType.Full,
+
+            // CenterPoint: Remove if center is inside redaction area (legacy behavior)
+            GlyphRemovalStrategy.CenterPoint or _ => redactionArea.Contains(
+                (normalizedGlyph.Left + normalizedGlyph.Right) / 2.0,
+                (normalizedGlyph.Bottom + normalizedGlyph.Top) / 2.0)
+        };
     }
 
     /// <summary>

@@ -25,11 +25,13 @@ public class TextSegmenter
     /// <param name="textOperation">The original text operation.</param>
     /// <param name="letterMatches">Letters matched to this operation.</param>
     /// <param name="redactionArea">Area to redact.</param>
+    /// <param name="strategy">Strategy for determining when to remove glyphs. Default: AnyOverlap.</param>
     /// <returns>List of segments to KEEP (segments to remove are excluded).</returns>
     public List<TextSegment> BuildSegments(
         TextOperation textOperation,
         List<LetterMatch> letterMatches,
-        PdfRectangle redactionArea)
+        PdfRectangle redactionArea,
+        GlyphRemovalStrategy strategy = GlyphRemovalStrategy.AnyOverlap)
     {
         var allSegments = new List<TextSegment>();
         TextSegment? currentSegment = null;
@@ -83,7 +85,7 @@ public class TextSegmenter
             if (match != null)
             {
                 // We have letter position info - get detailed overlap info
-                var (shouldRemove, overlap) = GetLetterOverlapInfo(match.Letter.GlyphRectangle, redactionArea);
+                var (shouldRemove, overlap) = GetLetterOverlapInfo(match.Letter.GlyphRectangle, redactionArea, strategy);
                 keep = !shouldRemove;
                 overlapType = overlap;
 
@@ -176,16 +178,6 @@ public class TextSegmenter
     }
 
     /// <summary>
-    /// Check if a letter's center point is within the redaction area.
-    /// Handles rotated text where PdfPig may return swapped Left/Right or Bottom/Top.
-    /// </summary>
-    private bool IsLetterInRedactionArea(UglyToad.PdfPig.Core.PdfRectangle glyphRect, PdfRectangle redactionArea)
-    {
-        var (shouldRemove, _) = GetLetterOverlapInfo(glyphRect, redactionArea);
-        return shouldRemove;
-    }
-
-    /// <summary>
     /// Get detailed overlap information for a letter.
     /// Returns whether to remove the letter and what type of overlap exists.
     /// </summary>
@@ -194,7 +186,8 @@ public class TextSegmenter
     /// <returns>Tuple of (shouldRemove, overlapType).</returns>
     private (bool ShouldRemove, GlyphOverlapType OverlapType) GetLetterOverlapInfo(
         UglyToad.PdfPig.Core.PdfRectangle glyphRect,
-        PdfRectangle redactionArea)
+        PdfRectangle redactionArea,
+        GlyphRemovalStrategy strategy)
     {
         // Normalize coordinates for rotated text (PdfPig can return Left > Right for 90° rotation)
         var normalizedGlyph = PdfRectangle.FromPdfPig(glyphRect);
@@ -202,16 +195,22 @@ public class TextSegmenter
         // Get overlap type
         var overlapType = redactionArea.GetOverlapType(normalizedGlyph);
 
-        // Current behavior: Use center point for determination
-        // This maintains backward compatibility
-        double centerX = (normalizedGlyph.Left + normalizedGlyph.Right) / 2.0;
-        double centerY = (normalizedGlyph.Bottom + normalizedGlyph.Top) / 2.0;
-        bool centerInArea = redactionArea.Contains(centerX, centerY);
+        // Determine if we should remove based on the strategy
+        bool shouldRemove = strategy switch
+        {
+            // AnyOverlap: Remove if ANY part intersects (most secure)
+            GlyphRemovalStrategy.AnyOverlap => overlapType != GlyphOverlapType.None,
 
-        // If center is in area, should remove (Full or Partial)
-        // If center is NOT in area but there's intersection, it's Partial but we currently keep it
-        // Future: Configuration option to control this behavior
-        return (centerInArea, overlapType);
+            // FullyContained: Remove only if glyph is entirely inside redaction area
+            GlyphRemovalStrategy.FullyContained => overlapType == GlyphOverlapType.Full,
+
+            // CenterPoint: Remove if center is inside redaction area (legacy behavior)
+            GlyphRemovalStrategy.CenterPoint or _ => redactionArea.Contains(
+                (normalizedGlyph.Left + normalizedGlyph.Right) / 2.0,
+                (normalizedGlyph.Bottom + normalizedGlyph.Top) / 2.0)
+        };
+
+        return (shouldRemove, overlapType);
     }
 }
 

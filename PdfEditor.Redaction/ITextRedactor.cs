@@ -174,6 +174,22 @@ public class RedactionOptions
     /// </summary>
     public bool PreservePartialGlyphsAsImages { get; set; } = false;
 
+    #endregion
+
+    #region Partial Image Redaction (Issue #276)
+
+    /// <summary>
+    /// When true (default), images that partially overlap the redaction area are modified
+    /// to black out only the covered portion, preserving the rest of the image.
+    ///
+    /// When false, entire images are removed if any part intersects
+    /// with the redaction area.
+    ///
+    /// Default: true (black out only the covered portion)
+    /// See issue #276: Partial image redaction (black out only the covered portion)
+    /// </summary>
+    public bool RedactImagesPartially { get; set; } = true;
+
     /// <summary>
     /// DPI (dots per inch) for rasterizing partial glyphs when PreservePartialGlyphsAsImages is true.
     /// Higher values produce better quality but larger file sizes.
@@ -189,9 +205,10 @@ public class RedactionOptions
 
     /// <summary>
     /// Strategy for determining when a glyph should be removed during redaction.
+    /// Default: AnyOverlap (most secure - removes glyphs that touch the redaction area)
     /// See issue #206: Detect glyphs with partial overlap of redaction area
     /// </summary>
-    public GlyphRemovalStrategy GlyphRemovalStrategy { get; set; } = GlyphRemovalStrategy.CenterPoint;
+    public GlyphRemovalStrategy GlyphRemovalStrategy { get; set; } = GlyphRemovalStrategy.AnyOverlap;
 
     #endregion
 }
@@ -239,6 +256,11 @@ public class RedactionResult
     public int RedactionCount { get; init; }
 
     /// <summary>
+    /// Number of image operations removed (XObject Do operators and inline images).
+    /// </summary>
+    public int ImageRedactionCount { get; init; }
+
+    /// <summary>
     /// Pages that were modified.
     /// </summary>
     public IReadOnlyList<int> AffectedPages { get; init; } = Array.Empty<int>();
@@ -256,11 +278,12 @@ public class RedactionResult
     /// <summary>
     /// Create a successful result.
     /// </summary>
-    public static RedactionResult Succeeded(int count, IEnumerable<int> pages, IEnumerable<RedactionDetail>? details = null)
+    public static RedactionResult Succeeded(int count, IEnumerable<int> pages, IEnumerable<RedactionDetail>? details = null, int imageCount = 0)
         => new()
         {
             Success = true,
             RedactionCount = count,
+            ImageRedactionCount = imageCount,
             AffectedPages = pages.Distinct().OrderBy(p => p).ToList(),
             Details = details?.ToList() ?? new List<RedactionDetail>()
         };
@@ -400,9 +423,14 @@ public class PageRedactionResult
     public bool Success { get; init; }
 
     /// <summary>
-    /// Number of redactions applied to the page.
+    /// Number of text redactions applied to the page.
     /// </summary>
     public int RedactionCount { get; init; }
+
+    /// <summary>
+    /// Number of image operations removed (XObject Do operators and inline images).
+    /// </summary>
+    public int ImageRedactionCount { get; init; }
 
     /// <summary>
     /// Error message if Success is false.
@@ -417,11 +445,12 @@ public class PageRedactionResult
     /// <summary>
     /// Create a successful result.
     /// </summary>
-    public static PageRedactionResult Succeeded(IEnumerable<RedactionDetail> details)
+    public static PageRedactionResult Succeeded(IEnumerable<RedactionDetail> details, int imageCount = 0)
         => new()
         {
             Success = true,
             RedactionCount = details.Count(),
+            ImageRedactionCount = imageCount,
             Details = details.ToList()
         };
 

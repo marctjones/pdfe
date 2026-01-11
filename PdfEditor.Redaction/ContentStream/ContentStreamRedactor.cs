@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PdfEditor.Redaction.ContentStream.Building;
 using PdfEditor.Redaction.ContentStream.Parsing;
 using PdfEditor.Redaction.GlyphLevel;
+using PdfEditor.Redaction.ImageRedaction;
 using PdfEditor.Redaction.PathClipping;
 using PdfSharp.Pdf;
 using UglyToad.PdfPig.Content;
@@ -40,6 +41,7 @@ internal class ContentStreamRedactor
     private readonly IContentStreamBuilder _builder;
     private readonly GlyphRemover? _glyphRemover;
     private readonly PathRedactor _pathRedactor;
+    private readonly ImageRedactor _imageRedactor;
     private readonly ILogger _logger;
 
     public ContentStreamRedactor(
@@ -52,6 +54,7 @@ internal class ContentStreamRedactor
         _builder = builder;
         _glyphRemover = glyphRemover;
         _pathRedactor = new PathRedactor(logger);
+        _imageRedactor = new ImageRedactor(logger);
         _logger = logger;
     }
 
@@ -69,8 +72,8 @@ internal class ContentStreamRedactor
     /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
     /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
     /// <param name="resources">Page resources for font information (CJK support). If null, font detection is disabled.</param>
-    /// <returns>Modified content stream bytes and list of redaction details.</returns>
-    public (byte[] modifiedContent, List<RedactionDetail> details) RedactContentStream(
+    /// <returns>Modified content stream bytes, list of redaction details, and image operation count.</returns>
+    public (byte[] modifiedContent, List<RedactionDetail> details, int imageOpsRemoved) RedactContentStream(
         byte[] contentBytes,
         double pageHeight,
         List<PdfRectangle> redactionAreas,
@@ -83,11 +86,12 @@ internal class ContentStreamRedactor
         PdfDictionary? resources = null)
     {
         var details = new List<RedactionDetail>();
+        int imageOpsRemoved = 0;
 
         if (contentBytes == null || contentBytes.Length == 0)
         {
             _logger.LogDebug("Content stream is empty");
-            return (contentBytes ?? Array.Empty<byte>(), details);
+            return (contentBytes ?? Array.Empty<byte>(), details, 0);
         }
 
         RedactionLogger.LogParseStart(_logger, contentBytes.Length, pageHeight);
@@ -132,8 +136,10 @@ internal class ContentStreamRedactor
                 // Process operations with glyph-level redaction
                 // letterArea is used for letter position matching (visual coordinates)
                 // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
+                // Pass glyph removal strategy from options (default: AnyOverlap for security)
                 modifiedOps = _glyphRemover.ProcessOperations(
-                    modifiedOps, letters, letterArea, pageRotation, mediaBoxWidth, mediaBoxHeight);
+                    modifiedOps, letters, letterArea, pageRotation, mediaBoxWidth, mediaBoxHeight,
+                    options.GlyphRemovalStrategy);
 
                 // Track redacted text (approximate - we don't have exact text anymore)
                 // contentStreamArea is used for operation matching
@@ -152,30 +158,9 @@ internal class ContentStreamRedactor
                 }
             }
 
-            // Issue #192: Remove image XObjects that intersect with redaction areas
-            modifiedOps = modifiedOps
-                .Where(op =>
-                {
-                    // Keep state operations (q, Q, cm, etc.) - they don't represent visible content
-                    if (op is StateOperation || op is TextStateOperation)
-                        return true;
-
-                    // For images, remove entirely if they intersect with any redaction area
-                    if (op is ImageOperation)
-                    {
-                        var shouldRemove = redactionAreas.Any(area => op.IntersectsWith(area));
-                        if (shouldRemove)
-                        {
-                            _logger.LogDebug("Removing ImageOperation at ({L:F2},{B:F2},{R:F2},{T:F2}) - intersects with redaction area",
-                                op.BoundingBox.Left, op.BoundingBox.Bottom, op.BoundingBox.Right, op.BoundingBox.Top);
-                        }
-                        return !shouldRemove;
-                    }
-
-                    // Keep all other operations (paths handled below, TextOperations already modified)
-                    return true;
-                })
-                .ToList();
+            // Issue #192 & #269: Handle image XObjects that intersect with redaction areas
+            // Issue #276: Support partial image redaction (black out only covered portion)
+            modifiedOps = ProcessImageOperations(modifiedOps, redactionAreas, options, ref imageOpsRemoved);
 
             // Issue #197: Apply partial shape clipping to paths
             // Instead of removing entire paths, use polygon clipping to remove only the intersecting portion
@@ -223,7 +208,7 @@ internal class ContentStreamRedactor
             if (opsToRemove.Count == 0)
             {
                 _logger.LogDebug("No operations to redact");
-                return (contentBytes, details);
+                return (contentBytes, details, imageOpsRemoved);
             }
 
             _logger.LogDebug("Removing {Count} operations from content stream", opsToRemove.Count);
@@ -232,7 +217,7 @@ internal class ContentStreamRedactor
             newContentBytes = _builder.BuildWithRedactions(operations, redactionAreas);
         }
 
-        return (newContentBytes, details);
+        return (newContentBytes, details, imageOpsRemoved);
     }
 
     /// <summary>
@@ -248,8 +233,8 @@ internal class ContentStreamRedactor
     /// <param name="pageRotation">Page rotation in degrees (0, 90, 180, 270). Default 0.</param>
     /// <param name="mediaBoxWidth">Page MediaBox width in points. Default 612 (US Letter).</param>
     /// <param name="mediaBoxHeight">Page MediaBox height in points. Default 792 (US Letter).</param>
-    /// <returns>Modified content stream bytes, redaction details, and modified Form XObjects.</returns>
-    public (byte[] modifiedContent, List<RedactionDetail> details, List<FormXObjectRedactionResult> formXObjects)
+    /// <returns>Modified content stream bytes, redaction details, modified Form XObjects, and image operation count.</returns>
+    public (byte[] modifiedContent, List<RedactionDetail> details, List<FormXObjectRedactionResult> formXObjects, int imageOpsRemoved)
         RedactContentStreamWithFormXObjects(
             byte[] contentBytes,
             double pageHeight,
@@ -267,7 +252,7 @@ internal class ContentStreamRedactor
         if (contentBytes == null || contentBytes.Length == 0)
         {
             _logger.LogDebug("Content stream is empty");
-            return (contentBytes ?? Array.Empty<byte>(), new List<RedactionDetail>(), formXObjectResults);
+            return (contentBytes ?? Array.Empty<byte>(), new List<RedactionDetail>(), formXObjectResults, 0);
         }
 
         // Parse with Form XObject support
@@ -300,12 +285,12 @@ internal class ContentStreamRedactor
         // Pass visual areas for glyph-level letter matching (if provided)
         // CRITICAL FIX (Issue #173): Pass rotation info for coordinate transformation
         // CRITICAL FIX (Issue #174): Pass resources for CJK font support
-        var (mainContent, mainDetails) = RedactContentStream(
+        var (mainContent, mainDetails, imageOpsRemoved) = RedactContentStream(
             contentBytes, pageHeight, redactionAreas, letters, options, visualRedactionAreas,
             pageRotation, mediaBoxWidth, mediaBoxHeight, resources);
         allDetails.AddRange(mainDetails);
 
-        return (mainContent, allDetails, formXObjectResults);
+        return (mainContent, allDetails, formXObjectResults, imageOpsRemoved);
     }
 
     /// <summary>
@@ -344,7 +329,7 @@ internal class ContentStreamRedactor
         // Redact the form's content stream
         // Note: Form XObjects use form coordinate space, but we apply the same redaction areas
         // because PdfPig extracts text positions in page coordinates after transformation.
-        var (modifiedBytes, details) = RedactContentStream(
+        var (modifiedBytes, details, _) = RedactContentStream(
             formOp.ContentStreamBytes,
             pageHeight,  // Use page height for coordinate conversion
             redactionAreas,
@@ -357,5 +342,121 @@ internal class ContentStreamRedactor
             ModifiedContentBytes = modifiedBytes,
             Details = details
         };
+    }
+
+    /// <summary>
+    /// Process image operations - either remove entirely or apply partial redaction.
+    /// </summary>
+    /// <param name="operations">List of operations to process.</param>
+    /// <param name="redactionAreas">Areas to redact.</param>
+    /// <param name="options">Redaction options (controls partial vs full removal).</param>
+    /// <param name="imageOpsRemoved">Counter for removed/modified image operations.</param>
+    /// <returns>Modified list of operations.</returns>
+    private List<PdfOperation> ProcessImageOperations(
+        List<PdfOperation> operations,
+        List<PdfRectangle> redactionAreas,
+        RedactionOptions options,
+        ref int imageOpsRemoved)
+    {
+        var result = new List<PdfOperation>();
+
+        foreach (var op in operations)
+        {
+            // Keep state operations (q, Q, cm, etc.) - they don't represent visible content
+            if (op is StateOperation || op is TextStateOperation)
+            {
+                result.Add(op);
+                continue;
+            }
+
+            // Handle XObject images (Do operator)
+            if (op is ImageOperation imageOp)
+            {
+                var intersects = redactionAreas.Any(area => op.IntersectsWith(area));
+                if (!intersects)
+                {
+                    result.Add(op);
+                    continue;
+                }
+
+                // For partial image redaction, we keep the operation - the actual XObject
+                // modification happens at the page level (in TextRedactor.RedactPage)
+                if (options.RedactImagesPartially)
+                {
+                    _logger.LogDebug("Keeping ImageOperation '{Name}' for partial redaction at ({L:F2},{B:F2},{R:F2},{T:F2})",
+                        imageOp.XObjectName, op.BoundingBox.Left, op.BoundingBox.Bottom, op.BoundingBox.Right, op.BoundingBox.Top);
+                    result.Add(op);
+                    imageOpsRemoved++; // Count as modified
+                }
+                else
+                {
+                    // Remove entire image
+                    imageOpsRemoved++;
+                    _logger.LogDebug("Removing ImageOperation '{Name}' at ({L:F2},{B:F2},{R:F2},{T:F2}) - intersects with redaction area",
+                        imageOp.XObjectName, op.BoundingBox.Left, op.BoundingBox.Bottom, op.BoundingBox.Right, op.BoundingBox.Top);
+                }
+                continue;
+            }
+
+            // Handle inline images (BI...ID...EI)
+            if (op is InlineImageOperation inlineImageOp)
+            {
+                var intersects = redactionAreas.Any(area => op.IntersectsWith(area));
+                if (!intersects)
+                {
+                    result.Add(op);
+                    continue;
+                }
+
+                if (options.RedactImagesPartially)
+                {
+                    // Try to apply partial redaction to inline image
+                    var modifiedBytes = _imageRedactor.RedactInlineImage(inlineImageOp, redactionAreas);
+                    if (modifiedBytes != null)
+                    {
+                        // Create modified inline image operation
+                        var modifiedOp = new InlineImageOperation
+                        {
+                            Operator = inlineImageOp.Operator,
+                            Operands = inlineImageOp.Operands,
+                            BoundingBox = inlineImageOp.BoundingBox,
+                            StreamPosition = inlineImageOp.StreamPosition,
+                            InsideTextBlock = inlineImageOp.InsideTextBlock,
+                            RawBytes = modifiedBytes,
+                            ImageWidth = inlineImageOp.ImageWidth,
+                            ImageHeight = inlineImageOp.ImageHeight,
+                            BitsPerComponent = 8, // We re-encode as 8bpp RGB
+                            ColorSpace = "RGB",
+                            Filter = "AHx" // ASCII Hex encoding
+                        };
+                        result.Add(modifiedOp);
+                        imageOpsRemoved++;
+                        _logger.LogDebug("Partially redacted InlineImageOperation ({W}x{H}) at ({L:F2},{B:F2},{R:F2},{T:F2})",
+                            inlineImageOp.ImageWidth, inlineImageOp.ImageHeight,
+                            op.BoundingBox.Left, op.BoundingBox.Bottom, op.BoundingBox.Right, op.BoundingBox.Top);
+                    }
+                    else
+                    {
+                        // Fallback to removing if partial redaction fails
+                        imageOpsRemoved++;
+                        _logger.LogDebug("Could not partially redact InlineImageOperation, removing entirely");
+                    }
+                }
+                else
+                {
+                    // Remove entire inline image
+                    imageOpsRemoved++;
+                    _logger.LogDebug("Removing InlineImageOperation ({W}x{H}) at ({L:F2},{B:F2},{R:F2},{T:F2}) - intersects with redaction area",
+                        inlineImageOp.ImageWidth, inlineImageOp.ImageHeight,
+                        op.BoundingBox.Left, op.BoundingBox.Bottom, op.BoundingBox.Right, op.BoundingBox.Top);
+                }
+                continue;
+            }
+
+            // Keep all other operations
+            result.Add(op);
+        }
+
+        return result;
     }
 }
