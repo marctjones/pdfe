@@ -9,6 +9,8 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Suppress platform-specific warnings for cross-platform PDF rendering -->
     <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- Application Icon -->
+    <ApplicationIcon>Assets\pdfe_logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -44,6 +46,9 @@
   <ItemGroup>
     <!-- Avalonia XAML Resources -->
     <AvaloniaResource Include="Styles\**\*.axaml" />
+    <!-- Application Assets (icons, logos) -->
+    <AvaloniaResource Include="Assets\*.png" />
+    <AvaloniaResource Include="Assets\*.svg" />
   </ItemGroup>
 
   <ItemGroup>
