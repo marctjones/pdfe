@@ -369,10 +369,11 @@ public class RedactionService
             _logger.LogDebug("In-memory redaction completed in {ElapsedMs}ms", sw.ElapsedMilliseconds);
 
             // Set result from library redaction
+            // Issue #269: Now tracking image operations removed
             result.Mode = RedactionMode.TrueRedaction;
-            result.ContentRemoved = libraryResult.RedactionCount > 0;
+            result.ContentRemoved = libraryResult.RedactionCount > 0 || libraryResult.ImageRedactionCount > 0;
             result.TextOperationsRemoved = libraryResult.RedactionCount;
-            result.ImageOperationsRemoved = 0;
+            result.ImageOperationsRemoved = libraryResult.ImageRedactionCount;
             result.GraphicsOperationsRemoved = 0;
 
             // Track redacted text from library details
@@ -393,9 +394,9 @@ public class RedactionService
             }
 
             // MANDATORY LOGGING
-            Console.WriteLine($"[REDACTION-SECURITY] IN-MEMORY GLYPH-LEVEL REDACTION: Removed {libraryResult.RedactionCount} text segments using PdfEditor.Redaction library");
-            _logger.LogWarning("IN-MEMORY GLYPH-LEVEL REDACTION PERFORMED: {Count} segments removed via RedactPage() API in {ElapsedMs}ms",
-                libraryResult.RedactionCount, sw.ElapsedMilliseconds);
+            Console.WriteLine($"[REDACTION-SECURITY] IN-MEMORY GLYPH-LEVEL REDACTION: Removed {libraryResult.RedactionCount} text segments, {libraryResult.ImageRedactionCount} images using PdfEditor.Redaction library");
+            _logger.LogWarning("IN-MEMORY GLYPH-LEVEL REDACTION PERFORMED: {TextCount} text segments, {ImageCount} images removed via RedactPage() API in {ElapsedMs}ms",
+                libraryResult.RedactionCount, libraryResult.ImageRedactionCount, sw.ElapsedMilliseconds);
 
             return result;
         }
@@ -603,6 +604,49 @@ public class RedactionService
     {
         _logger.LogInformation("Removing all metadata from document");
         _metadataSanitizer.RemoveAllMetadata(document);
+    }
+
+    /// <summary>
+    /// Redact all occurrences of specific text from a PDF file.
+    /// This uses the proven TextRedactor.RedactText() API that bypasses coordinate conversion.
+    /// Added to fix issue #190: GUI scripting fails on corpus PDFs due to coordinate issues.
+    /// </summary>
+    /// <param name="inputPath">Path to the input PDF file</param>
+    /// <param name="outputPath">Path to save the redacted PDF</param>
+    /// <param name="textToRedact">Text to search for and redact</param>
+    /// <param name="caseSensitive">Whether to match case-sensitively (default: false)</param>
+    /// <returns>Result indicating success and number of redactions</returns>
+    public PdfEditor.Redaction.RedactionResult RedactText(string inputPath, string outputPath, string textToRedact, bool caseSensitive = false)
+    {
+        _logger.LogInformation("RedactText: Searching for '{Text}' in {Input}", textToRedact, inputPath);
+
+        var options = new PdfEditor.Redaction.RedactionOptions
+        {
+            CaseSensitive = caseSensitive,
+            UseGlyphLevelRedaction = true,
+            DrawVisualMarker = true,
+            MarkerColor = (0, 0, 0)  // Black
+        };
+
+        var result = _textRedactor.RedactText(inputPath, outputPath, textToRedact, options);
+
+        if (result.Success)
+        {
+            _logger.LogInformation("RedactText: Successfully redacted {Count} occurrences of '{Text}'",
+                result.RedactionCount, textToRedact);
+
+            // Track redacted text for metadata sanitization
+            if (result.RedactionCount > 0)
+            {
+                _redactedTerms.Add(textToRedact);
+            }
+        }
+        else
+        {
+            _logger.LogError("RedactText: Failed to redact '{Text}': {Error}", textToRedact, result.ErrorMessage);
+        }
+
+        return result;
     }
 
     /// <summary>
