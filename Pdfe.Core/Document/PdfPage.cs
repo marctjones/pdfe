@@ -361,6 +361,19 @@ public class PdfPage
         return obj != null ? _document.Resolve(obj) as PdfDictionary : null;
     }
 
+    /// <summary>
+    /// Get a shading dictionary from the page resources.
+    /// </summary>
+    public PdfDictionary? GetShading(string name)
+    {
+        var shadings = Resources?.GetDictionaryOrNull("Shading");
+        if (shadings == null)
+            return null;
+
+        var obj = shadings.GetOptional(name);
+        return obj != null ? _document.Resolve(obj) as PdfDictionary : null;
+    }
+
     #region Inherited Properties
 
     /// <summary>

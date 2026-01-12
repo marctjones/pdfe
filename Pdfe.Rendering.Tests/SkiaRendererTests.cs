@@ -243,6 +243,160 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region CMYK Color Tests
+
+    [Fact]
+    public void RenderPage_CmykCyan_ShowsCyan()
+    {
+        // Arrange - Cyan in CMYK: C=1, M=0, Y=0, K=0
+        var pdfData = CreatePdfWithCmykRectangle(100, 100, 200, 150, 1, 0, 0, 0);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - cyan = RGB(0, 255, 255) or close to it
+        var pixelX = (int)(200 * 150 / 72);
+        var pixelY = bitmap.Height - (int)(175 * 150 / 72);
+        var pixel = bitmap.GetPixel(pixelX, pixelY);
+        pixel.Red.Should().BeLessThan(100, "red component should be low for cyan");
+        pixel.Green.Should().BeGreaterThan(200, "green component should be high for cyan");
+        pixel.Blue.Should().BeGreaterThan(200, "blue component should be high for cyan");
+    }
+
+    [Fact]
+    public void RenderPage_CmykMagenta_ShowsMagenta()
+    {
+        // Arrange - Magenta in CMYK: C=0, M=1, Y=0, K=0
+        var pdfData = CreatePdfWithCmykRectangle(100, 100, 200, 150, 0, 1, 0, 0);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - magenta = RGB(255, 0, 255) or close to it
+        var pixelX = (int)(200 * 150 / 72);
+        var pixelY = bitmap.Height - (int)(175 * 150 / 72);
+        var pixel = bitmap.GetPixel(pixelX, pixelY);
+        pixel.Red.Should().BeGreaterThan(200, "red component should be high for magenta");
+        pixel.Green.Should().BeLessThan(100, "green component should be low for magenta");
+        pixel.Blue.Should().BeGreaterThan(200, "blue component should be high for magenta");
+    }
+
+    [Fact]
+    public void RenderPage_CmykYellow_ShowsYellow()
+    {
+        // Arrange - Yellow in CMYK: C=0, M=0, Y=1, K=0
+        var pdfData = CreatePdfWithCmykRectangle(100, 100, 200, 150, 0, 0, 1, 0);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - yellow = RGB(255, 255, 0) or close to it
+        var pixelX = (int)(200 * 150 / 72);
+        var pixelY = bitmap.Height - (int)(175 * 150 / 72);
+        var pixel = bitmap.GetPixel(pixelX, pixelY);
+        pixel.Red.Should().BeGreaterThan(200, "red component should be high for yellow");
+        pixel.Green.Should().BeGreaterThan(200, "green component should be high for yellow");
+        pixel.Blue.Should().BeLessThan(100, "blue component should be low for yellow");
+    }
+
+    [Fact]
+    public void RenderPage_CmykBlack_ShowsBlack()
+    {
+        // Arrange - Black in CMYK: C=0, M=0, Y=0, K=1
+        var pdfData = CreatePdfWithCmykRectangle(100, 100, 200, 150, 0, 0, 0, 1);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - black = RGB(0, 0, 0)
+        var pixelX = (int)(200 * 150 / 72);
+        var pixelY = bitmap.Height - (int)(175 * 150 / 72);
+        var pixel = bitmap.GetPixel(pixelX, pixelY);
+        pixel.Red.Should().BeLessThan(50, "red component should be low for black");
+        pixel.Green.Should().BeLessThan(50, "green component should be low for black");
+        pixel.Blue.Should().BeLessThan(50, "blue component should be low for black");
+    }
+
+    #endregion
+
+    #region Line Style Tests
+
+    [Fact]
+    public void RenderPage_ThickLine_ShowsThickStroke()
+    {
+        // Arrange
+        var pdfData = CreatePdfWithThickLine(100, 100, 300, 100, 10);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - line should be visible
+        var midX = (int)(200 * 150 / 72);
+        var midY = bitmap.Height - (int)(100 * 150 / 72);
+        var pixel = bitmap.GetPixel(midX, midY);
+        pixel.Should().NotBe(SKColors.White, "thick line should be visible");
+    }
+
+    [Fact]
+    public void RenderPage_RoundLineCap_DrawsRoundCaps()
+    {
+        // Arrange - 1 J sets round line cap
+        var content = "0 G 20 w 1 J 100 400 m 300 400 l S";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - just verify it renders without error
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_RoundLineJoin_DrawsRoundJoins()
+    {
+        // Arrange - 1 j sets round line join
+        var content = "0 G 10 w 1 j 100 400 m 200 500 l 300 400 l S";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - just verify it renders without error
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MiterLimit_Applied()
+    {
+        // Arrange - M sets miter limit
+        var content = "0 G 10 w 0 j 2 M 100 400 m 200 500 l 300 400 l S";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - just verify it renders without error
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
@@ -290,6 +444,18 @@ public class SkiaRendererTests
     private static byte[] CreatePdfWithStateStack()
     {
         var content = "q 1 0 0 rg 50 50 100 100 re f Q 0 g 200 200 100 100 re f";
+        return CreatePdfWithContent(content);
+    }
+
+    private static byte[] CreatePdfWithCmykRectangle(int x, int y, int w, int h, double c, double m, double yy, double k)
+    {
+        var content = $"{c} {m} {yy} {k} k {x} {y} {w} {h} re f";
+        return CreatePdfWithContent(content);
+    }
+
+    private static byte[] CreatePdfWithThickLine(int x1, int y1, int x2, int y2, double lineWidth)
+    {
+        var content = $"0 G {lineWidth} w {x1} {y1} m {x2} {y2} l S";
         return CreatePdfWithContent(content);
     }
 

@@ -355,7 +355,8 @@ public class RedactionService
             {
                 UseGlyphLevelRedaction = true,  // TRUE GLYPH-LEVEL!
                 DrawVisualMarker = true,
-                MarkerColor = (0, 0, 0)  // Black
+                MarkerColor = (0, 0, 0),  // Black
+                RedactImagesPartially = false  // Security: Remove entire images (issue #282)
             };
 
             var libraryResult = _textRedactor.RedactPage(page, new[] { pdfRectangle }, redactionOptions, pageLetters: letters);

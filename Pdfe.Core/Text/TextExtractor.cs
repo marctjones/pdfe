@@ -152,7 +152,7 @@ public class TextExtractor
 
             // Try to parse a token
             var token = ParseToken(content, ref pos);
-            if (token == null) break;
+            if (token == null) continue; // Skip null tokens (like dictionaries) but keep parsing
 
             if (token is string op && IsOperator(op))
             {

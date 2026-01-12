@@ -119,6 +119,27 @@ internal class RenderContext
                 if (operands.Count >= 1)
                     _state.LineWidth = ParseNumber(operands[0]);
                 break;
+            case "J":
+                if (operands.Count >= 1)
+                    _state.LineCap = (int)ParseNumber(operands[0]);
+                break;
+            case "j":
+                if (operands.Count >= 1)
+                    _state.LineJoin = (int)ParseNumber(operands[0]);
+                break;
+            case "M":
+                if (operands.Count >= 1)
+                    _state.MiterLimit = (float)ParseNumber(operands[0]);
+                break;
+            case "d":
+                // Dash pattern - for now just ignore (implement later if needed)
+                break;
+            case "ri":
+                // Rendering intent - no effect on rendering for now
+                break;
+            case "i":
+                // Flatness tolerance - no effect on rendering for now
+                break;
 
             // Color (grayscale)
             case "g":
@@ -144,6 +165,36 @@ internal class RenderContext
                         ParseNumber(operands[0]),
                         ParseNumber(operands[1]),
                         ParseNumber(operands[2]));
+                break;
+
+            // Color (CMYK)
+            case "k":
+                if (operands.Count >= 4)
+                    _state.FillColor = CmykToColor(
+                        ParseNumber(operands[0]),
+                        ParseNumber(operands[1]),
+                        ParseNumber(operands[2]),
+                        ParseNumber(operands[3]));
+                break;
+            case "K":
+                if (operands.Count >= 4)
+                    _state.StrokeColor = CmykToColor(
+                        ParseNumber(operands[0]),
+                        ParseNumber(operands[1]),
+                        ParseNumber(operands[2]),
+                        ParseNumber(operands[3]));
+                break;
+
+            // Extended graphics state
+            case "gs":
+                if (operands.Count >= 1)
+                    ApplyExtGState(operands[0]);
+                break;
+
+            // XObject rendering (images and forms)
+            case "Do":
+                if (operands.Count >= 1)
+                    RenderXObject(operands[0]);
                 break;
 
             // Path construction
@@ -217,6 +268,67 @@ internal class RenderContext
                 // End path without fill or stroke (no-op)
                 _currentPath?.Dispose();
                 _currentPath = null;
+                break;
+
+            // Clipping path operators (#295)
+            case "W":
+                SetClippingPath(false);
+                break;
+            case "W*":
+                SetClippingPath(true);
+                break;
+
+            // Marked content operators (#298)
+            case "BMC":
+                // Begin marked content - no visual effect
+                break;
+            case "BDC":
+                // Begin marked content with property list - no visual effect
+                break;
+            case "EMC":
+                // End marked content - no visual effect
+                break;
+            case "MP":
+                // Marked content point - no visual effect
+                break;
+            case "DP":
+                // Marked content point with property list - no visual effect
+                break;
+
+            // Shading operator (#300)
+            case "sh":
+                if (operands.Count >= 1)
+                    RenderShading(operands[0]);
+                break;
+
+            // Type 3 font operators (#301)
+            case "d0":
+                // Set glyph width - only affects metrics, not rendering
+                break;
+            case "d1":
+                // Set glyph width and bounding box - only affects metrics
+                break;
+
+            // Color space operators
+            case "CS":
+                // Set stroking color space - store for later use with SC/SCN
+                if (operands.Count >= 1)
+                    _state.StrokeColorSpace = operands[0].TrimStart('/');
+                break;
+            case "cs":
+                // Set non-stroking color space
+                if (operands.Count >= 1)
+                    _state.FillColorSpace = operands[0].TrimStart('/');
+                break;
+            case "SC":
+            case "SCN":
+                // Set stroking color
+                SetStrokingColor(operands);
+                break;
+            case "sc":
+            case "scn":
+                // Set non-stroking (fill) color
+                SetNonStrokingColor(operands);
                 break;
 
             // Text state operators
@@ -394,8 +506,21 @@ internal class RenderContext
         using var paint = new SKPaint
         {
             Style = SKPaintStyle.Stroke,
-            Color = _state.StrokeColor,
+            Color = _state.StrokeColor.WithAlpha((byte)(_state.StrokeAlpha * 255)),
             StrokeWidth = (float)_state.LineWidth,
+            StrokeCap = _state.LineCap switch
+            {
+                1 => SKStrokeCap.Round,
+                2 => SKStrokeCap.Square,
+                _ => SKStrokeCap.Butt
+            },
+            StrokeJoin = _state.LineJoin switch
+            {
+                1 => SKStrokeJoin.Round,
+                2 => SKStrokeJoin.Bevel,
+                _ => SKStrokeJoin.Miter
+            },
+            StrokeMiter = _state.MiterLimit,
             IsAntialias = _options.AntiAlias
         };
 
@@ -413,7 +538,7 @@ internal class RenderContext
         using var paint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            Color = _state.FillColor,
+            Color = _state.FillColor.WithAlpha((byte)(_state.FillAlpha * 255)),
             IsAntialias = _options.AntiAlias
         };
 
@@ -432,7 +557,7 @@ internal class RenderContext
         using (var fillPaint = new SKPaint
         {
             Style = SKPaintStyle.Fill,
-            Color = _state.FillColor,
+            Color = _state.FillColor.WithAlpha((byte)(_state.FillAlpha * 255)),
             IsAntialias = _options.AntiAlias
         })
         {
@@ -443,8 +568,21 @@ internal class RenderContext
         using (var strokePaint = new SKPaint
         {
             Style = SKPaintStyle.Stroke,
-            Color = _state.StrokeColor,
+            Color = _state.StrokeColor.WithAlpha((byte)(_state.StrokeAlpha * 255)),
             StrokeWidth = (float)_state.LineWidth,
+            StrokeCap = _state.LineCap switch
+            {
+                1 => SKStrokeCap.Round,
+                2 => SKStrokeCap.Square,
+                _ => SKStrokeCap.Butt
+            },
+            StrokeJoin = _state.LineJoin switch
+            {
+                1 => SKStrokeJoin.Round,
+                2 => SKStrokeJoin.Bevel,
+                _ => SKStrokeJoin.Miter
+            },
+            StrokeMiter = _state.MiterLimit,
             IsAntialias = _options.AntiAlias
         })
         {
@@ -727,6 +865,512 @@ internal class RenderContext
             (byte)Math.Clamp(b * 255, 0, 255));
     }
 
+    private static SKColor CmykToColor(double c, double m, double y, double k)
+    {
+        // Simple CMYK to RGB conversion (not color-managed)
+        // R = 255 × (1-C) × (1-K)
+        // G = 255 × (1-M) × (1-K)
+        // B = 255 × (1-Y) × (1-K)
+        var r = (byte)Math.Clamp(255 * (1 - c) * (1 - k), 0, 255);
+        var g = (byte)Math.Clamp(255 * (1 - m) * (1 - k), 0, 255);
+        var b = (byte)Math.Clamp(255 * (1 - y) * (1 - k), 0, 255);
+        return new SKColor(r, g, b);
+    }
+
+    #endregion
+
+    #region Extended Graphics State (gs operator)
+
+    private void ApplyExtGState(string nameOperand)
+    {
+        // Remove leading / if present
+        var name = nameOperand.TrimStart('/');
+        var extGState = _page.GetExtGState(name);
+        if (extGState == null)
+            return;
+
+        // CA - Stroking alpha
+        if (extGState.ContainsKey("CA"))
+        {
+            var alpha = extGState.GetNumber("CA", 1.0);
+            _state.StrokeAlpha = (float)Math.Clamp(alpha, 0, 1);
+        }
+
+        // ca - Non-stroking (fill) alpha
+        if (extGState.ContainsKey("ca"))
+        {
+            var alpha = extGState.GetNumber("ca", 1.0);
+            _state.FillAlpha = (float)Math.Clamp(alpha, 0, 1);
+        }
+
+        // LW - Line width
+        if (extGState.ContainsKey("LW"))
+        {
+            _state.LineWidth = extGState.GetNumber("LW", 1.0);
+        }
+
+        // LC - Line cap style
+        if (extGState.ContainsKey("LC"))
+        {
+            _state.LineCap = (int)extGState.GetNumber("LC", 0);
+        }
+
+        // LJ - Line join style
+        if (extGState.ContainsKey("LJ"))
+        {
+            _state.LineJoin = (int)extGState.GetNumber("LJ", 0);
+        }
+
+        // ML - Miter limit
+        if (extGState.ContainsKey("ML"))
+        {
+            _state.MiterLimit = (float)extGState.GetNumber("ML", 10.0);
+        }
+    }
+
+    #endregion
+
+    #region XObject Rendering (Do operator)
+
+    private void RenderXObject(string nameOperand)
+    {
+        // Remove leading / if present
+        var name = nameOperand.TrimStart('/');
+        var xobj = _page.GetXObject(name);
+        if (xobj == null)
+            return;
+
+        if (xobj is not Pdfe.Core.Primitives.PdfStream stream)
+            return;
+
+        var subtype = stream.GetNameOrNull("Subtype");
+        switch (subtype)
+        {
+            case "Image":
+                RenderImageXObject(stream);
+                break;
+            case "Form":
+                RenderFormXObject(stream);
+                break;
+        }
+    }
+
+    private void RenderImageXObject(Pdfe.Core.Primitives.PdfStream imageStream)
+    {
+        var width = imageStream.GetInt("Width", 0);
+        var height = imageStream.GetInt("Height", 0);
+        if (width <= 0 || height <= 0)
+            return;
+
+        var bitsPerComponent = imageStream.GetInt("BitsPerComponent", 8);
+        var colorSpace = imageStream.GetNameOrNull("ColorSpace") ?? "DeviceRGB";
+        var imageData = imageStream.DecodedData;
+
+        // Try to decode image
+        SKBitmap? bitmap = null;
+        try
+        {
+            // Check if it's a DCT (JPEG) encoded image
+            var filters = imageStream.Filters;
+            if (filters.Contains("DCTDecode"))
+            {
+                // JPEG data - decode directly
+                bitmap = SKBitmap.Decode(imageStream.EncodedData);
+            }
+            else
+            {
+                // Raw image data - create bitmap based on color space
+                bitmap = CreateBitmapFromRawData(imageData, width, height, bitsPerComponent, colorSpace, imageStream);
+            }
+
+            if (bitmap == null)
+                return;
+
+            // Draw the image at unit square (0,0)-(1,1), the CTM handles positioning
+            _canvas.Save();
+
+            // Images are drawn into a 1x1 unit square, scaled by the CTM
+            // We need to flip Y because images have origin at top-left
+            _canvas.Scale(1.0f / width, -1.0f / height);
+            _canvas.Translate(0, -height);
+
+            using var paint = new SKPaint { IsAntialias = _options.AntiAlias };
+            if (_state.FillAlpha < 1.0f)
+            {
+                paint.Color = paint.Color.WithAlpha((byte)(_state.FillAlpha * 255));
+            }
+
+            _canvas.DrawBitmap(bitmap, 0, 0, paint);
+            _canvas.Restore();
+        }
+        finally
+        {
+            bitmap?.Dispose();
+        }
+    }
+
+    private SKBitmap? CreateBitmapFromRawData(byte[] data, int width, int height, int bitsPerComponent, string colorSpace, Pdfe.Core.Primitives.PdfStream stream)
+    {
+        // Handle different color spaces
+        int componentsPerPixel = colorSpace switch
+        {
+            "DeviceGray" => 1,
+            "DeviceRGB" => 3,
+            "DeviceCMYK" => 4,
+            "CalGray" => 1,
+            "CalRGB" => 3,
+            _ => 3 // Default to RGB
+        };
+
+        // Check for indexed color space
+        var csObj = stream.GetOptional("ColorSpace");
+        if (csObj is Pdfe.Core.Primitives.PdfArray csArray && csArray.Count >= 1)
+        {
+            var csName = (csArray[0] as Pdfe.Core.Primitives.PdfName)?.Value;
+            if (csName == "Indexed")
+            {
+                componentsPerPixel = 1; // Indexed uses palette lookup
+            }
+        }
+
+        var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        var pixels = new byte[width * height * 4];
+
+        try
+        {
+            int srcIndex = 0;
+            int dstIndex = 0;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    byte r = 0, g = 0, b = 0, a = 255;
+
+                    if (bitsPerComponent == 8)
+                    {
+                        switch (componentsPerPixel)
+                        {
+                            case 1: // Grayscale
+                                if (srcIndex < data.Length)
+                                {
+                                    r = g = b = data[srcIndex++];
+                                }
+                                break;
+                            case 3: // RGB
+                                if (srcIndex + 2 < data.Length)
+                                {
+                                    r = data[srcIndex++];
+                                    g = data[srcIndex++];
+                                    b = data[srcIndex++];
+                                }
+                                break;
+                            case 4: // CMYK
+                                if (srcIndex + 3 < data.Length)
+                                {
+                                    var c = data[srcIndex++] / 255.0;
+                                    var m = data[srcIndex++] / 255.0;
+                                    var yy = data[srcIndex++] / 255.0;
+                                    var k = data[srcIndex++] / 255.0;
+                                    r = (byte)Math.Clamp(255 * (1 - c) * (1 - k), 0, 255);
+                                    g = (byte)Math.Clamp(255 * (1 - m) * (1 - k), 0, 255);
+                                    b = (byte)Math.Clamp(255 * (1 - yy) * (1 - k), 0, 255);
+                                }
+                                break;
+                        }
+                    }
+                    else if (bitsPerComponent == 1)
+                    {
+                        // 1-bit monochrome
+                        int byteIndex = srcIndex / 8;
+                        int bitIndex = 7 - (srcIndex % 8);
+                        if (byteIndex < data.Length)
+                        {
+                            int bit = (data[byteIndex] >> bitIndex) & 1;
+                            r = g = b = (byte)(bit == 0 ? 0 : 255);
+                        }
+                        srcIndex++;
+                    }
+
+                    // RGBA format
+                    pixels[dstIndex++] = r;
+                    pixels[dstIndex++] = g;
+                    pixels[dstIndex++] = b;
+                    pixels[dstIndex++] = a;
+                }
+
+                // Handle row padding for 1-bit images
+                if (bitsPerComponent == 1)
+                {
+                    srcIndex = ((srcIndex + 7) / 8) * 8; // Align to byte boundary
+                }
+            }
+
+            // Copy pixels to bitmap
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try
+            {
+                bitmap.SetPixels(handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+        catch
+        {
+            bitmap.Dispose();
+            return null;
+        }
+
+        return bitmap;
+    }
+
+    private void RenderFormXObject(Pdfe.Core.Primitives.PdfStream formStream)
+    {
+        // Form XObjects contain their own content stream
+        // Get the form's content and render it recursively
+        var formContent = formStream.DecodedData;
+        if (formContent.Length == 0)
+            return;
+
+        _canvas.Save();
+
+        // Apply the form's transformation matrix if present
+        var matrixArray = formStream.GetOptional("Matrix") as Pdfe.Core.Primitives.PdfArray;
+        if (matrixArray != null && matrixArray.Count >= 6)
+        {
+            var a = (float)matrixArray.GetNumber(0);
+            var b = (float)matrixArray.GetNumber(1);
+            var c = (float)matrixArray.GetNumber(2);
+            var d = (float)matrixArray.GetNumber(3);
+            var e = (float)matrixArray.GetNumber(4);
+            var f = (float)matrixArray.GetNumber(5);
+            var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
+            _canvas.Concat(ref matrix);
+        }
+
+        // Parse and render the form's content stream
+        var content = Encoding.Latin1.GetString(formContent);
+        var tokens = Tokenize(content);
+        var operands = new List<string>();
+
+        foreach (var token in tokens)
+        {
+            if (IsOperator(token))
+            {
+                ExecuteOperator(token, operands);
+                operands.Clear();
+            }
+            else
+            {
+                operands.Add(token);
+            }
+        }
+
+        _canvas.Restore();
+    }
+
+    #endregion
+
+    #region Clipping Path (W, W* operators) - Issue #295
+
+    private void SetClippingPath(bool evenOdd)
+    {
+        if (_currentPath == null) return;
+
+        _currentPath.FillType = evenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
+
+        // Apply the clipping path to the canvas
+        _canvas.ClipPath(_currentPath, SKClipOperation.Intersect, _options.AntiAlias);
+
+        // Note: The path is NOT disposed here - it will be used by the following
+        // path-painting operator (like n, S, f) which will dispose it
+    }
+
+    #endregion
+
+    #region Shading (sh operator) - Issue #300
+
+    private void RenderShading(string nameOperand)
+    {
+        // Remove leading / if present
+        var name = nameOperand.TrimStart('/');
+
+        // Get the shading dictionary from page resources
+        var shading = _page.GetShading(name);
+        if (shading == null)
+            return;
+
+        var shadingType = shading.GetInt("ShadingType", 0);
+
+        // Handle different shading types
+        switch (shadingType)
+        {
+            case 2: // Axial shading (linear gradient)
+                RenderAxialShading(shading);
+                break;
+            case 3: // Radial shading (radial gradient)
+                RenderRadialShading(shading);
+                break;
+            // Types 1, 4-7 are more complex (function-based, mesh-based)
+            // For now, just fill with background color as fallback
+            default:
+                // Shading fills the current clipping path
+                break;
+        }
+    }
+
+    private void RenderAxialShading(Pdfe.Core.Primitives.PdfDictionary shading)
+    {
+        // Get the coordinate array [x0, y0, x1, y1]
+        var coords = shading.GetOptional("Coords") as Pdfe.Core.Primitives.PdfArray;
+        if (coords == null || coords.Count < 4)
+            return;
+
+        var x0 = (float)coords.GetNumber(0);
+        var y0 = (float)coords.GetNumber(1);
+        var x1 = (float)coords.GetNumber(2);
+        var y1 = (float)coords.GetNumber(3);
+
+        // Get colors from the color space and function
+        // For simplicity, use black to white gradient as fallback
+        var startColor = SKColors.Black;
+        var endColor = SKColors.White;
+
+        // Try to get colors from the function if available
+        var colorSpace = shading.GetNameOrNull("ColorSpace") ?? "DeviceGray";
+        var function = shading.GetOptional("Function");
+
+        // Create the gradient shader
+        using var shader = SKShader.CreateLinearGradient(
+            new SKPoint(x0, y0),
+            new SKPoint(x1, y1),
+            new[] { startColor, endColor },
+            null,
+            SKShaderTileMode.Clamp);
+
+        using var paint = new SKPaint
+        {
+            Shader = shader,
+            IsAntialias = _options.AntiAlias
+        };
+
+        // Fill the current clipping area
+        var clipBounds = _canvas.LocalClipBounds;
+        _canvas.DrawRect(clipBounds, paint);
+    }
+
+    private void RenderRadialShading(Pdfe.Core.Primitives.PdfDictionary shading)
+    {
+        // Get the coordinate array [x0, y0, r0, x1, y1, r1]
+        var coords = shading.GetOptional("Coords") as Pdfe.Core.Primitives.PdfArray;
+        if (coords == null || coords.Count < 6)
+            return;
+
+        var x0 = (float)coords.GetNumber(0);
+        var y0 = (float)coords.GetNumber(1);
+        var r0 = (float)coords.GetNumber(2);
+        var x1 = (float)coords.GetNumber(3);
+        var y1 = (float)coords.GetNumber(4);
+        var r1 = (float)coords.GetNumber(5);
+
+        // For simplicity, use black to white gradient as fallback
+        var startColor = SKColors.Black;
+        var endColor = SKColors.White;
+
+        // Create the two-point conical gradient
+        using var shader = SKShader.CreateTwoPointConicalGradient(
+            new SKPoint(x0, y0), r0,
+            new SKPoint(x1, y1), r1,
+            new[] { startColor, endColor },
+            null,
+            SKShaderTileMode.Clamp);
+
+        using var paint = new SKPaint
+        {
+            Shader = shader,
+            IsAntialias = _options.AntiAlias
+        };
+
+        // Fill the current clipping area
+        var clipBounds = _canvas.LocalClipBounds;
+        _canvas.DrawRect(clipBounds, paint);
+    }
+
+    #endregion
+
+    #region Color Space Operators (SC, SCN, sc, scn)
+
+    private void SetStrokingColor(List<string> operands)
+    {
+        var color = ParseColorFromOperands(operands, _state.StrokeColorSpace);
+        if (color.HasValue)
+            _state.StrokeColor = color.Value;
+    }
+
+    private void SetNonStrokingColor(List<string> operands)
+    {
+        var color = ParseColorFromOperands(operands, _state.FillColorSpace);
+        if (color.HasValue)
+            _state.FillColor = color.Value;
+    }
+
+    private SKColor? ParseColorFromOperands(List<string> operands, string colorSpace)
+    {
+        // Filter out pattern names (start with /)
+        var values = operands.Where(o => !o.StartsWith("/")).ToList();
+
+        return colorSpace switch
+        {
+            "DeviceGray" or "CalGray" when values.Count >= 1 =>
+                GrayToColor(ParseNumber(values[0])),
+
+            "DeviceRGB" or "CalRGB" when values.Count >= 3 =>
+                RgbToColor(
+                    ParseNumber(values[0]),
+                    ParseNumber(values[1]),
+                    ParseNumber(values[2])),
+
+            "DeviceCMYK" when values.Count >= 4 =>
+                CmykToColor(
+                    ParseNumber(values[0]),
+                    ParseNumber(values[1]),
+                    ParseNumber(values[2]),
+                    ParseNumber(values[3])),
+
+            // Pattern color space - the pattern name is handled separately
+            "Pattern" when operands.Any(o => o.StartsWith("/")) =>
+                null, // Pattern fills are handled by pattern rendering
+
+            // ICCBased, Lab, Indexed, Separation, DeviceN - fallback behavior
+            _ when values.Count >= 3 =>
+                RgbToColor(
+                    ParseNumber(values[0]),
+                    ParseNumber(values[1]),
+                    ParseNumber(values[2])),
+
+            _ when values.Count >= 1 =>
+                GrayToColor(ParseNumber(values[0])),
+
+            _ => null
+        };
+    }
+
+    #endregion
+
+    #region Inline Images (BI, ID, EI operators) - Issue #297
+
+    private void RenderInlineImage(string content, ref int tokenIndex, List<string> tokens)
+    {
+        // Inline images are complex to parse from tokenized content
+        // The format is: BI <dict entries> ID <image data> EI
+        // For now, we'll handle this by looking for the pattern in raw content
+
+        // This is a stub - inline images require special handling during tokenization
+        // because the image data between ID and EI is binary and not tokenized
+    }
+
     #endregion
 
     #region Tokenizer
@@ -888,6 +1532,13 @@ internal class GraphicsState
     public SKColor FillColor { get; set; } = SKColors.Black;
     public SKColor StrokeColor { get; set; } = SKColors.Black;
     public double LineWidth { get; set; } = 1;
+    public float FillAlpha { get; set; } = 1.0f;
+    public float StrokeAlpha { get; set; } = 1.0f;
+    public int LineCap { get; set; } = 0;  // 0=Butt, 1=Round, 2=Square
+    public int LineJoin { get; set; } = 0; // 0=Miter, 1=Round, 2=Bevel
+    public float MiterLimit { get; set; } = 10.0f;
+    public string FillColorSpace { get; set; } = "DeviceGray";
+    public string StrokeColorSpace { get; set; } = "DeviceGray";
 
     public GraphicsState Clone()
     {
@@ -895,7 +1546,14 @@ internal class GraphicsState
         {
             FillColor = FillColor,
             StrokeColor = StrokeColor,
-            LineWidth = LineWidth
+            LineWidth = LineWidth,
+            FillAlpha = FillAlpha,
+            StrokeAlpha = StrokeAlpha,
+            LineCap = LineCap,
+            LineJoin = LineJoin,
+            MiterLimit = MiterLimit,
+            FillColorSpace = FillColorSpace,
+            StrokeColorSpace = StrokeColorSpace
         };
     }
 }

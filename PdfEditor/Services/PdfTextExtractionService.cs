@@ -298,18 +298,32 @@ public class PdfTextExtractionService
     /// Check if a letter's center point is inside the selection rectangle.
     /// This provides precise character-level selection - a letter is only selected
     /// if its center point falls within the selection bounds.
+    /// Issue #285: Use 50% overlap threshold to handle position differences
+    /// between word bounding boxes and letter positions.
     /// </summary>
     /// <param name="letterBox">The bounding box of the letter (glyph rectangle)</param>
     /// <param name="selection">The selection rectangle in PDF coordinates</param>
-    /// <returns>True if the letter's center is inside the selection</returns>
+    /// <returns>True if at least 50% of the letter overlaps with selection</returns>
     private static bool IsLetterCenterInSelection(PdfRectangle letterBox, PdfRectangle selection)
     {
-        // Calculate the center point of the letter
-        var centerX = (letterBox.Left + letterBox.Right) / 2.0;
-        var centerY = (letterBox.Top + letterBox.Bottom) / 2.0;
+        // Issue #285 fix: Check if at least 50% of the letter overlaps with the selection.
+        // This is more forgiving than center-point but more precise than any-intersection.
 
-        // Check if center point is inside the selection rectangle
-        return centerX >= selection.Left && centerX <= selection.Right &&
-               centerY >= selection.Bottom && centerY <= selection.Top;
+        // Calculate the intersection rectangle
+        var intersectLeft = Math.Max(letterBox.Left, selection.Left);
+        var intersectRight = Math.Min(letterBox.Right, selection.Right);
+        var intersectBottom = Math.Max(letterBox.Bottom, selection.Bottom);
+        var intersectTop = Math.Min(letterBox.Top, selection.Top);
+
+        // No intersection if any dimension is negative
+        if (intersectRight <= intersectLeft || intersectTop <= intersectBottom)
+            return false;
+
+        // Calculate areas
+        var letterArea = (letterBox.Right - letterBox.Left) * (letterBox.Top - letterBox.Bottom);
+        var intersectArea = (intersectRight - intersectLeft) * (intersectTop - intersectBottom);
+
+        // Select if at least 50% of the letter is inside the selection
+        return intersectArea >= (letterArea * 0.5);
     }
 }
