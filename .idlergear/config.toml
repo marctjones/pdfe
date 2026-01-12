@@ -1,0 +1,17 @@
+idlergear_version = "0.3.45"
+
+[project]
+name = ""
+
+[github]
+
+[daemon]
+auto_start = true
+
+[backends]
+task = "github"
+explore = "github"
+note = "github"
+reference = "github"
+plan = "github"
+vision = "github"

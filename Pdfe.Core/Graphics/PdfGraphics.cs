@@ -6,6 +6,31 @@ using Pdfe.Core.Primitives;
 namespace Pdfe.Core.Graphics;
 
 /// <summary>
+/// Text alignment options for DrawString.
+/// </summary>
+public enum TextAlignment
+{
+    /// <summary>Left aligned (default).</summary>
+    Left,
+    /// <summary>Center aligned.</summary>
+    Center,
+    /// <summary>Right aligned.</summary>
+    Right
+}
+
+/// <summary>
+/// Represents a size in PDF units (points).
+/// </summary>
+public readonly record struct PdfSize(double Width, double Height)
+{
+    /// <summary>An empty size.</summary>
+    public static readonly PdfSize Empty = new(0, 0);
+
+    /// <inheritdoc />
+    public override string ToString() => $"{Width:F2} x {Height:F2}";
+}
+
+/// <summary>
 /// Provides graphics drawing operations for a PDF page.
 /// Generates PDF content stream operators for drawing shapes, text, and images.
 /// </summary>
@@ -243,6 +268,80 @@ public class PdfGraphics : IDisposable
         _operators.AppendLine(pen.GetStrokeColorOperator());
         _operators.AppendLine(pen.GetLineWidthOperator());
         _operators.AppendLine("B");
+    }
+
+    #endregion
+
+    #region Text Drawing
+
+    /// <summary>
+    /// Draws text at the specified position.
+    /// </summary>
+    /// <param name="text">The text to draw.</param>
+    /// <param name="font">The font to use.</param>
+    /// <param name="brush">The brush for text color.</param>
+    /// <param name="x">X coordinate (in PDF coordinates, bottom-left origin).</param>
+    /// <param name="y">Y coordinate (in PDF coordinates, bottom-left origin).</param>
+    public void DrawString(string text, PdfFont font, PdfBrush brush, double x, double y)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        // Ensure font is registered in page resources
+        var fontName = _page.AddFont(font);
+
+        // Set fill color
+        _operators.AppendLine(brush.GetFillColorOperator());
+
+        // Begin text block
+        _operators.AppendLine("BT");
+
+        // Set font and size
+        _operators.AppendLine($"/{fontName} {Fmt(font.Size)} Tf");
+
+        // Position text (Td moves from current position)
+        _operators.AppendLine($"{Fmt(x)} {Fmt(y)} Td");
+
+        // Draw the text
+        _operators.AppendLine($"{font.EncodeString(text)} Tj");
+
+        // End text block
+        _operators.AppendLine("ET");
+    }
+
+    /// <summary>
+    /// Draws text at the specified position with alignment options.
+    /// </summary>
+    public void DrawString(string text, PdfFont font, PdfBrush brush, double x, double y, TextAlignment alignment)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        // Calculate alignment offset
+        var width = font.MeasureWidth(text);
+        var alignedX = alignment switch
+        {
+            TextAlignment.Center => x - width / 2,
+            TextAlignment.Right => x - width,
+            _ => x // Left alignment (default)
+        };
+
+        DrawString(text, font, brush, alignedX, y);
+    }
+
+    /// <summary>
+    /// Measures the size of a string when rendered with the specified font.
+    /// </summary>
+    public static PdfSize MeasureString(string text, PdfFont font)
+    {
+        if (string.IsNullOrEmpty(text))
+            return new PdfSize(0, 0);
+
+        return new PdfSize(font.MeasureWidth(text), font.LineHeight);
     }
 
     #endregion

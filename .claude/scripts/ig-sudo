@@ -1,0 +1,70 @@
+#!/bin/bash
+# IdlerGear sudo wrapper - handles sudo with GUI password prompts
+#
+# Usage:
+#   ig-sudo apt install nodejs
+#   ig-sudo ./install.sh
+#
+# This wrapper:
+#   1. Checks if sudo is already authenticated (no prompt needed)
+#   2. If not, tries to use GUI askpass if available
+#   3. Falls back to helpful error message with alternatives
+
+set -e
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Check if we have a command to run
+if [[ $# -eq 0 ]]; then
+    echo "Usage: ig-sudo <command> [args...]" >&2
+    echo "" >&2
+    echo "Examples:" >&2
+    echo "  ig-sudo apt install nodejs" >&2
+    echo "  ig-sudo ./install.sh" >&2
+    exit 1
+fi
+
+# Check if sudo session is already active (no password needed)
+if sudo -n true 2>/dev/null; then
+    # Already authenticated, just run the command
+    exec sudo "$@"
+fi
+
+# Find ig-askpass - check multiple locations
+ASKPASS=""
+if [[ -x "$SCRIPT_DIR/ig-askpass" ]]; then
+    ASKPASS="$SCRIPT_DIR/ig-askpass"
+elif command -v ig-askpass &>/dev/null; then
+    ASKPASS="$(command -v ig-askpass)"
+elif [[ -x "$HOME/.local/bin/ig-askpass" ]]; then
+    ASKPASS="$HOME/.local/bin/ig-askpass"
+fi
+
+# Check if askpass is available and a GUI prompt exists
+if [[ -n "$ASKPASS" ]] && "$ASKPASS" --check &>/dev/null; then
+    # Use sudo -A with our askpass helper
+    export SUDO_ASKPASS="$ASKPASS"
+    exec sudo -A "$@"
+fi
+
+# No GUI available - provide helpful guidance
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+echo "⚠️  sudo requires a password but no GUI prompt is available" >&2
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+echo "" >&2
+echo "Options:" >&2
+echo "" >&2
+echo "  1. Pre-authenticate in another terminal:" >&2
+echo "     $ sudo -v" >&2
+echo "     Then retry this command." >&2
+echo "" >&2
+echo "  2. Run directly in your terminal:" >&2
+echo "     $ sudo $*" >&2
+echo "" >&2
+echo "  3. Install zenity for GUI password prompts:" >&2
+echo "     $ sudo apt install zenity   # Debian/Ubuntu" >&2
+echo "     $ sudo dnf install zenity   # Fedora" >&2
+echo "" >&2
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+exit 1
