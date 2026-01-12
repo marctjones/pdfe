@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PdfEditor.Services;
 using PdfEditor.Tests.Utilities;
-using PdfSharp.Pdf.IO;
+using Pdfe.Core.Document;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -68,7 +68,7 @@ public class BatesNumberingTests : IDisposable
 
         var outputPath = CreateTempFile();
 
-        using (var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify))
+        using (var document = PdfDocument.Open(pdfPath))
         {
             var service = new BatesNumberingService(_loggerFactory.CreateLogger<BatesNumberingService>());
 
@@ -83,7 +83,7 @@ public class BatesNumberingTests : IDisposable
             service.ApplyBatesNumbers(document, options);
 
             // Verify the document was modified (before saving)
-            document.PageCount.Should().Be(5);
+            document.Pages.Count.Should().Be(5);
 
             document.Save(outputPath);
         }
@@ -103,7 +103,7 @@ public class BatesNumberingTests : IDisposable
         var pdfPath = CreateTempFile();
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "Test Content");
 
-        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        using var document = PdfDocument.Open(pdfPath);
 
         var service = new BatesNumberingService(_loggerFactory.CreateLogger<BatesNumberingService>());
 
@@ -139,7 +139,7 @@ public class BatesNumberingTests : IDisposable
         var pdfPath = CreateTempFile();
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "Test Content");
 
-        using var document = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Modify);
+        using var document = PdfDocument.Open(pdfPath);
 
         var service = new BatesNumberingService(_loggerFactory.CreateLogger<BatesNumberingService>());
 
