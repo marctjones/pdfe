@@ -88,6 +88,31 @@ public class PdfFont
     public static PdfFont Courier(double size) => new("F1", StandardFonts.Courier, size);
 
     /// <summary>
+    /// Create a Times Bold font with the specified size.
+    /// </summary>
+    public static PdfFont TimesBold(double size) => new("F1", StandardFonts.TimesBold, size);
+
+    /// <summary>
+    /// Create a Times Italic font with the specified size.
+    /// </summary>
+    public static PdfFont TimesItalic(double size) => new("F1", StandardFonts.TimesItalic, size);
+
+    /// <summary>
+    /// Create a Courier Bold font with the specified size.
+    /// </summary>
+    public static PdfFont CourierBold(double size) => new("F1", StandardFonts.CourierBold, size);
+
+    /// <summary>
+    /// Create a Courier Oblique font with the specified size.
+    /// </summary>
+    public static PdfFont CourierOblique(double size) => new("F1", StandardFonts.CourierOblique, size);
+
+    /// <summary>
+    /// Create a Helvetica Oblique font with the specified size.
+    /// </summary>
+    public static PdfFont HelveticaOblique(double size) => new("F1", StandardFonts.HelveticaOblique, size);
+
+    /// <summary>
     /// Create a new font with a different size.
     /// </summary>
     public PdfFont WithSize(double size) => new(Name, BaseFont, size);

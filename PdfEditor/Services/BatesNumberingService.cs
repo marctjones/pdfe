@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
-using PdfSharp.Drawing;
-using PdfSharp.Pdf;
-using PdfSharp.Pdf.IO;
+using Pdfe.Core.Document;
+using Pdfe.Core.Graphics;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -24,7 +23,7 @@ public class BatesNumberingService
     /// <summary>
     /// Apply Bates numbers to a document
     /// </summary>
-    public void ApplyBatesNumbers(PdfDocument document, BatesOptions options)
+    public void ApplyBatesNumbers(Pdfe.Core.Document.PdfDocument document, BatesOptions options)
     {
         _logger.LogInformation(
             "Applying Bates numbers: Prefix={Prefix}, Start={Start}, Digits={Digits}, Position={Position}",
@@ -32,7 +31,7 @@ public class BatesNumberingService
 
         var currentNumber = options.StartNumber;
 
-        for (int i = 0; i < document.PageCount; i++)
+        for (int i = 0; i < document.Pages.Count; i++)
         {
             var page = document.Pages[i];
             var batesNumber = FormatBatesNumber(currentNumber, options);
@@ -84,9 +83,9 @@ public class BatesNumberingService
                 var outputPath = GenerateOutputPath(filePath, options.OutputDirectory, options.OutputSuffix);
 
                 // Use explicit using block for proper disposal
-                using (var document = PdfReader.Open(filePath, PdfDocumentOpenMode.Modify))
+                using (var document = Pdfe.Core.Document.PdfDocument.Open(filePath))
                 {
-                    pageCount = document.PageCount;
+                    pageCount = document.Pages.Count;
 
                     for (int i = 0; i < pageCount; i++)
                     {
@@ -143,8 +142,8 @@ public class BatesNumberingService
         {
             try
             {
-                using var document = PdfReader.Open(filePath, PdfDocumentOpenMode.Import);
-                totalPages += document.PageCount;
+                using var document = Pdfe.Core.Document.PdfDocument.Open(filePath);
+                totalPages += document.Pages.Count;
             }
             catch (Exception ex)
             {
@@ -156,27 +155,45 @@ public class BatesNumberingService
 
     private void ApplyBatesNumberToPage(PdfPage page, string batesNumber, BatesOptions options)
     {
-        using var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append);
+        using var gfx = page.GetGraphics();
 
-        // Create font
-        var font = new XFont(options.FontName, options.FontSize);
-        var brush = XBrushes.Black;
+        // Create font - map font name to standard PDF font
+        var font = MapToStandardFont(options.FontName, options.FontSize);
+        var brush = PdfBrush.Black;
 
         // Measure text
-        var textSize = gfx.MeasureString(batesNumber, font);
+        var textSize = PdfGraphics.MeasureString(batesNumber, font);
 
         // Calculate position
         var (x, y) = CalculatePosition(page, textSize, options);
 
         // Draw the Bates number
-        gfx.DrawString(batesNumber, font, brush, new XPoint(x, y));
+        gfx.DrawString(batesNumber, font, brush, x, y);
     }
 
-    private (double x, double y) CalculatePosition(PdfPage page, XSize textSize, BatesOptions options)
+    /// <summary>
+    /// Maps a font name to a standard PDF font.
+    /// </summary>
+    private static PdfFont MapToStandardFont(string fontName, double fontSize)
+    {
+        // Map common font names to standard PDF fonts
+        return fontName.ToLowerInvariant() switch
+        {
+            "arial" or "helvetica" or "sans-serif" => PdfFont.Helvetica(fontSize),
+            "arial bold" or "helvetica bold" or "helvetica-bold" => PdfFont.HelveticaBold(fontSize),
+            "times" or "times new roman" or "times-roman" or "serif" => PdfFont.TimesRoman(fontSize),
+            "times bold" or "times new roman bold" => PdfFont.TimesBold(fontSize),
+            "courier" or "courier new" or "monospace" => PdfFont.Courier(fontSize),
+            "courier bold" => PdfFont.CourierBold(fontSize),
+            _ => PdfFont.Helvetica(fontSize) // Default to Helvetica
+        };
+    }
+
+    private (double x, double y) CalculatePosition(PdfPage page, PdfSize textSize, BatesOptions options)
     {
         double x, y;
-        var pageWidth = page.Width.Point;
-        var pageHeight = page.Height.Point;
+        var pageWidth = page.Width;
+        var pageHeight = page.Height;
 
         switch (options.Position)
         {
