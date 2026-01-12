@@ -277,6 +277,65 @@ public class PdfPage
     }
 
     /// <summary>
+    /// Adds a font to the page resources if not already present.
+    /// Returns the font resource name (e.g., "F1", "F2").
+    /// </summary>
+    public string AddFont(PdfFont font)
+    {
+        // Get or create Resources dictionary
+        var resources = EnsureResources();
+
+        // Get or create Font dictionary within Resources
+        if (!resources.TryGetValue("Font", out var fontDictObj) || fontDictObj is not PdfDictionary fontDict)
+        {
+            fontDict = new PdfDictionary();
+            resources["Font"] = fontDict;
+        }
+
+        // Check if this font is already registered by base font name
+        foreach (var kvp in fontDict)
+        {
+            var existingFont = _document.Resolve(kvp.Value) as PdfDictionary;
+            if (existingFont != null)
+            {
+                var existingBaseFont = existingFont.GetNameOrNull("BaseFont");
+                if (existingBaseFont == font.BaseFont)
+                {
+                    return kvp.Key.Value; // Return existing name
+                }
+            }
+        }
+
+        // Find next available font name
+        var fontName = font.Name;
+        int counter = 1;
+        while (fontDict.ContainsKey(fontName))
+        {
+            fontName = $"F{counter++}";
+        }
+
+        // Add the font dictionary
+        fontDict[fontName] = font.CreateFontDictionary();
+
+        return fontName;
+    }
+
+    /// <summary>
+    /// Ensures the page has a Resources dictionary, creating one if needed.
+    /// </summary>
+    private PdfDictionary EnsureResources()
+    {
+        var resources = Resources;
+        if (resources != null)
+            return resources;
+
+        // Create a new Resources dictionary
+        resources = new PdfDictionary();
+        _pageDict["Resources"] = resources;
+        return resources;
+    }
+
+    /// <summary>
     /// Get an XObject (form or image) from the page resources.
     /// </summary>
     public PdfObject? GetXObject(string name)

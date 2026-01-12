@@ -61,6 +61,9 @@ internal class RenderContext
     private readonly Stack<GraphicsState> _stateStack;
     private GraphicsState _state;
     private SKPath? _currentPath;
+    private TextState _textState;
+    private bool _inTextBlock;
+    private SKTypeface? _currentTypeface;
 
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
@@ -69,6 +72,8 @@ internal class RenderContext
         _options = options;
         _stateStack = new Stack<GraphicsState>();
         _state = new GraphicsState();
+        _textState = new TextState();
+        _inTextBlock = false;
     }
 
     public void Render()
@@ -214,25 +219,84 @@ internal class RenderContext
                 _currentPath = null;
                 break;
 
-            // Text (basic - just skip for now)
+            // Text state operators
             case "BT":
+                BeginText();
+                break;
             case "ET":
+                EndText();
+                break;
             case "Tf":
+                if (operands.Count >= 2)
+                    SetFont(operands[0], ParseNumber(operands[1]));
+                break;
             case "Td":
+                if (operands.Count >= 2)
+                    TextMove(ParseNumber(operands[0]), ParseNumber(operands[1]));
+                break;
             case "TD":
+                if (operands.Count >= 2)
+                {
+                    _textState.TextLeading = -(float)ParseNumber(operands[1]);
+                    TextMove(ParseNumber(operands[0]), ParseNumber(operands[1]));
+                }
+                break;
             case "Tm":
+                if (operands.Count >= 6)
+                    SetTextMatrix(
+                        ParseNumber(operands[0]), ParseNumber(operands[1]),
+                        ParseNumber(operands[2]), ParseNumber(operands[3]),
+                        ParseNumber(operands[4]), ParseNumber(operands[5]));
+                break;
             case "T*":
-            case "Tj":
-            case "TJ":
-            case "'":
-            case "\"":
+                TextNewLine();
+                break;
             case "Tc":
+                if (operands.Count >= 1)
+                    _textState.CharSpacing = (float)ParseNumber(operands[0]);
+                break;
             case "Tw":
+                if (operands.Count >= 1)
+                    _textState.WordSpacing = (float)ParseNumber(operands[0]);
+                break;
             case "Tz":
+                if (operands.Count >= 1)
+                    _textState.HorizontalScale = (float)ParseNumber(operands[0]);
+                break;
             case "TL":
+                if (operands.Count >= 1)
+                    _textState.TextLeading = (float)ParseNumber(operands[0]);
+                break;
             case "Tr":
+                if (operands.Count >= 1)
+                    _textState.RenderMode = (int)ParseNumber(operands[0]);
+                break;
             case "Ts":
-                // Text operators - skip for basic path rendering
+                if (operands.Count >= 1)
+                    _textState.TextRise = (float)ParseNumber(operands[0]);
+                break;
+
+            // Text showing operators
+            case "Tj":
+                if (operands.Count >= 1)
+                    ShowText(operands[0]);
+                break;
+            case "TJ":
+                ShowTextArray(operands);
+                break;
+            case "'":
+                TextNewLine();
+                if (operands.Count >= 1)
+                    ShowText(operands[0]);
+                break;
+            case "\"":
+                if (operands.Count >= 3)
+                {
+                    _textState.WordSpacing = (float)ParseNumber(operands[0]);
+                    _textState.CharSpacing = (float)ParseNumber(operands[1]);
+                    TextNewLine();
+                    ShowText(operands[2]);
+                }
                 break;
 
             // Ignore unknown operators
@@ -389,6 +453,260 @@ internal class RenderContext
 
         _currentPath.Dispose();
         _currentPath = null;
+    }
+
+    #endregion
+
+    #region Text Rendering
+
+    private void BeginText()
+    {
+        _inTextBlock = true;
+        _textState.Reset();
+    }
+
+    private void EndText()
+    {
+        _inTextBlock = false;
+    }
+
+    private void SetFont(string fontName, double fontSize)
+    {
+        // Remove leading / if present
+        if (fontName.StartsWith("/"))
+            fontName = fontName.Substring(1);
+
+        _textState.FontName = fontName;
+        _textState.FontSize = (float)fontSize;
+
+        // Try to get the font from page resources to determine the base font
+        var fontDict = _page.GetFont(fontName);
+        var baseFont = fontDict?.GetNameOrNull("BaseFont") ?? "Helvetica";
+
+        // Map PDF font names to SkiaSharp typefaces
+        _currentTypeface = GetTypeface(baseFont);
+    }
+
+    private SKTypeface GetTypeface(string baseFont)
+    {
+        // Map standard PDF fonts to system fonts
+        var family = baseFont switch
+        {
+            "Helvetica" or "Helvetica-Bold" or "Helvetica-Oblique" or "Helvetica-BoldOblique"
+                => "Helvetica",
+            "Times-Roman" or "Times-Bold" or "Times-Italic" or "Times-BoldItalic"
+                => "Times New Roman",
+            "Courier" or "Courier-Bold" or "Courier-Oblique" or "Courier-BoldOblique"
+                => "Courier New",
+            "Symbol" => "Symbol",
+            "ZapfDingbats" => "Wingdings",
+            _ => "Sans-Serif" // Default fallback
+        };
+
+        var style = SKFontStyle.Normal;
+        if (baseFont.Contains("Bold") && baseFont.Contains("Italic"))
+            style = SKFontStyle.BoldItalic;
+        else if (baseFont.Contains("Bold"))
+            style = SKFontStyle.Bold;
+        else if (baseFont.Contains("Italic") || baseFont.Contains("Oblique"))
+            style = SKFontStyle.Italic;
+
+        return SKTypeface.FromFamilyName(family, style) ?? SKTypeface.Default;
+    }
+
+    private void TextMove(double tx, double ty)
+    {
+        // Td operator: Move to start of next line, offset by (tx, ty)
+        _textState.TextMatrixE = _textState.LineMatrixE + (float)tx;
+        _textState.TextMatrixF = _textState.LineMatrixF + (float)ty;
+        _textState.LineMatrixE = _textState.TextMatrixE;
+        _textState.LineMatrixF = _textState.TextMatrixF;
+    }
+
+    private void SetTextMatrix(double a, double b, double c, double d, double e, double f)
+    {
+        _textState.TextMatrixA = (float)a;
+        _textState.TextMatrixB = (float)b;
+        _textState.TextMatrixC = (float)c;
+        _textState.TextMatrixD = (float)d;
+        _textState.TextMatrixE = (float)e;
+        _textState.TextMatrixF = (float)f;
+        _textState.LineMatrixE = (float)e;
+        _textState.LineMatrixF = (float)f;
+    }
+
+    private void TextNewLine()
+    {
+        // T* operator: Move to start of next line using leading
+        TextMove(0, -_textState.TextLeading);
+    }
+
+    private void ShowText(string textOperand)
+    {
+        // Parse the string operand (removes parentheses and handles escapes)
+        var text = ParsePdfString(textOperand);
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        RenderText(text);
+    }
+
+    private void ShowTextArray(List<string> operands)
+    {
+        // TJ operator: array of strings and position adjustments
+        // The operands come as tokens: [, string1, number, string2, ], etc.
+        foreach (var operand in operands)
+        {
+            if (operand == "[" || operand == "]")
+                continue;
+
+            if (operand.StartsWith("(") || operand.StartsWith("<"))
+            {
+                // It's a string
+                var text = ParsePdfString(operand);
+                if (!string.IsNullOrEmpty(text))
+                    RenderText(text);
+            }
+            else if (double.TryParse(operand, NumberStyles.Float, CultureInfo.InvariantCulture, out var adjustment))
+            {
+                // It's a position adjustment (in thousandths of em)
+                // Negative values move right, positive move left
+                var xOffset = (float)(-adjustment * _textState.FontSize / 1000.0);
+                _textState.TextMatrixE += xOffset * _textState.HorizontalScale / 100.0f;
+            }
+        }
+    }
+
+    private void RenderText(string text)
+    {
+        if (!_inTextBlock || _currentTypeface == null)
+            return;
+
+        using var font = new SKFont(_currentTypeface, _textState.FontSize);
+        using var paint = new SKPaint(font)
+        {
+            Color = _state.FillColor,
+            IsAntialias = _options.AntiAlias
+        };
+
+        // Calculate position in PDF coordinates
+        var x = _textState.TextMatrixE;
+        var y = _textState.TextMatrixF + _textState.TextRise;
+
+        // The canvas has been transformed with Scale(scale, -scale) to flip Y for paths.
+        // For text, we need to un-flip it so text appears right-side up.
+        // Save state, apply local transform to flip text back, draw, restore.
+        _canvas.Save();
+
+        // Move to text position, then flip Y locally for this text
+        _canvas.Translate(x, y);
+        _canvas.Scale(1, -1); // Flip back for text
+
+        // Draw text at origin (we've already translated)
+        _canvas.DrawText(text, 0, 0, paint);
+
+        _canvas.Restore();
+
+        // Advance the text position
+        var width = paint.MeasureText(text);
+        var charCount = text.Length;
+        var spaceCount = text.Count(c => c == ' ');
+
+        // Apply character and word spacing
+        width += charCount * _textState.CharSpacing;
+        width += spaceCount * _textState.WordSpacing;
+        width *= _textState.HorizontalScale / 100.0f;
+
+        _textState.TextMatrixE += width;
+    }
+
+    private static string ParsePdfString(string operand)
+    {
+        if (string.IsNullOrEmpty(operand))
+            return "";
+
+        // Literal string: (text)
+        if (operand.StartsWith("(") && operand.EndsWith(")"))
+        {
+            var content = operand.Substring(1, operand.Length - 2);
+            return UnescapePdfString(content);
+        }
+
+        // Hex string: <hexdata>
+        if (operand.StartsWith("<") && operand.EndsWith(">"))
+        {
+            var hex = operand.Substring(1, operand.Length - 2);
+            return DecodeHexString(hex);
+        }
+
+        return operand;
+    }
+
+    private static string UnescapePdfString(string s)
+    {
+        var sb = new StringBuilder();
+        var i = 0;
+        while (i < s.Length)
+        {
+            if (s[i] == '\\' && i + 1 < s.Length)
+            {
+                var next = s[i + 1];
+                switch (next)
+                {
+                    case 'n': sb.Append('\n'); i += 2; break;
+                    case 'r': sb.Append('\r'); i += 2; break;
+                    case 't': sb.Append('\t'); i += 2; break;
+                    case 'b': sb.Append('\b'); i += 2; break;
+                    case 'f': sb.Append('\f'); i += 2; break;
+                    case '(': sb.Append('('); i += 2; break;
+                    case ')': sb.Append(')'); i += 2; break;
+                    case '\\': sb.Append('\\'); i += 2; break;
+                    default:
+                        // Octal escape \ddd
+                        if (char.IsDigit(next))
+                        {
+                            var octal = "";
+                            i++;
+                            while (i < s.Length && octal.Length < 3 && char.IsDigit(s[i]) && s[i] < '8')
+                            {
+                                octal += s[i++];
+                            }
+                            if (int.TryParse(octal, out var code))
+                                sb.Append((char)Convert.ToInt32(octal, 8));
+                        }
+                        else
+                        {
+                            sb.Append(next);
+                            i += 2;
+                        }
+                        break;
+                }
+            }
+            else
+            {
+                sb.Append(s[i++]);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string DecodeHexString(string hex)
+    {
+        // Remove whitespace
+        hex = new string(hex.Where(c => !char.IsWhiteSpace(c)).ToArray());
+
+        // Pad with 0 if odd length
+        if (hex.Length % 2 != 0)
+            hex += "0";
+
+        var bytes = new byte[hex.Length / 2];
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (byte.TryParse(hex.Substring(i * 2, 2), NumberStyles.HexNumber, null, out var b))
+                bytes[i] = b;
+        }
+
+        return Encoding.Latin1.GetString(bytes);
     }
 
     #endregion
@@ -578,6 +896,68 @@ internal class GraphicsState
             FillColor = FillColor,
             StrokeColor = StrokeColor,
             LineWidth = LineWidth
+        };
+    }
+}
+
+/// <summary>
+/// Text state for rendering text operators.
+/// </summary>
+internal class TextState
+{
+    public string FontName { get; set; } = "";
+    public float FontSize { get; set; } = 12;
+    public float CharSpacing { get; set; } = 0;
+    public float WordSpacing { get; set; } = 0;
+    public float HorizontalScale { get; set; } = 100;
+    public float TextLeading { get; set; } = 0;
+    public float TextRise { get; set; } = 0;
+    public int RenderMode { get; set; } = 0; // 0 = fill, 1 = stroke, 2 = fill+stroke
+
+    // Text matrix components (Tm operator sets this)
+    public float TextMatrixA { get; set; } = 1;
+    public float TextMatrixB { get; set; } = 0;
+    public float TextMatrixC { get; set; } = 0;
+    public float TextMatrixD { get; set; } = 1;
+    public float TextMatrixE { get; set; } = 0; // X position
+    public float TextMatrixF { get; set; } = 0; // Y position
+
+    // Line matrix (start of current line)
+    public float LineMatrixE { get; set; } = 0;
+    public float LineMatrixF { get; set; } = 0;
+
+    public void Reset()
+    {
+        TextMatrixA = 1;
+        TextMatrixB = 0;
+        TextMatrixC = 0;
+        TextMatrixD = 1;
+        TextMatrixE = 0;
+        TextMatrixF = 0;
+        LineMatrixE = 0;
+        LineMatrixF = 0;
+    }
+
+    public TextState Clone()
+    {
+        return new TextState
+        {
+            FontName = FontName,
+            FontSize = FontSize,
+            CharSpacing = CharSpacing,
+            WordSpacing = WordSpacing,
+            HorizontalScale = HorizontalScale,
+            TextLeading = TextLeading,
+            TextRise = TextRise,
+            RenderMode = RenderMode,
+            TextMatrixA = TextMatrixA,
+            TextMatrixB = TextMatrixB,
+            TextMatrixC = TextMatrixC,
+            TextMatrixD = TextMatrixD,
+            TextMatrixE = TextMatrixE,
+            TextMatrixF = TextMatrixF,
+            LineMatrixE = LineMatrixE,
+            LineMatrixF = LineMatrixF
         };
     }
 }
