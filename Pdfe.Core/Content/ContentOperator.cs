@@ -56,6 +56,59 @@ public class ContentOperator
     {
     }
 
+    #region Operand Accessors
+
+    /// <summary>
+    /// Get a numeric operand by index.
+    /// </summary>
+    public double GetNumber(int index)
+    {
+        if (index < 0 || index >= Operands.Count)
+            return 0;
+
+        return Operands[index] switch
+        {
+            PdfInteger i => i.Value,
+            PdfReal r => r.Value,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Get a name operand by index (without leading slash).
+    /// </summary>
+    public string GetName(int index)
+    {
+        if (index < 0 || index >= Operands.Count)
+            return "";
+
+        return Operands[index] is PdfName n ? n.Value : "";
+    }
+
+    /// <summary>
+    /// Get a string operand by index.
+    /// </summary>
+    public string GetString(int index)
+    {
+        if (index < 0 || index >= Operands.Count)
+            return "";
+
+        return Operands[index] is PdfString s ? s.Value : "";
+    }
+
+    /// <summary>
+    /// Get an array operand by index.
+    /// </summary>
+    public PdfArray? GetArray(int index)
+    {
+        if (index < 0 || index >= Operands.Count)
+            return null;
+
+        return Operands[index] as PdfArray;
+    }
+
+    #endregion
+
     /// <summary>
     /// Check if this operator's bounding box intersects with a rectangle.
     /// </summary>
