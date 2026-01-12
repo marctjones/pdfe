@@ -206,8 +206,10 @@ public class RedactionEdgeCaseTests : IDisposable
     [Fact]
     public void Test_RedactImage_RemovesXObjectDoOperator()
     {
-        // Test that XObject images are removed when they intersect with redaction area.
+        // Test that XObject images are removed entirely when RedactImagesPartially=false.
         // Issue #192: XObject image redaction is supported via the Do operator.
+        // Issue #276: By default, images are partially redacted (kept with black boxes).
+        //            This test explicitly requests complete removal.
 
         // Arrange
         var pdfPath = CreatePdfWithImageXObject("xobject_image_test.pdf");
