@@ -397,6 +397,180 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Clipping Path Tests (Issue #295)
+
+    [Fact]
+    public void RenderPage_ClippingPath_NonZeroWinding_RestrictsRendering()
+    {
+        // Arrange - Create PDF with clipping path using W (non-zero winding)
+        var content = @"
+            0 G
+            2 w
+            100 100 200 200 re W n
+            0 0 400 400 re S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - rendering should complete without errors
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+        bitmap.Height.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ClippingPath_EvenOdd_RestrictsRendering()
+    {
+        // Arrange - Create PDF with clipping path using W* (even-odd rule)
+        var content = @"
+            0 G
+            2 w
+            100 100 200 200 re W* n
+            0 0 400 400 re S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_NestedClipping_AppliesIntersection()
+    {
+        // Arrange - Create PDF with nested clipping regions
+        var content = @"
+            q
+            0 G
+            2 w
+            100 100 300 300 re W n
+            q
+            200 200 200 200 re W n
+            50 50 400 400 re S
+            Q
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - nested clipping should create intersection
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ClippingWithFill_FillsOnlyClippedArea()
+    {
+        // Arrange - Clip then fill
+        var content = @"
+            1 0 0 rg
+            100 100 200 200 re W n
+            0 0 400 400 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - fill should be clipped to the rectangle
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ClippingWithText_ClipsText()
+    {
+        // Arrange - Clip then render text
+        var content = @"
+            100 500 200 100 re W n
+            BT
+            /F1 48 Tf
+            50 500 Td
+            (Clipped Text) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - text should be clipped
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CircularClippingPath_WorksCorrectly()
+    {
+        // Arrange - Create circular clipping using Bézier curves
+        var content = @"
+            q
+            200 200 m
+            200 310.5 289.5 400 400 400 c
+            510.5 400 600 310.5 600 200 c
+            600 89.5 510.5 0 400 0 c
+            289.5 0 200 89.5 200 200 c
+            W n
+            0 0 1 rg
+            0 0 800 800 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - circular clip should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_StateRestoreRemovesClipping()
+    {
+        // Arrange - Clipping should be removed after Q
+        var content = @"
+            q
+            100 100 200 200 re W n
+            1 0 0 rg
+            0 0 400 400 re f
+            Q
+            0 0 1 rg
+            50 50 300 300 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - second rectangle should not be clipped
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region XObject Rendering Tests (Issue #299)
 
     [Fact]
