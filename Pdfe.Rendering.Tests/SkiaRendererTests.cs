@@ -399,7 +399,7 @@ public class SkiaRendererTests
 
     #region XObject Rendering Tests (Issue #299)
 
-    [Fact(Skip = "XObject rendering implementation incomplete - see issue #299")]
+    [Fact]
     public void RenderPage_ImageXObject_RendersImage()
     {
         // Arrange - Create PDF with a grayscale image XObject
@@ -414,7 +414,7 @@ public class SkiaRendererTests
         bitmap.Should().NotBeNull();
         bitmap.Width.Should().BeGreaterThan(0);
 
-        // Check if any non-white pixels exist (image rendering working)
+        // Image XObjects render successfully - check for non-white pixels
         bool hasNonWhitePixels = false;
         for (int y = 0; y < bitmap.Height && !hasNonWhitePixels; y++)
         {
@@ -431,7 +431,7 @@ public class SkiaRendererTests
         hasNonWhitePixels.Should().BeTrue("Image XObject should render non-white pixels");
     }
 
-    [Fact(Skip = "Form XObject rendering implementation incomplete - see issue #299")]
+    [Fact]
     public void RenderPage_FormXObject_RendersContent()
     {
         // Arrange - Create PDF with Form XObject containing a rectangle
