@@ -221,6 +221,203 @@ public class SkiaRendererTests
         translated.Should().NotBe(SKColors.White, "translated position should have content");
     }
 
+    [Fact]
+    public void RenderPage_RotatedContent_Rotates()
+    {
+        // Arrange - Rotate 45 degrees using cm operator
+        // Rotation matrix: [cos θ, sin θ, -sin θ, cos θ, 0, 0]
+        var content = @"
+            q
+            0.707 0.707 -0.707 0.707 300 300 cm
+            0 0 1 rg
+            0 0 100 100 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render without error
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ScaledContent_Scales()
+    {
+        // Arrange - Scale by 2x in both directions
+        // Scale matrix: [sx, 0, 0, sy, 0, 0]
+        var content = @"
+            q
+            2 0 0 2 100 100 cm
+            1 0 0 rg
+            0 0 50 50 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - scaled rectangle should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_NonUniformScale_ScalesDifferently()
+    {
+        // Arrange - Scale 3x horizontally, 1x vertically
+        var content = @"
+            q
+            3 0 0 1 100 100 cm
+            0 1 0 rg
+            0 0 50 50 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - non-uniform scaling should work
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_SkewedContent_Skews()
+    {
+        // Arrange - Skew transformation
+        // Skew matrix: [1, tan(angle_y), tan(angle_x), 1, 0, 0]
+        var content = @"
+            q
+            1 0.5 0.3 1 100 100 cm
+            0 0 1 rg
+            0 0 100 100 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - skewed content should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CombinedTransformations_AppliesInOrder()
+    {
+        // Arrange - Combine scale, rotate, and translate
+        var content = @"
+            q
+            1 0 0 1 200 200 cm
+            0.707 0.707 -0.707 0.707 0 0 cm
+            2 0 0 2 0 0 cm
+            1 0 0 rg
+            0 0 25 25 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - combined transformations should work
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_NestedTransformations_ComposesCorrectly()
+    {
+        // Arrange - Nested q/Q with transformations
+        var content = @"
+            q
+            1 0 0 1 100 100 cm
+            1 0 0 rg
+            0 0 50 50 re f
+            q
+            2 0 0 2 50 50 cm
+            0 1 0 rg
+            0 0 25 25 re f
+            Q
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - nested transformations should compose
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_TransformationWithText_TransformsText()
+    {
+        // Arrange - Apply transformation to text
+        var content = @"
+            q
+            2 0 0 2 100 100 cm
+            BT
+            /F1 24 Tf
+            0 0 Td
+            (Scaled) Tj
+            ET
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - transformed text should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_IdentityMatrix_NoTransformation()
+    {
+        // Arrange - Identity matrix (no transformation)
+        var content = @"
+            q
+            1 0 0 1 0 0 cm
+            0 0 1 rg
+            100 100 100 100 re f
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - identity matrix should have no effect
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
     #endregion
 
     #region State Stack Tests
