@@ -1888,6 +1888,198 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Additional Graphics State Operators (i, ri)
+
+    [Fact]
+    public void RenderPage_Flatness_SetsTolerance()
+    {
+        // Arrange - i operator sets flatness tolerance (0-100)
+        // Lower values = more accurate curves, higher values = faster but less accurate
+        var content = @"
+            0 G
+            2 w
+            1 i
+            100 300 m
+            150 450 250 450 300 300 c
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render without error
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+        bitmap.Height.Should().BeGreaterThan(0);
+    }
+
+    [Theory]
+    [InlineData(0)]    // Maximum precision
+    [InlineData(1)]    // Standard tolerance
+    [InlineData(10)]   // Moderate tolerance
+    [InlineData(100)]  // Maximum tolerance
+    public void RenderPage_Flatness_AcceptsValidRange(double flatness)
+    {
+        // Arrange - Test various flatness values
+        var content = $@"
+            0 G
+            2 w
+            {flatness} i
+            100 200 m
+            200 300 300 200 400 300 c
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - all valid flatness values should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_RenderingIntent_AbsoluteColorimetric()
+    {
+        // Arrange - ri operator sets rendering intent
+        // /AbsoluteColorimetric - Preserve absolute color values
+        var content = @"
+            /AbsoluteColorimetric ri
+            1 0 0 rg
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - rendering intent should be applied
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_RenderingIntent_RelativeColorimetric()
+    {
+        // Arrange - /RelativeColorimetric - Adjust colors relative to white point
+        var content = @"
+            /RelativeColorimetric ri
+            0 1 0 rg
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_RenderingIntent_Saturation()
+    {
+        // Arrange - /Saturation - Preserve color saturation (for graphics)
+        var content = @"
+            /Saturation ri
+            0 0 1 rg
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_RenderingIntent_Perceptual()
+    {
+        // Arrange - /Perceptual - Preserve visual appearance (for images)
+        var content = @"
+            /Perceptual ri
+            0.5 0.5 0 rg
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_RenderingIntent_WithColorSpace()
+    {
+        // Arrange - Combine ri with color space operators
+        var content = @"
+            /RelativeColorimetric ri
+            /DeviceRGB cs
+            1 0 0 sc
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - ri should work with color space operators
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CombinedFlatnessAndRenderingIntent()
+    {
+        // Arrange - Test both i and ri operators together
+        var content = @"
+            /Perceptual ri
+            5 i
+            0 G
+            2 w
+            100 200 m
+            150 350 250 350 300 200 c
+            200 100 m
+            250 250 350 250 400 100 c
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - both operators should work together
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
