@@ -291,6 +291,7 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaiseAndSetIfChanged(ref _currentPageIndex, value);
             this.RaisePropertyChanged(nameof(DisplayPageNumber));
             UpdateThumbnailSelection();
+            UpdateSearchHighlights(); // Update highlights when page changes (fixes #310)
         }
     }
 
