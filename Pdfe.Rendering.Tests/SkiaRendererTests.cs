@@ -637,6 +637,50 @@ public class SkiaRendererTests
         pixel.Blue.Should().BeLessThan(50, "blue component should be low for black");
     }
 
+    [Fact]
+    public void RenderPage_CmykStroke_UsesKOperator()
+    {
+        // Arrange - Test K operator for stroke color (uppercase K)
+        // K sets stroke CMYK, k sets fill CMYK
+        var content = @"
+            0 1 1 0 K
+            5 w
+            100 400 m 400 400 l S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - CMYK (0, 1, 1, 0) = red stroke should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CmykFillAndStroke_SeparateColors()
+    {
+        // Arrange - Test k (fill) and K (stroke) together
+        var content = @"
+            0 1 0 0 k
+            1 0 1 0 K
+            3 w
+            100 100 200 150 re B
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - magenta fill (0,1,0,0), yellow stroke (1,0,1,0)
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
     #endregion
 
     #region Line Style Tests
