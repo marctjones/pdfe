@@ -188,25 +188,31 @@ public class ContentStreamWriterTests
     [Fact]
     public void Write_LineStyleOperators_RoundTrip()
     {
-        // Test J (line cap), j (line join), M (miter limit)
+        // Test J (line cap), j (line join), M (miter limit), d (dash pattern)
+        var dashArray = new PdfArray(new PdfObject[] { new PdfInteger(3), new PdfInteger(2) });
         var operators = new[]
         {
             new ContentOperator("J", new PdfObject[] { new PdfInteger(1) }),  // Round cap
             new ContentOperator("j", new PdfObject[] { new PdfInteger(1) }),  // Round join
-            new ContentOperator("M", new PdfObject[] { new PdfReal(4.0) })    // Miter limit
+            new ContentOperator("M", new PdfObject[] { new PdfReal(4.0) }),   // Miter limit
+            new ContentOperator("d", new PdfObject[] { dashArray, new PdfInteger(0) })  // Dash pattern
         };
         var content = new ContentStream(operators);
 
         var bytes = _writer.Write(content);
         var parsed = Parse(bytes);
 
-        parsed.Operators.Should().HaveCount(3);
+        parsed.Operators.Should().HaveCount(4);
         parsed.Operators[0].Name.Should().Be("J");
         parsed.Operators[0].GetNumber(0).Should().Be(1);
         parsed.Operators[1].Name.Should().Be("j");
         parsed.Operators[1].GetNumber(0).Should().Be(1);
         parsed.Operators[2].Name.Should().Be("M");
         parsed.Operators[2].GetNumber(0).Should().BeApproximately(4.0, 0.001);
+        parsed.Operators[3].Name.Should().Be("d");
+        parsed.Operators[3].GetArray(0).Should().NotBeNull();
+        parsed.Operators[3].GetArray(0)!.Count.Should().Be(2);
+        parsed.Operators[3].GetNumber(1).Should().Be(0);
     }
 
     [Fact]

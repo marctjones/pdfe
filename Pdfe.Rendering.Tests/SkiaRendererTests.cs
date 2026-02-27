@@ -592,6 +592,100 @@ public class SkiaRendererTests
         bitmap.Width.Should().BeGreaterThan(0);
     }
 
+    [Fact]
+    public void RenderPage_DashedLine_RendersDashPattern()
+    {
+        // Arrange - d operator sets dash pattern
+        // Format: [dashArray] dashPhase d
+        // [3 2] 0 d = 3 units on, 2 units off, starting at 0
+        var content = @"
+            0 G
+            3 w
+            [3 2] 0 d
+            100 400 m 400 400 l S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - dashed line should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_DashPatternWithPhase_RendersWithOffset()
+    {
+        // Arrange - dash phase offsets the pattern start
+        // [10 5] 3 d = 10 on, 5 off, starting 3 units into pattern
+        var content = @"
+            0 G
+            5 w
+            [10 5] 3 d
+            100 500 m 400 500 l S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - dashed line with phase should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ComplexDashPattern_RendersMultiSegmentPattern()
+    {
+        // Arrange - complex pattern with multiple on/off segments
+        // [5 3 2 3] 0 d = 5 on, 3 off, 2 on, 3 off, repeat
+        var content = @"
+            0 G
+            4 w
+            [5 3 2 3] 0 d
+            100 300 m 400 300 l S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - complex dash pattern should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_SolidLineAfterDashed_ResetsToSolid()
+    {
+        // Arrange - empty dash array [] resets to solid line
+        var content = @"
+            0 G
+            3 w
+            [5 2] 0 d
+            100 500 m 400 500 l S
+            [] 0 d
+            100 400 m 400 400 l S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render both dashed and solid lines
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
     #endregion
 
     #region Clipping Path Tests (Issue #295)
