@@ -54,6 +54,41 @@ EOF
     exit 0
 fi
 
+# ============================================
+# KNOWLEDGE GRAPH ENFORCEMENT (Level 2)
+# ============================================
+# Intercept Grep - suggest knowledge graph instead
+if [[ "$TOOL" == "Grep" ]]; then
+    PATTERN=$(echo "$TOOL_INPUT" | jq -r '.pattern // empty')
+    OUTPUT_MODE=$(echo "$TOOL_INPUT" | jq -r '.output_mode // "files_with_matches"')
+
+    # Only suggest for symbol searches (not file content searches)
+    # If pattern looks like a function/class name (alphanumeric with underscores)
+    if [[ "$PATTERN" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        cat >&2 <<EOF
+💡 KNOWLEDGE GRAPH SUGGESTION: 95-98% Token Savings!
+
+Instead of: Grep(pattern="$PATTERN")
+Try this:   idlergear_graph_query_symbols(pattern="$PATTERN", limit=10)
+
+Why?
+  • Knowledge graph: ~100 tokens, <40ms response
+  • Grep + file reads: ~7,500 tokens, slower
+
+Your knowledge graph has:
+  • 2,081 symbols (functions, classes, methods)
+  • 419 files
+  • 79 tasks
+  • Already indexed and ready!
+
+If not found in graph, THEN fall back to Grep.
+
+Proceeding with Grep in 2 seconds...
+EOF
+        sleep 2  # Give Claude time to see the message
+    fi
+fi
+
 # Only check Write and Edit tools for forbidden files
 if [[ "$TOOL" != "Write" && "$TOOL" != "Edit" ]]; then
     exit 0

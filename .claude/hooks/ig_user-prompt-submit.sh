@@ -71,6 +71,62 @@ if [ -S ".idlergear/daemon.sock" ] || [ -d ".idlergear/inbox" ]; then
     fi
 fi
 
+# ============================================
+# AUTO-CHECKPOINT: Save lightweight checkpoint every 15 minutes
+# ============================================
+# This runs in background to avoid blocking the user prompt
+if command -v idlergear >/dev/null 2>&1; then
+    (
+        # Check if we should save a checkpoint
+        CHECKPOINT_DIR=".idlergear/sessions/checkpoints"
+        if [ -d "$CHECKPOINT_DIR" ]; then
+            # Find latest checkpoint timestamp
+            LATEST_CHECKPOINT=$(ls -1t "$CHECKPOINT_DIR"/c*.json 2>/dev/null | head -1)
+            if [ -n "$LATEST_CHECKPOINT" ]; then
+                LAST_CHECKPOINT_TIME=$(stat -c %Y "$LATEST_CHECKPOINT" 2>/dev/null || stat -f %m "$LATEST_CHECKPOINT" 2>/dev/null)
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - LAST_CHECKPOINT_TIME))
+
+                # 15 minutes = 900 seconds
+                if [ "$ELAPSED" -ge 900 ]; then
+                    # Save checkpoint (lightweight)
+                    python3 -c "
+from idlergear.session_history import SessionHistory
+from idlergear.sessions import capture_session_state
+
+# Capture current state
+state = capture_session_state()
+
+# Save checkpoint (essential fields only)
+history = SessionHistory()
+checkpoint_state = {
+    'current_task_id': state.current_task.get('id') if state.current_task else None,
+    'working_files': state.uncommitted_changes,
+    'notes': state.next_steps,
+}
+history.save_checkpoint(checkpoint_state)
+" >/dev/null 2>&1 &
+                fi
+            else
+                # No checkpoints exist, create first one
+                python3 -c "
+from idlergear.session_history import SessionHistory
+from idlergear.sessions import capture_session_state
+
+state = capture_session_state()
+history = SessionHistory()
+checkpoint_state = {
+    'current_task_id': state.current_task.get('id') if state.current_task else None,
+    'working_files': state.uncommitted_changes,
+    'notes': state.next_steps,
+}
+history.save_checkpoint(checkpoint_state)
+" >/dev/null 2>&1 &
+            fi
+        fi
+    ) &
+fi
+
 # Pattern: Implementation command (implement, add, create, build, write, make)
 if echo "$PROMPT" | grep -qiE "^(implement|add|create|build|write|make|develop|fix) "; then
     # Extract feature name (first 5 words after the verb)
