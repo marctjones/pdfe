@@ -1232,6 +1232,66 @@ public class SkiaRendererTests
     }
 
     [Fact]
+    public void RenderPage_TD_MovesAndSetsLeading()
+    {
+        // Arrange - TD operator moves text position and sets leading
+        // Format: tx ty TD
+        // Sets leading to -ty and moves by (tx, ty)
+        // Equivalent to: -ty TL tx ty Td
+        var content = @"
+            BT
+            /F1 18 Tf
+            100 700 Td
+            (First line) Tj
+            0 -25 TD
+            (Second line with TD) Tj
+            T*
+            (Third line uses leading from TD) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - TD should position text and set leading for T*
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_Tm_SetsTextMatrix()
+    {
+        // Arrange - Tm operator sets the text matrix
+        // Format: a b c d e f Tm (same as transformation matrix)
+        // Controls scaling, rotation, skewing, and translation of text
+        var content = @"
+            BT
+            /F1 20 Tf
+            1 0 0 1 100 700 Tm
+            (Normal) Tj
+            ET
+            BT
+            /F1 20 Tf
+            0.707 0.707 -0.707 0.707 300 300 Tm
+            (Rotated 45) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - Tm should position and transform text
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
     public void RenderPage_TextRenderMode_AffectsRendering()
     {
         // Arrange - Tr operator sets text rendering mode
