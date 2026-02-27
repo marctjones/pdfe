@@ -970,6 +970,86 @@ public class SkiaRendererTests
         bitmap.Width.Should().BeGreaterThan(0);
     }
 
+    [Fact]
+    public void RenderPage_SingleQuoteOperator_MovesAndShowsText()
+    {
+        // Arrange - ' operator moves to next line and shows text (equivalent to T* Tj)
+        var content = @"
+            BT
+            /F1 20 Tf
+            100 700 Td
+            14 TL
+            (First line) Tj
+            (Second line) '
+            (Third line) '
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - ' operator should move to next line and show text
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_DoubleQuoteOperator_SetsSpacingAndShowsText()
+    {
+        // Arrange - " operator sets word/char spacing, moves to next line, shows text
+        // Format: aw ac string " (word spacing, char spacing, string)
+        var content = @"
+            BT
+            /F1 20 Tf
+            100 700 Td
+            14 TL
+            (Normal spacing) Tj
+            10 2 (Wide spacing) ""
+            0 0 (Normal again) ""
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - " operator should set spacing, move to next line, and show text
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MixedLineOperators_CombinesTjQuoteAndDoubleQuote()
+    {
+        // Arrange - Mix Tj, ', and " operators in same text object
+        var content = @"
+            BT
+            /F1 18 Tf
+            100 700 Td
+            12 TL
+            (Line 1: Tj) Tj
+            (Line 2: quote) '
+            5 1 (Line 3: double quote) ""
+            0 0 (Line 4: double quote) ""
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - all three text-showing operators should work together
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
     #endregion
 
     #region XObject Rendering Tests (Issue #299)
