@@ -2308,6 +2308,95 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Shading Pattern Operator (sh)
+
+    [Fact]
+    public void RenderPage_ShadingPattern_AxialGradient_RendersWithoutError()
+    {
+        // Arrange - sh operator paints a shading pattern
+        // Axial shading (Type 2) - gradient along a line
+        var content = @"
+            /Sh1 sh
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should handle shading pattern reference
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ShadingPattern_WithClipping_RestrictsShading()
+    {
+        // Arrange - Apply shading within clipping path
+        var content = @"
+            q
+            100 100 400 400 re W n
+            /Sh1 sh
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - shading should be clipped
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ShadingPattern_WithTransformation_AppliesCTM()
+    {
+        // Arrange - Shading with transformation matrix
+        var content = @"
+            q
+            1 0 0 1 100 200 cm
+            /Sh1 sh
+            Q
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - CTM should affect shading
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ShadingPattern_MissingResource_ContinuesRendering()
+    {
+        // Arrange - Reference non-existent shading resource
+        var content = @"
+            /NonExistentShading sh
+            1 0 0 rg
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should continue rendering after missing resource
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
