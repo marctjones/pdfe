@@ -5,6 +5,7 @@
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name')
+TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input')
 TOOL_RESPONSE=$(echo "$INPUT" | jq -r '.tool_response // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 
@@ -118,6 +119,47 @@ if [[ "$TOOL" == "Bash" ]] && [ -n "$TOOL_RESPONSE" ]; then
     if echo "$TOOL_RESPONSE" | grep -qiE "(--- FAIL:|FAIL.*\[)"; then
         SUGGESTIONS="${SUGGESTIONS}🐛 Go test failure detected\n"
         SUGGESTIONS="${SUGGESTIONS}  Consider: idlergear task create \"Fix Go test failure\" --label bug\n\n"
+    fi
+fi
+
+# ============================================
+# FILE ANNOTATION ENFORCEMENT (Level 2)
+# ============================================
+# After reading a file, check if it's annotated
+if [[ "$TOOL" == "Read" ]]; then
+    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
+
+    if [ -n "$FILE_PATH" ] && [ -f "$FILE_PATH" ]; then
+        # Check if file has annotation by checking centralized registry
+        REGISTRY_FILE=".idlergear/file_registry.json"
+        IS_ANNOTATED=false
+
+        # If registry exists, check if this file is in it
+        if [ -f "$REGISTRY_FILE" ]; then
+            # Use jq to check if file path exists in registry
+            if jq -e ".files[\"$FILE_PATH\"]" "$REGISTRY_FILE" &>/dev/null; then
+                IS_ANNOTATED=true
+            fi
+        fi
+
+        # If not annotated, remind to annotate
+        if [ "$IS_ANNOTATED" = false ]; then
+            # Get file basename for cleaner message
+            FILE_BASENAME=$(basename "$FILE_PATH")
+
+            # Only suggest for source files (not test files, config files, etc.)
+            if [[ "$FILE_PATH" =~ \.(py|js|ts|go|rs|java|cpp|c|h)$ ]] && [[ ! "$FILE_PATH" =~ test_|_test\.|\.test\. ]]; then
+                SUGGESTIONS="${SUGGESTIONS}📝 RECOMMENDED: Annotate $FILE_BASENAME for 93% token savings!\n\n"
+                SUGGESTIONS="${SUGGESTIONS}After reading a file, annotate it:\n"
+                SUGGESTIONS="${SUGGESTIONS}  idlergear_file_annotate(\n"
+                SUGGESTIONS="${SUGGESTIONS}    path=\"$FILE_PATH\",\n"
+                SUGGESTIONS="${SUGGESTIONS}    description=\"[what this file does]\",\n"
+                SUGGESTIONS="${SUGGESTIONS}    tags=[\"category\"],\n"
+                SUGGESTIONS="${SUGGESTIONS}    components=[\"ClassName\", \"function_name\"]\n"
+                SUGGESTIONS="${SUGGESTIONS}  )\n\n"
+                SUGGESTIONS="${SUGGESTIONS}Token savings: 93%% (200 vs 15,000 tokens on future searches)\n\n"
+            fi
+        fi
     fi
 fi
 

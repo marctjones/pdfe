@@ -1,7 +1,9 @@
 using System;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
@@ -388,22 +390,70 @@ public partial class PdfViewerControl : UserControl
         return new Rect(left, top, right - left, bottom - top);
     }
 
+    private Rectangle? _tempRedactionRect;
+    private Rectangle? _tempSelectionRect;
+
     private void DrawTemporaryRedactionRectangle(Point start, Point end)
     {
-        // TODO: Implement temporary rectangle drawing
-        // This will be part of Phase 2
+        if (_interactionLayer == null) return;
+
+        var rect = CreateRect(start, end);
+
+        if (_tempRedactionRect == null)
+        {
+            _tempRedactionRect = new Rectangle
+            {
+                Fill = new SolidColorBrush(Color.FromArgb(0x40, 0x00, 0x00, 0x00)), // Semi-transparent black
+                Stroke = Brushes.Red,
+                StrokeThickness = 2,
+                StrokeDashArray = new AvaloniaList<double> { 5, 5 }
+            };
+            _interactionLayer.Children.Add(_tempRedactionRect);
+        }
+
+        Canvas.SetLeft(_tempRedactionRect, rect.X);
+        Canvas.SetTop(_tempRedactionRect, rect.Y);
+        _tempRedactionRect.Width = rect.Width;
+        _tempRedactionRect.Height = rect.Height;
+        _tempRedactionRect.IsVisible = true;
     }
 
     private void DrawTemporarySelectionRectangle(Point start, Point end)
     {
-        // TODO: Implement temporary rectangle drawing
-        // This will be part of Phase 2
+        if (_interactionLayer == null) return;
+
+        var rect = CreateRect(start, end);
+
+        if (_tempSelectionRect == null)
+        {
+            _tempSelectionRect = new Rectangle
+            {
+                Fill = new SolidColorBrush(Color.FromArgb(0x40, 0x4C, 0xAF, 0x50)), // Semi-transparent green
+                Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0x4C, 0xAF, 0x50)),
+                StrokeThickness = 2,
+                StrokeDashArray = new AvaloniaList<double> { 5, 5 }
+            };
+            _interactionLayer.Children.Add(_tempSelectionRect);
+        }
+
+        Canvas.SetLeft(_tempSelectionRect, rect.X);
+        Canvas.SetTop(_tempSelectionRect, rect.Y);
+        _tempSelectionRect.Width = rect.Width;
+        _tempSelectionRect.Height = rect.Height;
+        _tempSelectionRect.IsVisible = true;
     }
 
     private void ClearTemporaryDrawings()
     {
-        // TODO: Clear temporary overlay elements
-        // This will be part of Phase 2
+        if (_tempRedactionRect != null)
+        {
+            _tempRedactionRect.IsVisible = false;
+        }
+
+        if (_tempSelectionRect != null)
+        {
+            _tempSelectionRect.IsVisible = false;
+        }
     }
 
     #endregion
@@ -454,6 +504,110 @@ public partial class PdfViewerControl : UserControl
     public void ZoomToActualSize()
     {
         ZoomLevel = 1.0;
+    }
+
+    /// <summary>
+    /// Add a search highlight rectangle at the specified coordinates.
+    /// </summary>
+    public void AddSearchHighlight(Rect area)
+    {
+        var searchLayer = this.FindControl<Canvas>("SearchHighlightsLayer");
+        if (searchLayer == null) return;
+
+        var highlight = new Rectangle
+        {
+            Fill = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0x00)), // Semi-transparent yellow
+            Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x98, 0x00)), // Orange border
+            StrokeThickness = 1,
+            Width = area.Width,
+            Height = area.Height
+        };
+
+        Canvas.SetLeft(highlight, area.X);
+        Canvas.SetTop(highlight, area.Y);
+        searchLayer.Children.Add(highlight);
+    }
+
+    /// <summary>
+    /// Clear all search highlights.
+    /// </summary>
+    public void ClearSearchHighlights()
+    {
+        var searchLayer = this.FindControl<Canvas>("SearchHighlightsLayer");
+        searchLayer?.Children.Clear();
+    }
+
+    /// <summary>
+    /// Add a pending redaction overlay at the specified coordinates.
+    /// </summary>
+    public void AddPendingRedaction(Rect area)
+    {
+        var redactionLayer = this.FindControl<Canvas>("PendingRedactionsLayer");
+        if (redactionLayer == null) return;
+
+        var rect = new Rectangle
+        {
+            Fill = Brushes.Transparent,
+            Stroke = Brushes.Red,
+            StrokeThickness = 2,
+            StrokeDashArray = new AvaloniaList<double> { 5, 3 },
+            Width = area.Width,
+            Height = area.Height
+        };
+
+        Canvas.SetLeft(rect, area.X);
+        Canvas.SetTop(rect, area.Y);
+        redactionLayer.Children.Add(rect);
+    }
+
+    /// <summary>
+    /// Clear all pending redaction overlays.
+    /// </summary>
+    public void ClearPendingRedactions()
+    {
+        var redactionLayer = this.FindControl<Canvas>("PendingRedactionsLayer");
+        redactionLayer?.Children.Clear();
+    }
+
+    /// <summary>
+    /// Add an applied redaction overlay (black rectangle) at the specified coordinates.
+    /// </summary>
+    public void AddAppliedRedaction(Rect area)
+    {
+        var appliedLayer = this.FindControl<Canvas>("AppliedRedactionsLayer");
+        if (appliedLayer == null) return;
+
+        var rect = new Rectangle
+        {
+            Fill = Brushes.Black,
+            Stroke = Brushes.Black,
+            StrokeThickness = 1,
+            Width = area.Width,
+            Height = area.Height
+        };
+
+        Canvas.SetLeft(rect, area.X);
+        Canvas.SetTop(rect, area.Y);
+        appliedLayer.Children.Add(rect);
+    }
+
+    /// <summary>
+    /// Clear all applied redaction overlays.
+    /// </summary>
+    public void ClearAppliedRedactions()
+    {
+        var appliedLayer = this.FindControl<Canvas>("AppliedRedactionsLayer");
+        appliedLayer?.Children.Clear();
+    }
+
+    /// <summary>
+    /// Clear all overlays (search, pending redactions, applied redactions).
+    /// </summary>
+    public void ClearAllOverlays()
+    {
+        ClearSearchHighlights();
+        ClearPendingRedactions();
+        ClearAppliedRedactions();
     }
 
     #endregion
