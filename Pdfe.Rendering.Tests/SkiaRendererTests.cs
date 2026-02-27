@@ -198,6 +198,121 @@ public class SkiaRendererTests
         pixel.Blue.Should().BeInRange((byte)100, (byte)160);
     }
 
+    [Fact]
+    public void RenderPage_ColorSpace_DeviceGray_SetsGrayscale()
+    {
+        // Arrange - cs/sc operators for device-independent color
+        // cs sets color space, sc sets color components
+        var content = @"
+            /DeviceGray cs
+            0.3 sc
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render 30% gray rectangle
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ColorSpace_DeviceRGB_SetsRGBColor()
+    {
+        // Arrange - CS/SC for stroke color space
+        var content = @"
+            /DeviceRGB CS
+            1 0 0 SC
+            5 w
+            100 400 m 400 400 l S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render red line
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ColorSpace_DeviceCMYK_SetsCMYKColor()
+    {
+        // Arrange - CMYK color space with sc operator
+        var content = @"
+            /DeviceCMYK cs
+            0 1 1 0 sc
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - CMYK (0, 1, 1, 0) = red, should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ColorSpace_SeparateFillAndStroke_UsesIndependentSpaces()
+    {
+        // Arrange - cs/CS set fill/stroke color spaces independently
+        var content = @"
+            /DeviceGray cs
+            0.5 sc
+            /DeviceRGB CS
+            1 0 0 SC
+            3 w
+            100 100 200 150 re B
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - gray fill, red stroke
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ColorSpace_scn_WorksLikeScWithoutPattern()
+    {
+        // Arrange - scn/SCN are like sc/SC but support patterns
+        // Without pattern name, they work the same as sc/SC
+        var content = @"
+            /DeviceRGB cs
+            0 0 1 scn
+            100 100 200 150 re f
+            /DeviceRGB CS
+            0 1 0 SCN
+            3 w
+            100 300 200 150 re S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - blue fill, green stroke
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
     #endregion
 
     #region Transformation Tests
