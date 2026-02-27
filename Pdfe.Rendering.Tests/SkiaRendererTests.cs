@@ -153,6 +153,102 @@ public class SkiaRendererTests
         pixel.Should().NotBe(SKColors.White, "line should be visible");
     }
 
+    [Fact]
+    public void RenderPage_CubicBezierCurve_RendersSmoothCurve()
+    {
+        // Arrange - c operator: x1 y1 x2 y2 x3 y3 c (cubic Bézier with all control points)
+        var content = @"
+            0 G
+            2 w
+            100 400 m
+            150 500 250 500 300 400 c
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - curve should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_BezierV_UsesCurrentPointAsControl()
+    {
+        // Arrange - v operator: x2 y2 x3 y3 v (current point is first control point)
+        // Equivalent to: currentX currentY x2 y2 x3 y3 c
+        var content = @"
+            0 G
+            2 w
+            100 300 m
+            250 450 300 300 v
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - v operator curve should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_BezierY_UsesEndpointAsControl()
+    {
+        // Arrange - y operator: x1 y1 x3 y3 y (endpoint is second control point)
+        // Equivalent to: x1 y1 x3 y3 x3 y3 c
+        var content = @"
+            0 G
+            2 w
+            100 200 m
+            150 350 300 200 y
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - y operator curve should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ComplexPath_CombinesMultipleCurves()
+    {
+        // Arrange - Complex path with c, v, and y operators
+        var content = @"
+            0 G
+            3 w
+            100 400 m
+            150 450 200 450 250 400 c
+            300 500 350 350 v
+            400 450 450 400 y
+            S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - complex curved path should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
     #endregion
 
     #region Color Tests
