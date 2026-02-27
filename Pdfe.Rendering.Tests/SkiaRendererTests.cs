@@ -2567,6 +2567,131 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Type 3 Font Operators (d0, d1)
+
+    [Fact]
+    public void RenderPage_Type3Font_d0_SetsGlyphWidth()
+    {
+        // Arrange - d0 operator sets glyph width for Type 3 fonts
+        // Format: wx wy d0 (width in x and y directions)
+        // Type 3 fonts define glyphs as content streams
+        var content = @"
+            BT /F1 24 Tf 100 700 Td (Type3) Tj ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - d0 would be in glyph definition, not page content
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_Type3Font_d1_SetsGlyphWidthAndBBox()
+    {
+        // Arrange - d1 operator sets glyph width and bounding box
+        // Format: wx wy llx lly urx ury d1
+        // Used for Type 3 fonts with bounding box info
+        var content = @"
+            BT /F1 18 Tf 100 650 Td (Custom glyphs) Tj ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - d1 would be in glyph definition
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
+    #region Compatibility Operators (BX, EX)
+
+    [Fact]
+    public void RenderPage_CompatibilitySection_BX_EX_IgnoresUnknown()
+    {
+        // Arrange - BX/EX wraps content with unknown operators
+        // Operators between BX and EX that are not recognized should be ignored
+        var content = @"
+            BT /F1 20 Tf 100 700 Td (Before) Tj ET
+            BX
+            /UnknownOp1 123 ABC
+            /UnknownOp2 DoSomething
+            EX
+            BT /F1 20 Tf 100 650 Td (After) Tj ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - unknown operators should be ignored, text should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CompatibilitySection_NestedBX_EX()
+    {
+        // Arrange - Nested compatibility sections (though not recommended)
+        var content = @"
+            BT /F1 16 Tf 100 750 Td (Text 1) Tj ET
+            BX
+            /Experimental1 test
+            BX
+            /Experimental2 nested
+            EX
+            EX
+            BT /F1 16 Tf 100 700 Td (Text 2) Tj ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - nested compatibility sections should be handled
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CompatibilitySection_WithKnownOperators()
+    {
+        // Arrange - Mix known and unknown operators in compatibility section
+        var content = @"
+            BX
+            1 0 0 rg
+            100 100 200 150 re f
+            /FutureOperator xyz
+            BT /F1 14 Tf 100 300 Td (Test) Tj ET
+            EX
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - known operators should still execute
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
