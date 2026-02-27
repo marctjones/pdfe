@@ -73,7 +73,8 @@ public class RedactionEdgeCaseTests : IDisposable
     [InlineData(270)]
     public void Test_RedactRotatedPage_CoordsTransformedCorrectly(int rotation)
     {
-        // SKIPPED: Rotated page redaction is complex because:
+        // SKIPPED: Test would verify {rotation}° rotated page redaction
+        // Rotated page redaction is complex because:
         // 1. PdfPig transforms letter coordinates based on page rotation
         // 2. XGraphics draws in the visual coordinate system
         // 3. The transformation between these systems varies by rotation angle
@@ -88,7 +89,7 @@ public class RedactionEdgeCaseTests : IDisposable
         // may not work correctly and users should rotate pages to 0° before redacting.
         //
         // See CLAUDE.md "Limitations" section for documentation.
-        Assert.True(true);
+        Assert.True(true, $"Test skipped for {rotation}° rotation - see issue #151");
     }
 
     [Fact]

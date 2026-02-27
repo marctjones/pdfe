@@ -121,7 +121,6 @@ public class ScreenshotContentShiftTests : IDisposable
 
         // Assert - Calculate shifts
         var shifts = new List<(string Marker, double ShiftX, double ShiftY, double TotalShift)>();
-        var maxAcceptableShiftPixels = 1.0 * Dpi / 72.0; // 1 point = ~4 pixels at 300 DPI
 
         foreach (var (marker, beforePos) in markerPositionsBefore)
         {
