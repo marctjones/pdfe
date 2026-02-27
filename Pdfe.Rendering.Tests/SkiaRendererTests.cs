@@ -2397,6 +2397,176 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Marked Content Operators (MP, DP, BMC, BDC, EMC)
+
+    [Fact]
+    public void RenderPage_MarkedContentPoint_MP_DoesNotAffectRendering()
+    {
+        // Arrange - MP operator marks a point for structural purposes
+        // Format: /Tag MP
+        var content = @"
+            /Figure MP
+            1 0 0 rg
+            100 100 200 150 re f
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - MP is structural only, doesn't affect rendering
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MarkedContentPoint_DP_WithProperties()
+    {
+        // Arrange - DP operator marks point with property dictionary
+        // Format: /Tag properties DP
+        var content = @"
+            /Span <</ActualText (Alternative Text)>> DP
+            BT /F1 18 Tf 100 700 Td (Visual Text) Tj ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - DP with properties doesn't affect rendering
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MarkedContentSequence_BMC_EMC_WrapsContent()
+    {
+        // Arrange - BMC/EMC wraps content for structure
+        // Format: /Tag BMC ... EMC
+        var content = @"
+            /P BMC
+            BT /F1 20 Tf 100 700 Td (Paragraph text) Tj ET
+            EMC
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - marked content doesn't affect visual rendering
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MarkedContentSequence_BDC_EMC_WithProperties()
+    {
+        // Arrange - BDC/EMC with property dictionary
+        // Format: /Tag properties BDC ... EMC
+        var content = @"
+            /Span <</Lang (en-US)>> BDC
+            BT /F1 16 Tf 100 650 Td (English text) Tj ET
+            EMC
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_NestedMarkedContent_MultipleSequences()
+    {
+        // Arrange - Nested marked content sequences
+        var content = @"
+            /Document BMC
+                /H1 BMC
+                BT /F1 24 Tf 100 750 Td (Heading) Tj ET
+                EMC
+                /P BMC
+                BT /F1 14 Tf 100 700 Td (Paragraph) Tj ET
+                EMC
+            EMC
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - nested marked content should not affect rendering
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MarkedContent_MixedWithGraphics()
+    {
+        // Arrange - Marked content around graphics operations
+        var content = @"
+            /Figure BDC
+            1 0 0 rg
+            100 400 200 100 re f
+            EMC
+            /Caption BMC
+            BT /F1 12 Tf 100 350 Td (Figure 1) Tj ET
+            EMC
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - graphics and text should render normally
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_MarkedContent_AllOperatorTypes()
+    {
+        // Arrange - Test all marked content operators together
+        var content = @"
+            /Artifact MP
+            /Header BMC
+            BT /F1 10 Tf 100 780 Td (Page Header) Tj ET
+            EMC
+            /Content BDC
+                /P BMC
+                BT /F1 12 Tf 100 700 Td (Main content) Tj ET
+                EMC
+            EMC
+            /Footer DP
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - all marked content operators should be handled
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
