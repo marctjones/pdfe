@@ -512,6 +512,27 @@ public readonly record struct PdfRectangle(double Left, double Bottom, double Ri
         );
     }
 
+    /// <summary>
+    /// Check if this rectangle intersects with another rectangle.
+    /// </summary>
+    public bool IntersectsWith(PdfRectangle other)
+    {
+        var a = Normalize();
+        var b = other.Normalize();
+        return a.Left < b.Right && a.Right > b.Left &&
+               a.Bottom < b.Top && a.Top > b.Bottom;
+    }
+
+    /// <summary>
+    /// Check if a point is contained within this rectangle.
+    /// </summary>
+    public bool Contains(double x, double y)
+    {
+        var norm = Normalize();
+        return x >= norm.Left && x <= norm.Right &&
+               y >= norm.Bottom && y <= norm.Top;
+    }
+
     /// <inheritdoc />
     public override string ToString() => $"[{Left:F2}, {Bottom:F2}, {Right:F2}, {Top:F2}]";
 }
