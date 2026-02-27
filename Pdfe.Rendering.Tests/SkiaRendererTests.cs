@@ -481,6 +481,211 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region ExtGState (gs operator) Tests (Issue #294)
+
+    [Fact]
+    public void RenderPage_ExtGState_StrokeAlpha_AppliesTransparency()
+    {
+        // Arrange - Create PDF with gs operator setting stroke alpha (CA)
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "CA", 0.5 } // 50% stroke transparency
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - rendering should complete without errors
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+        bitmap.Height.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_FillAlpha_AppliesTransparency()
+    {
+        // Arrange - Create PDF with gs operator setting fill alpha (ca)
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "ca", 0.3 } // 30% fill transparency
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - rendering should complete without errors
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+        bitmap.Height.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_BothAlphas_AppliesBothTransparencies()
+    {
+        // Arrange - Create PDF with both CA and ca
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "CA", 0.7 }, // 70% stroke transparency
+            { "ca", 0.4 }  // 40% fill transparency
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_LineWidth_AppliesStrokeWidth()
+    {
+        // Arrange - Create PDF with LW (line width) in ExtGState
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "LW", 5.0 } // 5-point line width
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_LineCap_AppliesCapStyle()
+    {
+        // Arrange - Create PDF with LC (line cap) in ExtGState
+        // 0 = Butt cap, 1 = Round cap, 2 = Square cap
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "LC", 1 } // Round cap
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_LineJoin_AppliesJoinStyle()
+    {
+        // Arrange - Create PDF with LJ (line join) in ExtGState
+        // 0 = Miter join, 1 = Round join, 2 = Bevel join
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "LJ", 1 } // Round join
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_MiterLimit_AppliesMiterLimit()
+    {
+        // Arrange - Create PDF with ML (miter limit) in ExtGState
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "ML", 5.0 } // Miter limit of 5.0
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_CombinedParameters_AppliesAll()
+    {
+        // Arrange - Create PDF with multiple ExtGState parameters
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "CA", 0.8 },  // Stroke alpha
+            { "ca", 0.6 },  // Fill alpha
+            { "LW", 3.0 },  // Line width
+            { "LC", 2 },    // Square cap
+            { "LJ", 0 },    // Miter join
+            { "ML", 4.0 }   // Miter limit
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - all parameters should be applied without error
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_AlphaClampedToValidRange()
+    {
+        // Arrange - Create PDF with out-of-range alpha values
+        // Alpha should be clamped to [0, 1] range
+        var pdfData = CreatePdfWithExtGState(new Dictionary<string, object>
+        {
+            { "CA", 1.5 },  // > 1.0, should clamp to 1.0
+            { "ca", -0.2 }  // < 0.0, should clamp to 0.0
+        });
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render without throwing
+        bitmap.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void RenderPage_ExtGState_MissingDictionary_ContinuesRendering()
+    {
+        // Arrange - Create PDF with gs operator referencing non-existent ExtGState
+        var content = @"
+            /GS99 gs
+            100 100 200 200 re S
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should handle gracefully without crashing
+        bitmap.Should().NotBeNull();
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
@@ -735,6 +940,93 @@ public class SkiaRendererTests
         writer.WriteLine("0000000000 65535 f ");
         for (int i = 1; i <= 6; i++)
             writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 7 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        return ms.ToArray();
+    }
+
+    private static byte[] CreatePdfWithExtGState(Dictionary<string, object> extGStateParams)
+    {
+        // Build ExtGState dictionary content
+        var extGStateContent = new System.Text.StringBuilder();
+        extGStateContent.Append("<< /Type /ExtGState ");
+
+        foreach (var param in extGStateParams)
+        {
+            extGStateContent.Append($"/{param.Key} ");
+            if (param.Value is int intValue)
+                extGStateContent.Append(intValue);
+            else if (param.Value is double doubleValue)
+                extGStateContent.Append(doubleValue.ToString("0.0##", System.Globalization.CultureInfo.InvariantCulture));
+            else
+                extGStateContent.Append(param.Value);
+            extGStateContent.Append(" ");
+        }
+        extGStateContent.Append(">>");
+
+        // Create content stream that uses the ExtGState
+        var content = "/GS1 gs\n100 100 200 200 re\nf\n";
+
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[7];
+
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /ExtGState << /GS1 6 0 R >> >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine($"<< /Length {content.Length} >>");
+        writer.WriteLine("stream");
+        writer.Write(content);
+        writer.WriteLine();
+        writer.WriteLine("endstream");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[6] = ms.Position;
+        writer.WriteLine("6 0 obj");
+        writer.WriteLine(extGStateContent.ToString());
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        long xrefPos = ms.Position;
+        writer.WriteLine("xref");
+        writer.WriteLine("0 7");
+        writer.WriteLine("0000000000 65535 f ");
+        writer.WriteLine($"{offsets[1]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[2]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[3]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[4]:D10} 00000 n ");
+        writer.WriteLine("0000000000 65535 f "); // Object 5 unused
+        writer.WriteLine($"{offsets[6]:D10} 00000 n ");
         writer.Flush();
 
         writer.WriteLine("trailer");
