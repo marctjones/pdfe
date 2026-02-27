@@ -186,6 +186,110 @@ public class ContentStreamWriterTests
     }
 
     [Fact]
+    public void Write_LineStyleOperators_RoundTrip()
+    {
+        // Test J (line cap), j (line join), M (miter limit)
+        var operators = new[]
+        {
+            new ContentOperator("J", new PdfObject[] { new PdfInteger(1) }),  // Round cap
+            new ContentOperator("j", new PdfObject[] { new PdfInteger(1) }),  // Round join
+            new ContentOperator("M", new PdfObject[] { new PdfReal(4.0) })    // Miter limit
+        };
+        var content = new ContentStream(operators);
+
+        var bytes = _writer.Write(content);
+        var parsed = Parse(bytes);
+
+        parsed.Operators.Should().HaveCount(3);
+        parsed.Operators[0].Name.Should().Be("J");
+        parsed.Operators[0].GetNumber(0).Should().Be(1);
+        parsed.Operators[1].Name.Should().Be("j");
+        parsed.Operators[1].GetNumber(0).Should().Be(1);
+        parsed.Operators[2].Name.Should().Be("M");
+        parsed.Operators[2].GetNumber(0).Should().BeApproximately(4.0, 0.001);
+    }
+
+    [Fact]
+    public void Write_ClippingOperators_RoundTrip()
+    {
+        // Test W (clip non-zero winding) and W* (clip even-odd)
+        var operators = new[]
+        {
+            ContentOperator.Rectangle(50, 50, 100, 100),
+            new ContentOperator("W", Array.Empty<PdfObject>()),
+            new ContentOperator("n", Array.Empty<PdfObject>()),
+            ContentOperator.Rectangle(200, 200, 100, 100),
+            new ContentOperator("W*", Array.Empty<PdfObject>()),
+            new ContentOperator("n", Array.Empty<PdfObject>())
+        };
+        var content = new ContentStream(operators);
+
+        var bytes = _writer.Write(content);
+        var parsed = Parse(bytes);
+
+        parsed.Operators.Should().HaveCount(6);
+        parsed.Operators[1].Name.Should().Be("W");
+        parsed.Operators[4].Name.Should().Be("W*");
+    }
+
+    [Fact]
+    public void Write_AdvancedTextOperators_RoundTrip()
+    {
+        // Test ' (move to next line and show text) and " (set spacing and show text)
+        var operators = new[]
+        {
+            ContentOperator.BeginText(),
+            new ContentOperator("'", new PdfObject[] { new PdfString("Next line") }),
+            new ContentOperator("\"", new PdfObject[]
+            {
+                new PdfReal(0),      // word spacing
+                new PdfReal(0),      // character spacing
+                new PdfString("Text with spacing")
+            }),
+            ContentOperator.EndText()
+        };
+        var content = new ContentStream(operators);
+
+        var bytes = _writer.Write(content);
+        var parsed = Parse(bytes);
+
+        parsed.Operators.Should().HaveCount(4);
+        parsed.Operators[1].Name.Should().Be("'");
+        parsed.Operators[1].GetString(0).Should().Be("Next line");
+        parsed.Operators[2].Name.Should().Be("\"");
+        parsed.Operators[2].GetString(2).Should().Be("Text with spacing");
+    }
+
+    [Fact]
+    public void Write_ColorSpaceOperators_RoundTrip()
+    {
+        // Test cs/CS (set color space) and sc/SC/scn/SCN (set color)
+        var operators = new[]
+        {
+            new ContentOperator("cs", new PdfObject[] { new PdfName("DeviceGray") }),
+            new ContentOperator("CS", new PdfObject[] { new PdfName("DeviceRGB") }),
+            new ContentOperator("sc", new PdfObject[] { new PdfReal(0.5) }),
+            new ContentOperator("SC", new PdfObject[] { new PdfReal(1), new PdfReal(0), new PdfReal(0) }),
+            new ContentOperator("scn", new PdfObject[] { new PdfReal(0.3) }),
+            new ContentOperator("SCN", new PdfObject[] { new PdfReal(0), new PdfReal(1), new PdfReal(0) })
+        };
+        var content = new ContentStream(operators);
+
+        var bytes = _writer.Write(content);
+        var parsed = Parse(bytes);
+
+        parsed.Operators.Should().HaveCount(6);
+        parsed.Operators[0].Name.Should().Be("cs");
+        parsed.Operators[0].GetName(0).Should().Be("DeviceGray");
+        parsed.Operators[1].Name.Should().Be("CS");
+        parsed.Operators[1].GetName(0).Should().Be("DeviceRGB");
+        parsed.Operators[2].Name.Should().Be("sc");
+        parsed.Operators[3].Name.Should().Be("SC");
+        parsed.Operators[4].Name.Should().Be("scn");
+        parsed.Operators[5].Name.Should().Be("SCN");
+    }
+
+    [Fact]
     public void Write_TextOperators_RoundTrip()
     {
         var operators = new[]
