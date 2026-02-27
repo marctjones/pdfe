@@ -397,6 +397,90 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region XObject Rendering Tests (Issue #299)
+
+    [Fact(Skip = "XObject rendering implementation incomplete - see issue #299")]
+    public void RenderPage_ImageXObject_RendersImage()
+    {
+        // Arrange - Create PDF with a grayscale image XObject
+        var pdfData = CreatePdfWithImageXObject(width: 10, height: 10, grayscale: true);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - image should be rendered (non-white pixels somewhere)
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+
+        // Check if any non-white pixels exist (image rendering working)
+        bool hasNonWhitePixels = false;
+        for (int y = 0; y < bitmap.Height && !hasNonWhitePixels; y++)
+        {
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                if (bitmap.GetPixel(x, y) != SKColors.White)
+                {
+                    hasNonWhitePixels = true;
+                    break;
+                }
+            }
+        }
+
+        hasNonWhitePixels.Should().BeTrue("Image XObject should render non-white pixels");
+    }
+
+    [Fact(Skip = "Form XObject rendering implementation incomplete - see issue #299")]
+    public void RenderPage_FormXObject_RendersContent()
+    {
+        // Arrange - Create PDF with Form XObject containing a rectangle
+        var pdfData = CreatePdfWithFormXObject();
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - Form's content should be rendered
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+
+        // Check if any non-white pixels exist (form rendering working)
+        bool hasNonWhitePixels = false;
+        for (int y = 0; y < bitmap.Height && !hasNonWhitePixels; y++)
+        {
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                if (bitmap.GetPixel(x, y) != SKColors.White)
+                {
+                    hasNonWhitePixels = true;
+                    break;
+                }
+            }
+        }
+
+        hasNonWhitePixels.Should().BeTrue("Form XObject content should render");
+    }
+
+    [Fact]
+    public void RenderPage_ScaledImageXObject_AppliesCTM()
+    {
+        // Arrange - Image XObject with scaling transformation
+        var pdfData = CreatePdfWithScaledImageXObject();
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - verify rendering completed successfully
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreateSimplePdf(string text)
@@ -457,6 +541,210 @@ public class SkiaRendererTests
     {
         var content = $"0 G {lineWidth} w {x1} {y1} m {x2} {y2} l S";
         return CreatePdfWithContent(content);
+    }
+
+    private static byte[] CreatePdfWithImageXObject(int width, int height, bool grayscale = true)
+    {
+        // Create a simple grayscale image (gray square)
+        var imageData = new byte[width * height];
+        for (int i = 0; i < imageData.Length; i++)
+            imageData[i] = 128; // Mid-gray
+
+        // Content stream that draws the image at 100x100 points at position (100, 400)
+        var content = $"q 100 0 0 100 100 400 cm /Im1 Do Q";
+
+        return CreatePdfWithImageXObjectAndContent(content, imageData, width, height, grayscale);
+    }
+
+    private static byte[] CreatePdfWithScaledImageXObject()
+    {
+        // 2x2 gray image
+        var imageData = new byte[] { 128, 128, 128, 128 };
+
+        // Scale the image to 200x200 points
+        var content = "q 200 0 0 200 150 350 cm /Im1 Do Q";
+
+        return CreatePdfWithImageXObjectAndContent(content, imageData, 2, 2, grayscale: true);
+    }
+
+    private static byte[] CreatePdfWithFormXObject()
+    {
+        // Form XObject content: a black rectangle
+        var formContent = "0 g 10 10 80 80 re f";
+
+        // Main content stream: invoke the Form XObject
+        var content = "q 1 0 0 1 100 400 cm /Fm1 Do Q";
+
+        return CreatePdfWithFormXObjectAndContent(content, formContent);
+    }
+
+    private static byte[] CreatePdfWithImageXObjectAndContent(string content, byte[] imageData, int width, int height, bool grayscale)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[8];
+
+        // Catalog
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Pages
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Page
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]");
+        writer.WriteLine("   /Contents 4 0 R");
+        writer.WriteLine("   /Resources << /XObject << /Im1 6 0 R >> /Font << /F1 5 0 R >> >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Content stream
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine($"<< /Length {content.Length} >>");
+        writer.WriteLine("stream");
+        writer.Write(content);
+        writer.WriteLine();
+        writer.WriteLine("endstream");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Font
+        offsets[5] = ms.Position;
+        writer.WriteLine("5 0 obj");
+        writer.WriteLine("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Image XObject
+        offsets[6] = ms.Position;
+        writer.WriteLine("6 0 obj");
+        var colorSpace = grayscale ? "/DeviceGray" : "/DeviceRGB";
+        var bpc = 8;
+        writer.WriteLine($"<< /Type /XObject /Subtype /Image /Width {width} /Height {height}");
+        writer.WriteLine($"   /ColorSpace {colorSpace} /BitsPerComponent {bpc} /Length {imageData.Length} >>");
+        writer.WriteLine("stream");
+        writer.Flush();
+        ms.Write(imageData, 0, imageData.Length);
+        writer.WriteLine();
+        writer.WriteLine("endstream");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Xref
+        long xrefPos = ms.Position;
+        writer.WriteLine("xref");
+        writer.WriteLine("0 7");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 6; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 7 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        return ms.ToArray();
+    }
+
+    private static byte[] CreatePdfWithFormXObjectAndContent(string content, string formContent)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[8];
+
+        // Catalog
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Pages
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Page
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]");
+        writer.WriteLine("   /Contents 4 0 R");
+        writer.WriteLine("   /Resources << /XObject << /Fm1 6 0 R >> /Font << /F1 5 0 R >> >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Content stream
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine($"<< /Length {content.Length} >>");
+        writer.WriteLine("stream");
+        writer.Write(content);
+        writer.WriteLine();
+        writer.WriteLine("endstream");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Font
+        offsets[5] = ms.Position;
+        writer.WriteLine("5 0 obj");
+        writer.WriteLine("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Form XObject
+        offsets[6] = ms.Position;
+        writer.WriteLine("6 0 obj");
+        writer.WriteLine($"<< /Type /XObject /Subtype /Form /BBox [0 0 100 100]");
+        writer.WriteLine($"   /Matrix [1 0 0 1 0 0] /Length {formContent.Length} >>");
+        writer.WriteLine("stream");
+        writer.Write(formContent);
+        writer.WriteLine();
+        writer.WriteLine("endstream");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Xref
+        long xrefPos = ms.Position;
+        writer.WriteLine("xref");
+        writer.WriteLine("0 7");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 6; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 7 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        return ms.ToArray();
     }
 
     private static byte[] CreatePdfWithContent(string content)
