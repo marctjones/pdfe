@@ -132,6 +132,144 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Path Painting Operators Tests
+
+    [Fact]
+    public void RenderPage_CloseAndStroke_sOperator()
+    {
+        // Arrange - s operator: close and stroke path
+        // Equivalent to: h S (close path, then stroke)
+        var content = @"
+            0 G
+            2 w
+            100 400 m
+            200 400 l
+            200 500 l
+            100 500 l
+            s
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - closed square outline should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CloseFillStroke_bOperator()
+    {
+        // Arrange - b operator: close, fill, and stroke path (nonzero winding)
+        // Equivalent to: h B (close, then fill and stroke)
+        var content = @"
+            0.5 g
+            0 G
+            2 w
+            100 300 m
+            200 300 l
+            200 400 l
+            100 400 l
+            b
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - filled and stroked square should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CloseFillStrokeEvenOdd_bStarOperator()
+    {
+        // Arrange - b* operator: close, fill (even-odd), and stroke
+        // Even-odd rule for complex self-intersecting paths
+        var content = @"
+            0.7 g
+            0 G
+            2 w
+            150 200 m
+            250 300 l
+            150 300 l
+            250 200 l
+            b*
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - self-intersecting path with even-odd fill should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_FillStrokeEvenOdd_BStarOperator()
+    {
+        // Arrange - B* operator: fill (even-odd) and stroke, without closing
+        // Difference from B is even-odd rule vs nonzero winding
+        var content = @"
+            0.8 g
+            0 G
+            3 w
+            100 400 m
+            300 400 l
+            300 500 l
+            100 500 l
+            100 400 l
+            B*
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - rectangle filled and stroked with even-odd rule
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_ComplexPath_MultipleWindingRules()
+    {
+        // Arrange - Test nonzero winding (B) vs even-odd (B*) on same complex shape
+        var content = @"
+            0 G
+            2 w
+            0.3 g
+            50 500 m 150 500 l 150 600 l 50 600 l 50 500 l
+            B
+            0.6 g
+            250 500 m 350 500 l 350 600 l 250 600 l 250 500 l
+            B*
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - both squares should render (simple shapes, no difference in fill rules)
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region Line Rendering Tests
 
     [Fact]
