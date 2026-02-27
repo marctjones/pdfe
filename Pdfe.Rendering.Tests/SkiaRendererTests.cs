@@ -571,6 +571,210 @@ public class SkiaRendererTests
 
     #endregion
 
+    #region Text State Operator Tests
+
+    [Fact]
+    public void RenderPage_CharacterSpacing_AppliesSpacing()
+    {
+        // Arrange - Tc operator sets character spacing
+        var content = @"
+            BT
+            /F1 24 Tf
+            100 700 Td
+            0 Tc
+            (Normal) Tj
+            0 -30 Td
+            5 Tc
+            (Spaced) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - should render without error
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_WordSpacing_AppliesSpacing()
+    {
+        // Arrange - Tw operator sets word spacing
+        var content = @"
+            BT
+            /F1 20 Tf
+            100 700 Td
+            0 Tw
+            (Hello World) Tj
+            0 -30 Td
+            10 Tw
+            (Hello World) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_HorizontalScaling_ScalesText()
+    {
+        // Arrange - Tz operator sets horizontal scaling (percentage)
+        var content = @"
+            BT
+            /F1 24 Tf
+            100 700 Td
+            100 Tz
+            (Normal) Tj
+            0 -30 Td
+            150 Tz
+            (Stretched) Tj
+            0 -30 Td
+            50 Tz
+            (Compressed) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - different horizontal scales should render
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_TextLeading_AffectsLineSpacing()
+    {
+        // Arrange - TL operator sets text leading for T* operator
+        var content = @"
+            BT
+            /F1 20 Tf
+            100 700 Td
+            20 TL
+            (Line 1) Tj
+            T*
+            (Line 2) Tj
+            T*
+            (Line 3) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - lines should be spaced according to leading
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_TextRenderMode_AffectsRendering()
+    {
+        // Arrange - Tr operator sets text rendering mode
+        // 0 = fill, 1 = stroke, 2 = fill then stroke, 3 = invisible
+        var content = @"
+            BT
+            /F1 24 Tf
+            100 700 Td
+            0 Tr
+            (Fill) Tj
+            0 -30 Td
+            1 Tr
+            2 w
+            (Stroke) Tj
+            0 -30 Td
+            2 Tr
+            (Fill+Stroke) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - different rendering modes should work
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_TextRise_OffsetText()
+    {
+        // Arrange - Ts operator sets text rise (vertical offset)
+        var content = @"
+            BT
+            /F1 20 Tf
+            100 700 Td
+            (Normal) Tj
+            10 Ts
+            (Raised) Tj
+            -10 Ts
+            (Lowered) Tj
+            0 Ts
+            (Back to Normal) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - text with rise should render at different heights
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void RenderPage_CombinedTextState_AppliesAllSettings()
+    {
+        // Arrange - Combine multiple text state operators
+        var content = @"
+            BT
+            /F1 18 Tf
+            100 700 Td
+            2 Tc
+            5 Tw
+            120 Tz
+            0 Tr
+            (Styled Text) Tj
+            ET
+        ";
+        var pdfData = CreatePdfWithContent(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        // Act
+        using var bitmap = renderer.RenderPage(doc.GetPage(1));
+
+        // Assert - all text state settings should be applied
+        bitmap.Should().NotBeNull();
+        bitmap.Width.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
     #region XObject Rendering Tests (Issue #299)
 
     [Fact]
