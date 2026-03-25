@@ -27,7 +27,6 @@
     <!-- PDF Libraries (Non-Copyleft) -->
     <PackageReference Include="PDFsharp" Version="6.2.2" /> <!-- MIT License -->
     <PackageReference Include="PdfPig" Version="0.1.11" />
-    <PackageReference Include="PDFtoImage" Version="4.0.2" />
     <PackageReference Include="Portable.BouncyCastle" Version="1.9.0" /> <!-- MIT License -->
     <PackageReference Include="SkiaSharp" Version="2.88.9" /> <!-- MIT License -->
 
