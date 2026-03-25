@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Media;
+using PdfEditor.Controls;
 using PdfEditor.Models;
 using PdfEditor.ViewModels;
 using System;
@@ -14,13 +15,7 @@ namespace PdfEditor.Views;
 
 public partial class MainWindow : Window
 {
-    private Point _selectionStartPoint;
-    private bool _isSelecting;
-    private Point _textSelectionStartPoint;
-    private bool _isSelectingText;
-    private Canvas? _searchHighlightsCanvas;
-    private Canvas? _pendingRedactionsCanvas;
-    private Canvas? _appliedRedactionsCanvas;
+    private PdfViewerControl? _pdfViewerControl;
     private readonly WindowSettings _windowSettings;
 
     public MainWindow()
@@ -47,6 +42,9 @@ public partial class MainWindow : Window
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        // Get reference to PdfViewerControl
+        _pdfViewerControl ??= this.FindControl<PdfViewerControl>("PdfViewerControl");
+
         if (DataContext is MainWindowViewModel viewModel)
         {
             // Subscribe to search highlights collection changes
@@ -74,30 +72,17 @@ public partial class MainWindow : Window
 
     private void UpdateSearchHighlightsCanvas()
     {
-        _searchHighlightsCanvas ??= this.FindControl<Canvas>("SearchHighlightsCanvas");
-
-        if (_searchHighlightsCanvas == null)
+        if (_pdfViewerControl == null)
             return;
 
-        _searchHighlightsCanvas.Children.Clear();
+        _pdfViewerControl.ClearSearchHighlights();
 
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
         foreach (var rect in viewModel.CurrentPageSearchHighlights)
         {
-            var highlight = new Rectangle
-            {
-                Fill = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0x00)), // Semi-transparent yellow
-                Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x98, 0x00)), // Orange border
-                StrokeThickness = 1,
-                Width = rect.Width,
-                Height = rect.Height
-            };
-
-            Canvas.SetLeft(highlight, rect.X);
-            Canvas.SetTop(highlight, rect.Y);
-            _searchHighlightsCanvas.Children.Add(highlight);
+            _pdfViewerControl.AddSearchHighlight(rect);
         }
     }
 
@@ -108,14 +93,11 @@ public partial class MainWindow : Window
 
     private void UpdateRedactionOverlays()
     {
-        _pendingRedactionsCanvas ??= this.FindControl<Canvas>("PendingRedactionsCanvas");
-        _appliedRedactionsCanvas ??= this.FindControl<Canvas>("AppliedRedactionsCanvas");
-
-        if (_pendingRedactionsCanvas == null || _appliedRedactionsCanvas == null)
+        if (_pdfViewerControl == null)
             return;
 
-        _pendingRedactionsCanvas.Children.Clear();
-        _appliedRedactionsCanvas.Children.Clear();
+        _pdfViewerControl.ClearPendingRedactions();
+        _pdfViewerControl.ClearAppliedRedactions();
 
         if (DataContext is not MainWindowViewModel viewModel)
             return;
@@ -125,36 +107,13 @@ public partial class MainWindow : Window
         // Draw pending redactions (red dashed border)
         foreach (var pending in viewModel.RedactionWorkflow.GetPendingForPage(currentPage))
         {
-            var rect = new Rectangle
-            {
-                Fill = Brushes.Transparent,
-                Stroke = Brushes.Red,
-                StrokeThickness = 2,
-                StrokeDashArray = new AvaloniaList<double> { 5, 3 }, // Dashed pattern
-                Width = pending.Area.Width,
-                Height = pending.Area.Height
-            };
-
-            Canvas.SetLeft(rect, pending.Area.X);
-            Canvas.SetTop(rect, pending.Area.Y);
-            _pendingRedactionsCanvas.Children.Add(rect);
+            _pdfViewerControl.AddPendingRedaction(pending.Area);
         }
 
         // Draw applied redactions (black solid rectangle)
         foreach (var applied in viewModel.RedactionWorkflow.GetAppliedForPage(currentPage))
         {
-            var rect = new Rectangle
-            {
-                Fill = Brushes.Black,
-                Stroke = Brushes.Black,
-                StrokeThickness = 1,
-                Width = applied.Area.Width,
-                Height = applied.Area.Height
-            };
-
-            Canvas.SetLeft(rect, applied.Area.X);
-            Canvas.SetTop(rect, applied.Area.Y);
-            _appliedRedactionsCanvas.Children.Add(rect);
+            _pdfViewerControl.AddAppliedRedaction(applied.Area);
         }
     }
 
@@ -346,137 +305,46 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Update viewport dimensions when the PDF scroll viewer size changes.
-    /// This enables accurate zoom fit calculations.
-    /// </summary>
-    private void PdfScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.ViewportWidth = e.NewSize.Width;
-            viewModel.ViewportHeight = e.NewSize.Height;
-        }
-    }
-
     // ==================================================================================
-    // REDACTION SELECTION HANDLERS
-    // ==================================================================================
-    // COORDINATE SYSTEM DOCUMENTATION:
-    //
-    // The Canvas has a ScaleTransform(ZoomLevel, ZoomLevel) applied via XAML.
-    // When GetPosition(canvas) is called, Avalonia returns coordinates in the Canvas's
-    // LOCAL coordinate space (before the transform is applied to rendering).
-    //
-    // This means:
-    // - If ZoomLevel = 2.0 and user clicks at screen position (400, 300)
-    // - The Canvas visually appears 2x larger
-    // - GetPosition returns (200, 150) - automatically inverse-transformed!
-    //
-    // Result: Coordinates from GetPosition are already in "image pixel" space (150 DPI),
-    // NOT in "zoomed screen pixel" space. We do NOT need to divide by zoom here.
-    //
-    // The coordinates stored in CurrentRedactionArea are in rendered image pixels (150 DPI).
-    // The ViewModel/Service layer will convert these to PDF points (72 DPI) when applying
-    // the redaction: pdfPoints = imagePixels * (72 / 150)
+    // PDF VIEWER CONTROL EVENT HANDLERS
     // ==================================================================================
 
-    private void Canvas_PointerPressed(object? sender, PointerPressedEventArgs e)
+    private void OnRedactionDrawn(object? sender, RedactionDrawnEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        if (!viewModel.IsRedactionMode)
+        // The PdfViewerControl provides the area in image pixel coordinates
+        viewModel.CurrentRedactionArea = e.Area;
+
+        // Automatically apply the redaction when selection is completed
+        if (e.Area.Width > 5 && e.Area.Height > 5)
         {
-            Console.WriteLine($"[Selection] PointerPressed but NOT in redaction mode");
-            return;
+            viewModel.ApplyRedactionCommand.Execute().Subscribe();
         }
-
-        // GetPosition returns coordinates in Canvas local space (image pixels at 150 DPI)
-        // because the Canvas has ScaleTransform that inverse-transforms input coordinates
-        _selectionStartPoint = e.GetPosition(sender as Control);
-        _isSelecting = true;
-        Console.WriteLine($"[Selection] Started at ({_selectionStartPoint.X:F1},{_selectionStartPoint.Y:F1}) [image pixels]");
     }
 
-    private void Canvas_PointerMoved(object? sender, PointerEventArgs e)
+    private void OnTextSelected(object? sender, TextSelectedEventArgs e)
     {
-        if (!_isSelecting || DataContext is not MainWindowViewModel viewModel)
+        if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        // GetPosition returns image-space coordinates (zoom already handled by Canvas transform)
-        var currentPoint = e.GetPosition(sender as Control);
+        // The PdfViewerControl provides the area in image pixel coordinates
+        viewModel.CurrentTextSelectionArea = e.Area;
 
-        // Calculate selection rectangle in image pixel coordinates (150 DPI, top-left origin)
-        // NO zoom division needed - the Canvas ScaleTransform handles coordinate transformation
-        var x = Math.Min(_selectionStartPoint.X, currentPoint.X);
-        var y = Math.Min(_selectionStartPoint.Y, currentPoint.Y);
-        var width = Math.Abs(currentPoint.X - _selectionStartPoint.X);
-        var height = Math.Abs(currentPoint.Y - _selectionStartPoint.Y);
-
-        viewModel.CurrentRedactionArea = new Rect(x, y, width, height);
-    }
-
-    private void Canvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (_isSelecting && DataContext is MainWindowViewModel viewModel)
-        {
-            Console.WriteLine($"[Selection] Completed: ({viewModel.CurrentRedactionArea.X:F1},{viewModel.CurrentRedactionArea.Y:F1},{viewModel.CurrentRedactionArea.Width:F1}x{viewModel.CurrentRedactionArea.Height:F1}) [image pixels]");
-
-            // Automatically mark/apply the redaction when selection is released
-            if (viewModel.CurrentRedactionArea.Width > 5 && viewModel.CurrentRedactionArea.Height > 5)
-            {
-                viewModel.ApplyRedactionCommand.Execute().Subscribe();
-            }
-        }
-        _isSelecting = false;
-    }
-
-    // ==================================================================================
-    // TEXT SELECTION HANDLERS
-    // ==================================================================================
-    // Same coordinate system as redaction - Canvas has ScaleTransform so GetPosition
-    // returns image-space coordinates automatically.
-    // ==================================================================================
-
-    private void TextCanvas_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel viewModel || !viewModel.IsTextSelectionMode)
-            return;
-
-        // GetPosition returns coordinates in Canvas local space (image pixels at 150 DPI)
-        _textSelectionStartPoint = e.GetPosition(sender as Control);
-        _isSelectingText = true;
-    }
-
-    private void TextCanvas_PointerMoved(object? sender, PointerEventArgs e)
-    {
-        if (!_isSelectingText || DataContext is not MainWindowViewModel viewModel)
-            return;
-
-        // GetPosition returns image-space coordinates (zoom already handled by Canvas transform)
-        var currentPoint = e.GetPosition(sender as Control);
-
-        // Calculate selection rectangle in image pixel coordinates (150 DPI, top-left origin)
-        // NO zoom division needed - the Canvas ScaleTransform handles coordinate transformation
-        var x = Math.Min(_textSelectionStartPoint.X, currentPoint.X);
-        var y = Math.Min(_textSelectionStartPoint.Y, currentPoint.Y);
-        var width = Math.Abs(currentPoint.X - _textSelectionStartPoint.X);
-        var height = Math.Abs(currentPoint.Y - _textSelectionStartPoint.Y);
-
-        viewModel.CurrentTextSelectionArea = new Rect(x, y, width, height);
-    }
-
-    private void TextCanvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        _isSelectingText = false;
-
-        // Automatically copy text when selection is released
-        if (DataContext is MainWindowViewModel viewModel &&
-            viewModel.CurrentTextSelectionArea.Width > 5 &&
-            viewModel.CurrentTextSelectionArea.Height > 5)
+        // Automatically copy text when selection is completed
+        if (e.Area.Width > 5 && e.Area.Height > 5)
         {
             viewModel.CopyTextCommand.Execute().Subscribe();
         }
+    }
+
+    private void OnPageChanged(object? sender, PageChangedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+            return;
+
+        // Update ViewModel page index (convert from 1-based to 0-based)
+        viewModel.CurrentPageIndex = e.PageNumber - 1;
     }
 }
