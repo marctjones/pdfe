@@ -76,6 +76,9 @@ internal class RenderContext
         _textState = new TextState();
         _inTextBlock = false;
         _currentFontEncoding = "WinAnsiEncoding"; // Default encoding
+
+        // Register code pages encoding provider for Windows-1252, Mac Roman, etc.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     public void Render()
