@@ -6,6 +6,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
+using PdfEditor.Controls;
 using PdfEditor.Models;
 using PdfEditor.Services;
 using PdfEditor.Services.Verification;
@@ -17,6 +18,7 @@ using System.Diagnostics;
 using System.Reactive;
 using System.Threading.Tasks;
 using SkiaSharp;
+using PdfCoreDocument = Pdfe.Core.Document.PdfDocument;
 
 namespace PdfEditor.ViewModels;
 
@@ -39,6 +41,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private string _currentFilePath = string.Empty;
     private Bitmap? _currentPageImage;
+    private PdfCoreDocument? _pdfCoreDocument;
     private int _currentPageIndex;
     private double _zoomLevel = 1.0;
     private bool _skipZoomSave; // Flag to skip zoom save during auto-reset
@@ -283,6 +286,24 @@ public partial class MainWindowViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _currentPageImage, value);
     }
 
+    public PdfCoreDocument? PdfCoreDocument
+    {
+        get => _pdfCoreDocument;
+        set => this.RaiseAndSetIfChanged(ref _pdfCoreDocument, value);
+    }
+
+    public InteractionMode InteractionMode
+    {
+        get
+        {
+            if (IsRedactionMode) return InteractionMode.Redaction;
+            if (IsTextSelectionMode) return InteractionMode.TextSelection;
+            return InteractionMode.None;
+        }
+    }
+
+    public int CurrentPage => CurrentPageIndex + 1; // 1-based for PdfViewerControl
+
     public int CurrentPageIndex
     {
         get => _currentPageIndex;
@@ -348,6 +369,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             this.RaiseAndSetIfChanged(ref _isRedactionMode, value);
             this.RaisePropertyChanged(nameof(CurrentModeText));
+            this.RaisePropertyChanged(nameof(InteractionMode));
         }
     }
 
@@ -367,6 +389,7 @@ public partial class MainWindowViewModel : ViewModelBase
             if (value && _isRedactionMode)
                 IsRedactionMode = false;
             this.RaisePropertyChanged(nameof(CurrentModeText));
+            this.RaisePropertyChanged(nameof(InteractionMode));
         }
     }
 
@@ -658,6 +681,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
             _logger.LogInformation(">>> STEP 5: Calling _documentService.LoadDocument");
             _documentService.LoadDocument(filePath);
+
+            _logger.LogInformation(">>> STEP 5.5: Loading Pdfe.Core document for PdfViewerControl");
+            PdfCoreDocument = await Task.Run(() => Pdfe.Core.Document.PdfDocument.Open(filePath));
+            _logger.LogInformation(">>> STEP 5.5: Pdfe.Core document loaded successfully");
 
             _logger.LogInformation(">>> STEP 6: Setting CurrentPageIndex = 0");
             CurrentPageIndex = 0;
@@ -1957,6 +1984,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             // Clear visual state
             CurrentPageImage = null;
+            PdfCoreDocument = null;
             PageThumbnails.Clear();
             _renderService.ClearCache();
 
