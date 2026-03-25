@@ -64,6 +64,7 @@ internal class RenderContext
     private TextState _textState;
     private bool _inTextBlock;
     private SKTypeface? _currentTypeface;
+    private string _currentFontEncoding;
 
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
@@ -74,6 +75,7 @@ internal class RenderContext
         _state = new GraphicsState();
         _textState = new TextState();
         _inTextBlock = false;
+        _currentFontEncoding = "WinAnsiEncoding"; // Default encoding
     }
 
     public void Render()
@@ -617,9 +619,13 @@ internal class RenderContext
         _textState.FontName = fontName;
         _textState.FontSize = (float)fontSize;
 
-        // Try to get the font from page resources to determine the base font
+        // Try to get the font from page resources to determine the base font and encoding
         var fontDict = _page.GetFont(fontName);
         var baseFont = fontDict?.GetNameOrNull("BaseFont") ?? "Helvetica";
+        var encoding = fontDict?.GetNameOrNull("Encoding") ?? "WinAnsiEncoding";
+
+        // Store the encoding for text decoding
+        _currentFontEncoding = encoding;
 
         // Map PDF font names to SkiaSharp typefaces
         _currentTypeface = GetTypeface(baseFont);
@@ -758,7 +764,7 @@ internal class RenderContext
         _textState.TextMatrixE += width;
     }
 
-    private static string ParsePdfString(string operand)
+    private string ParsePdfString(string operand)
     {
         if (string.IsNullOrEmpty(operand))
             return "";
@@ -780,9 +786,10 @@ internal class RenderContext
         return operand;
     }
 
-    private static string UnescapePdfString(string s)
+    private string UnescapePdfString(string s)
     {
-        var sb = new StringBuilder();
+        // First, unescape the PDF string to get the raw bytes as characters
+        var unescaped = new List<byte>();
         var i = 0;
         while (i < s.Length)
         {
@@ -791,14 +798,14 @@ internal class RenderContext
                 var next = s[i + 1];
                 switch (next)
                 {
-                    case 'n': sb.Append('\n'); i += 2; break;
-                    case 'r': sb.Append('\r'); i += 2; break;
-                    case 't': sb.Append('\t'); i += 2; break;
-                    case 'b': sb.Append('\b'); i += 2; break;
-                    case 'f': sb.Append('\f'); i += 2; break;
-                    case '(': sb.Append('('); i += 2; break;
-                    case ')': sb.Append(')'); i += 2; break;
-                    case '\\': sb.Append('\\'); i += 2; break;
+                    case 'n': unescaped.Add((byte)'\n'); i += 2; break;
+                    case 'r': unescaped.Add((byte)'\r'); i += 2; break;
+                    case 't': unescaped.Add((byte)'\t'); i += 2; break;
+                    case 'b': unescaped.Add((byte)'\b'); i += 2; break;
+                    case 'f': unescaped.Add((byte)'\f'); i += 2; break;
+                    case '(': unescaped.Add((byte)'('); i += 2; break;
+                    case ')': unescaped.Add((byte)')'); i += 2; break;
+                    case '\\': unescaped.Add((byte)'\\'); i += 2; break;
                     default:
                         // Octal escape \ddd
                         if (char.IsDigit(next))
@@ -809,12 +816,11 @@ internal class RenderContext
                             {
                                 octal += s[i++];
                             }
-                            if (int.TryParse(octal, out var code))
-                                sb.Append((char)Convert.ToInt32(octal, 8));
+                            unescaped.Add((byte)Convert.ToInt32(octal, 8));
                         }
                         else
                         {
-                            sb.Append(next);
+                            unescaped.Add((byte)next);
                             i += 2;
                         }
                         break;
@@ -822,13 +828,16 @@ internal class RenderContext
             }
             else
             {
-                sb.Append(s[i++]);
+                // The content stream was decoded as Latin1, so the character value is the byte value
+                unescaped.Add((byte)s[i++]);
             }
         }
-        return sb.ToString();
+
+        // Now decode the bytes using the font's encoding
+        return DecodeTextBytes(unescaped.ToArray());
     }
 
-    private static string DecodeHexString(string hex)
+    private string DecodeHexString(string hex)
     {
         // Remove whitespace
         hex = new string(hex.Where(c => !char.IsWhiteSpace(c)).ToArray());
@@ -844,7 +853,24 @@ internal class RenderContext
                 bytes[i] = b;
         }
 
-        return Encoding.Latin1.GetString(bytes);
+        return DecodeTextBytes(bytes);
+    }
+
+    private string DecodeTextBytes(byte[] bytes)
+    {
+        // Use the appropriate encoding based on the current font
+        // WinAnsiEncoding is Windows-1252 (code page 1252)
+        // MacRomanEncoding would be different, but we'll default to Windows-1252 for now
+        if (_currentFontEncoding == "MacRomanEncoding")
+        {
+            // Mac Roman encoding (code page 10000)
+            return Encoding.GetEncoding(10000).GetString(bytes);
+        }
+        else
+        {
+            // WinAnsiEncoding (Windows-1252) is the default for most PDFs
+            return Encoding.GetEncoding(1252).GetString(bytes);
+        }
     }
 
     #endregion
