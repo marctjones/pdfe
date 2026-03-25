@@ -270,7 +270,8 @@ public partial class PdfViewerControl : UserControl
 
             // Render page on background thread
             var page = Document.GetPage(CurrentPage);
-            var skBitmap = await Task.Run(() => _renderer.RenderPage(page));
+            var options = new Pdfe.Rendering.RenderOptions { Dpi = 200 }; // Higher DPI for better readability
+            var skBitmap = await Task.Run(() => _renderer.RenderPage(page, options));
 
             // Convert to Avalonia bitmap on UI thread
             await Dispatcher.UIThread.InvokeAsync(() =>
