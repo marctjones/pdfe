@@ -729,7 +729,18 @@ internal class RenderContext
         if (!_inTextBlock || _currentTypeface == null)
             return;
 
-        using var font = new SKFont(_currentTypeface, _textState.FontSize);
+        // Many PDFs set `1 Tf` and encode the real glyph size via the text matrix
+        // (e.g. `10.02 0 0 10.02 x y Tm`). The effective point size is FontSize
+        // multiplied by the text-matrix Y-scale sqrt(c^2 + d^2). Default matrix
+        // (A=D=1, B=C=0) yields yScale=1, preserving behavior for PDFs that
+        // don't use Tm scaling.
+        var mc = _textState.TextMatrixC;
+        var md = _textState.TextMatrixD;
+        var yScale = (float)Math.Sqrt(mc * mc + md * md);
+        if (yScale < 1e-6f) yScale = 1f;
+        var effectiveSize = _textState.FontSize * yScale;
+
+        using var font = new SKFont(_currentTypeface, effectiveSize);
         using var paint = new SKPaint(font)
         {
             Color = _state.FillColor,
