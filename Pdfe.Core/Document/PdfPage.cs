@@ -214,8 +214,10 @@ public class PdfPage
     /// </summary>
     public PdfGraphics GetGraphics()
     {
-        _graphics ??= new PdfGraphics(this);
-        return _graphics;
+        // Return a fresh graphics context each call. Caching a single
+        // instance bit us when callers used `using var g = …` — once
+        // disposed, subsequent calls handed back the same dead instance.
+        return new PdfGraphics(this);
     }
 
     /// <summary>
