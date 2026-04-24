@@ -108,6 +108,11 @@
                           IsEnabled="{Binding IsDocumentLoaded}">
                     <MenuItem.Icon><TextBlock Text="🔐"/></MenuItem.Icon>
                 </MenuItem>
+                <MenuItem Header="Reveal _Hidden Text (audit overlay)"
+                          ToolTip.Tip="Surface text that is present in the PDF but visually covered by an opaque overlay — the classic 'black-box redaction' failure mode."
+                          IsEnabled="{Binding IsDocumentLoaded}"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding RevealHiddenText, Mode=TwoWay}" />
                 <Separator/>
                 <MenuItem Header="_Preferences..." Command="{Binding ShowPreferencesCommand}" InputGesture="Ctrl+,">
                     <MenuItem.Icon><TextBlock Text="⚙"/></MenuItem.Icon>
@@ -437,6 +442,7 @@
                                                CurrentPage="{Binding CurrentPage}"
                                                ZoomLevel="{Binding ZoomLevel}"
                                                InteractionMode="{Binding InteractionMode}"
+                                               HiddenTextHighlights="{Binding HiddenTextHighlights}"
                                                RedactionDrawn="OnRedactionDrawn"
                                                TextSelected="OnTextSelected"
                                                PageChanged="OnPageChanged" />

@@ -28,6 +28,7 @@ class Program
             CreateRenderCommand(),
             CreateDrawCommand(),
             CreateRedactCommand(),
+            CreateAuditCommand(),
             CreateDemoCommand()
         };
 
@@ -423,6 +424,96 @@ class Program
         var count = doc.RedactText(text, caseSensitive);
         doc.Save(outputPath);
         return count;
+    }
+
+    /// <summary>
+    /// pdfe audit &lt;file&gt; [--json]
+    /// Report text that is present in the PDF content stream but
+    /// visually occluded by a later-drawn opaque object ("redaction
+    /// by black box" style). Exits with a non-zero status when leaks
+    /// are found, so CI can gate on a clean audit.
+    /// </summary>
+    static Command CreateAuditCommand()
+    {
+        var fileArg = new Argument<FileInfo>("file", "PDF file to audit");
+        var jsonOption = new Option<bool>(
+            "--json",
+            () => false,
+            "Emit machine-readable JSON instead of the human-readable report");
+
+        var command = new Command(
+            "audit",
+            "Detect text hidden behind opaque overlays (black-box redaction audit)")
+        {
+            fileArg, jsonOption
+        };
+
+        command.SetHandler((FileInfo file, bool json) =>
+        {
+            if (!file.Exists)
+            {
+                Console.Error.WriteLine($"File not found: {file.FullName}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            try
+            {
+                using var doc = PdfDocument.Open(File.ReadAllBytes(file.FullName));
+                var hits = HiddenTextDetector.Scan(doc);
+
+                if (json)
+                {
+                    PrintJson(hits);
+                }
+                else if (hits.Count == 0)
+                {
+                    Console.WriteLine("✓ No hidden text detected.");
+                }
+                else
+                {
+                    Console.WriteLine($"✗ {hits.Count} hidden-text leak(s) detected:");
+                    foreach (var h in hits)
+                    {
+                        Console.WriteLine(
+                            $"  Page {h.PageNumber} at ({h.BoundingBox.Left:F1}, {h.BoundingBox.Bottom:F1}): " +
+                            $"\"{h.Text}\" covered by {h.HiddenBy}");
+                    }
+                }
+
+                // Exit non-zero on any hits so CI pipelines can gate.
+                Environment.ExitCode = hits.Count == 0 ? 0 : 2;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, fileArg, jsonOption);
+
+        return command;
+    }
+
+    private static void PrintJson(IReadOnlyList<HiddenTextRecord> hits)
+    {
+        // Hand-rolled to avoid pulling in a JSON dependency. The output
+        // is small enough that correctness is easy to eyeball.
+        Console.WriteLine("[");
+        for (int i = 0; i < hits.Count; i++)
+        {
+            var h = hits[i];
+            var escaped = h.Text
+                .Replace("\\", "\\\\").Replace("\"", "\\\"")
+                .Replace("\n", "\\n").Replace("\r", "\\r");
+            var sep = i + 1 < hits.Count ? "," : "";
+            Console.WriteLine(
+                $"  {{ \"page\": {h.PageNumber}, " +
+                $"\"text\": \"{escaped}\", " +
+                $"\"bbox\": [{h.BoundingBox.Left:F2}, {h.BoundingBox.Bottom:F2}, " +
+                $"{h.BoundingBox.Right:F2}, {h.BoundingBox.Top:F2}], " +
+                $"\"hidden_by\": \"{h.HiddenBy}\" }}{sep}");
+        }
+        Console.WriteLine("]");
     }
 
     /// <summary>

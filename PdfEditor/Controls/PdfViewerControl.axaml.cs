@@ -106,6 +106,20 @@ public partial class PdfViewerControl : UserControl
         private set => SetValue(ErrorMessageProperty, value);
     }
 
+    /// <summary>
+    /// Highlights for hidden-behind-overlay text to paint on top of the
+    /// rendered page. Bound to a VM observable collection; whenever it
+    /// changes, <see cref="RefreshHiddenTextOverlays"/> redraws them.
+    /// </summary>
+    public static readonly StyledProperty<System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>?> HiddenTextHighlightsProperty =
+        AvaloniaProperty.Register<PdfViewerControl, System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>?>(nameof(HiddenTextHighlights));
+
+    public System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>? HiddenTextHighlights
+    {
+        get => GetValue(HiddenTextHighlightsProperty);
+        set => SetValue(HiddenTextHighlightsProperty, value);
+    }
+
     #endregion
 
     #region Events
@@ -161,6 +175,75 @@ public partial class PdfViewerControl : UserControl
             control.OnErrorStateChanged());
         ErrorMessageProperty.Changed.AddClassHandler<PdfViewerControl>((control, e) =>
             control.OnErrorMessageChanged());
+        HiddenTextHighlightsProperty.Changed.AddClassHandler<PdfViewerControl>((control, e) =>
+            control.OnHiddenTextHighlightsChanged(
+                e.OldValue as System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>,
+                e.NewValue as System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>));
+    }
+
+    private System.Collections.Specialized.INotifyCollectionChanged? _watchedHighlights;
+
+    private void OnHiddenTextHighlightsChanged(
+        System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>? oldValue,
+        System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>? newValue)
+    {
+        // If the bound value is an ObservableCollection, subscribe to its
+        // changes so the overlay repaints when the VM adds/removes hits.
+        if (_watchedHighlights != null)
+        {
+            _watchedHighlights.CollectionChanged -= OnHighlightsCollectionChanged;
+            _watchedHighlights = null;
+        }
+        if (newValue is System.Collections.Specialized.INotifyCollectionChanged notify)
+        {
+            _watchedHighlights = notify;
+            notify.CollectionChanged += OnHighlightsCollectionChanged;
+        }
+        RedrawHiddenTextOverlays();
+    }
+
+    private void OnHighlightsCollectionChanged(object? s, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => RedrawHiddenTextOverlays();
+
+    private void RedrawHiddenTextOverlays()
+    {
+        var layer = this.FindControl<Canvas>("HiddenTextRevealLayer");
+        if (layer == null) return;
+        layer.Children.Clear();
+
+        var highlights = HiddenTextHighlights;
+        if (highlights == null) return;
+
+        foreach (var h in highlights)
+        {
+            // Semi-transparent yellow background behind the text makes
+            // it pop even when the overlay rect is still there. Then a
+            // bright red outline + red text labels the leak clearly.
+            var bg = new Rectangle
+            {
+                Width = Math.Max(h.ScreenBounds.Width, 8),
+                Height = Math.Max(h.ScreenBounds.Height, 8),
+                Fill = new SolidColorBrush(Color.FromArgb(230, 255, 255, 0)), // yellow
+                Stroke = new SolidColorBrush(Color.FromArgb(255, 220, 20, 20)), // red
+                StrokeThickness = 2,
+            };
+            Canvas.SetLeft(bg, h.ScreenBounds.X);
+            Canvas.SetTop(bg, h.ScreenBounds.Y);
+            layer.Children.Add(bg);
+
+            // Render the revealed text itself on top of the yellow box.
+            var label = new TextBlock
+            {
+                Text = h.Text,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 180, 0, 0)), // dark red
+                FontWeight = FontWeight.Bold,
+                FontSize = Math.Max(10, h.ScreenBounds.Height * 0.75),
+                TextWrapping = TextWrapping.NoWrap,
+            };
+            Canvas.SetLeft(label, h.ScreenBounds.X + 2);
+            Canvas.SetTop(label, h.ScreenBounds.Y);
+            layer.Children.Add(label);
+        }
     }
 
     private void InitializeComponent()

@@ -41,6 +41,9 @@
                     <!-- Text selection layer -->
                     <Canvas Name="TextSelectionLayer" />
 
+                    <!-- Hidden-text reveal layer (audit/"reveal" mode) -->
+                    <Canvas Name="HiddenTextRevealLayer" />
+
                     <!-- Interaction layer (for drawing) -->
                     <Canvas Name="InteractionLayer"
                             Background="Transparent" />
