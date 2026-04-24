@@ -43,12 +43,27 @@ public partial class App : Application
         {
             logger.LogInformation("Creating main window");
 
+            var vm = _serviceProvider.GetRequiredService<MainWindowViewModel>();
             desktop.MainWindow = new MainWindow
             {
-                DataContext = _serviceProvider.GetRequiredService<MainWindowViewModel>(),
+                DataContext = vm,
             };
 
             logger.LogInformation("Main window created successfully");
+
+            // If a PDF path was passed on the command line, open it once the
+            // window is shown. Supports file-manager "Open With" integrations
+            // and quick demos without clicking through File > Open.
+            var args = desktop.Args;
+            if (args != null && args.Length > 0 && System.IO.File.Exists(args[0]))
+            {
+                var path = args[0];
+                desktop.MainWindow.Opened += async (_, _) =>
+                {
+                    try { await vm.LoadDocumentAsync(path); }
+                    catch (Exception ex) { logger.LogError(ex, "Failed to auto-open {Path}", path); }
+                };
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
