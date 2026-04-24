@@ -87,7 +87,7 @@ public partial class MainWindowViewModel
 
     /// <summary>
     /// Load a document (for Roslyn scripts).
-    /// Usage: await LoadDocumentCommand.Execute("/path/to/file.pdf")
+    /// Usage: <c>await LoadDocumentCommand("/path/to/file.pdf")</c>
     /// Issue #93: Includes configurable timeout to prevent hangs on malformed PDFs.
     /// </summary>
     private async Task LoadDocumentViaScriptAsync(string filePath)
@@ -156,7 +156,7 @@ public partial class MainWindowViewModel
 
     /// <summary>
     /// Redact all occurrences of the specified text on all pages (for Roslyn scripts).
-    /// Usage: await RedactTextCommand.Execute("SECRET")
+    /// Usage: <c>await RedactTextCommand("SECRET")</c>
     ///
     /// Issue #190 FIX: This now uses the file-based TextRedactor API (like CLI) instead
     /// of the coordinate-based workflow. The coordinate conversion was causing failures
@@ -199,7 +199,7 @@ public partial class MainWindowViewModel
     /// <summary>
     /// Apply all pending redactions to the in-memory document (for Roslyn scripts).
     /// This modifies the document but does not save it. Use SaveDocumentCommand to save.
-    /// Usage: await ApplyRedactionsCommand.Execute()
+    /// Usage: <c>await ApplyRedactionsCommand()</c>
     ///
     /// Issue #190 FIX: Text redactions now use file-based TextRedactor API.
     /// </summary>
@@ -239,7 +239,7 @@ public partial class MainWindowViewModel
     /// <summary>
     /// Save the document to the specified path (for Roslyn scripts).
     /// If redactions are pending, apply them first, then save.
-    /// Usage: await SaveDocumentCommand.Execute("/path/to/output.pdf")
+    /// Usage: <c>await SaveDocumentCommand("/path/to/output.pdf")</c>
     ///
     /// Issue #190 FIX: Text redactions now use file-based TextRedactor API.
     /// </summary>
