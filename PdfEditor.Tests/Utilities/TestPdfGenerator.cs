@@ -6,13 +6,12 @@ using Pdfe.Core.Graphics;
 namespace PdfEditor.Tests.Utilities;
 
 /// <summary>
-/// Generates small PDF fixtures for tests. Pure Pdfe.Core — no PdfSharp.
+/// Generates small PDF fixtures for tests.
 /// </summary>
 /// <remarks>
-/// After the PdfSharp removal, this is a thin wrapper over
-/// <c>PdfDocument.CreateNew()</c> + <c>page.GetGraphics().DrawString()</c>.
-/// Method signatures are preserved from the legacy PdfSharp-based
-/// generator so existing tests compile unchanged.
+/// Thin wrapper over <c>PdfDocument.CreateNew()</c> +
+/// <c>page.GetGraphics().DrawString()</c>. Method signatures match the
+/// older helper so existing tests needed no changes.
 /// </remarks>
 public static class TestPdfGenerator
 {
@@ -87,8 +86,7 @@ public static class TestPdfGenerator
     /// <summary>
     /// Single-page PDF with text at an exact position.
     /// <paramref name="x"/> is measured from the left, <paramref name="y"/>
-    /// from the PDF BOTTOM-left origin (PDF native convention — matches
-    /// the legacy PdfSharp generator's contract).
+    /// from the PDF BOTTOM-left origin (PDF native convention).
     /// </summary>
     public static string CreatePdfWithTextAt(string outputPath, string text, double x, double y, double fontSize = 12)
     {

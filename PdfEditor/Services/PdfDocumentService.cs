@@ -57,7 +57,7 @@ public class PdfDocumentService
 
         _currentDocument?.Dispose();
         // Open from bytes so the file is not held open — matches the
-        // previous PdfSharp behavior that kept the file freely writable.
+        // previous file-based behavior that kept the file freely writable.
         _currentDocument = PdfDocument.Open(File.ReadAllBytes(filePath));
         _currentFilePath = filePath;
 
@@ -151,9 +151,7 @@ public class PdfDocumentService
 
     /// <summary>
     /// Serialize the current document to a fresh <see cref="MemoryStream"/>
-    /// for in-memory rendering. Unlike the PdfSharp predecessor, no
-    /// "reload after save" dance is needed — Pdfe.Core documents remain
-    /// mutable after <c>Save</c>.
+    /// for in-memory rendering.
     /// </summary>
     public MemoryStream? GetCurrentDocumentAsStream()
     {

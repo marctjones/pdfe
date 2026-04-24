@@ -286,7 +286,7 @@ public class CoordinateConverterTests
         // Page height is 792 points
         var imageSelection = new Rect(150, 150, 100, 50);
 
-        // Act: Convert to PDF coordinates (bottom-left origin, for PdfPig)
+        // Act: Convert to PDF coordinates (bottom-left origin)
         var (left, bottom, right, top) = CoordinateConverter.ImageSelectionToPdfCoords(
             imageSelection, LetterHeight, 150);
 
@@ -511,17 +511,17 @@ public class CoordinateConverterTests
     }
 
     [Fact]
-    public void Scenario_TextSelection_ExtractingFromPdfPig()
+    public void Scenario_TextSelection_ExtractingText()
     {
         // User selects area in image pixels
         var imageSelection = new Rect(75, 375, 450, 75);  // Middle of page
 
-        // Convert to PDF coords for PdfPig query
+        // Convert to PDF coords for content-stream query
         var (left, bottom, right, top) = CoordinateConverter.ImageSelectionToPdfCoords(
             imageSelection, LetterHeight, 150);
 
-        // PdfPig returns text with these bounds - verify they could intersect
-        // PdfPig text at PDF coords (40, 350, 250, 380) - overlapping Y range
+        // Extractor returns text with these bounds - verify they could intersect
+        // Text at PDF coords (40, 350, 250, 380) - overlapping Y range
         var pdfPigTextLeft = 40.0;
         var pdfPigTextBottom = 350.0;
         var pdfPigTextRight = 250.0;
@@ -542,7 +542,7 @@ public class CoordinateConverterTests
         right.Should().BeApproximately(252, 1);  // 36 + 216
         top.Should().BeApproximately(612, 1);
 
-        // Check if selection intersects with PdfPig text
+        // Check if selection intersects with extracted text
         // Selection Y: 576-612 in PDF coords
         // Text Y: 350-380 in PDF coords
         // These don't overlap, which is expected based on the values
