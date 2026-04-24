@@ -14,6 +14,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Reactive;
 using System.Threading.Tasks;
 using SkiaSharp;
@@ -282,6 +283,75 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaisePropertyChanged(nameof(CurrentPage));
             UpdateThumbnailSelection();
             UpdateSearchHighlights(); // Update highlights when page changes (fixes #310)
+            RefreshHiddenTextHighlights();
+        }
+    }
+
+    private bool _revealHiddenText;
+    /// <summary>
+    /// When true, scans the current page for hidden-behind-overlay text
+    /// and surfaces it through <see cref="HiddenTextHighlights"/>.
+    /// </summary>
+    public bool RevealHiddenText
+    {
+        get => _revealHiddenText;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _revealHiddenText, value);
+            RefreshHiddenTextHighlights();
+        }
+    }
+
+    /// <summary>
+    /// Highlights to paint on top of the current page — each entry is a
+    /// piece of text that the PDF still contains but has visually hidden
+    /// behind an overlay. Coords are in rendered-image pixels at the
+    /// current render DPI, top-left origin.
+    /// </summary>
+    public ObservableCollection<Models.HiddenTextHighlight> HiddenTextHighlights { get; }
+        = new();
+
+    private void RefreshHiddenTextHighlights()
+    {
+        HiddenTextHighlights.Clear();
+        if (!_revealHiddenText) return;
+        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath)) return;
+
+        try
+        {
+            // Scan fresh from disk so we see exactly what a downstream
+            // extractor would see; the in-memory doc may have pending
+            // GUI edits we don't want to audit against.
+            using var doc = Pdfe.Core.Document.PdfDocument.Open(File.ReadAllBytes(_currentFilePath));
+            if (CurrentPageIndex < 0 || CurrentPageIndex >= doc.PageCount) return;
+
+            var page = doc.GetPage(CurrentPageIndex + 1);
+            var hits = Pdfe.Core.Text.Segmentation.HiddenTextDetector.ScanPage(page, CurrentPageIndex + 1);
+
+            // PDF points (bottom-left origin) → rendered-image pixels
+            // (top-left origin) at the render DPI. Matches the same
+            // conversion the viewer uses for the page image itself.
+            double pageHeight = page.Height;
+            double scale = CoordinateConverter.DefaultRenderDpi / (double)CoordinateConverter.PdfPointsPerInch;
+            foreach (var h in hits)
+            {
+                double left = h.BoundingBox.Left * scale;
+                double top = (pageHeight - h.BoundingBox.Top) * scale;
+                double width = (h.BoundingBox.Right - h.BoundingBox.Left) * scale;
+                double height = (h.BoundingBox.Top - h.BoundingBox.Bottom) * scale;
+                HiddenTextHighlights.Add(new Models.HiddenTextHighlight(
+                    h.Text,
+                    new Rect(left, top, width, height),
+                    h.HiddenBy));
+            }
+
+            _logger.LogInformation(
+                "Reveal-hidden-text: {Count} leak(s) on page {Page}",
+                HiddenTextHighlights.Count, CurrentPageIndex + 1);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Hidden-text scan failed for page {Page}", CurrentPageIndex + 1);
         }
     }
 
