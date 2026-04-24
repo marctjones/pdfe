@@ -821,39 +821,124 @@ internal class RenderContext
         }
         if (descriptor == null) return null;
 
-        // Prefer /FontFile2 (TrueType) and /FontFile3 (OpenType/CFF) — SkiaSharp
-        // loads both via SKTypeface.FromData. /FontFile is legacy Type1
-        // PostScript, which Skia can't load directly; skip it for now and let
-        // the caller fall back to system-font mapping.
-        var streamObj = descriptor.GetOptional("FontFile2")
-                        ?? descriptor.GetOptional("FontFile3");
-        if (streamObj == null) return null;
+        // /FontFile2 (TrueType) → SkiaSharp loads directly.
+        // /FontFile3 (OpenType/CFF) → if already SFNT-wrapped, Skia loads it;
+        //   if it's raw Type1C/CIDFontType0C (more common in modern PDFs),
+        //   we wrap it in a minimal OpenType container first.
+        // /FontFile (raw Type1 PostScript) — Skia can't load directly. Skipped.
+        var ff2 = descriptor.GetOptional("FontFile2");
+        var ff3 = descriptor.GetOptional("FontFile3");
 
-        var resolved = _page.Document.Resolve(streamObj);
-        if (resolved is not Pdfe.Core.Primitives.PdfStream fontStream) return null;
+        byte[]? fontBytes = null;
+        bool isCff = false;
+        if (ff2 != null && _page.Document.Resolve(ff2) is Pdfe.Core.Primitives.PdfStream s2)
+        {
+            try { fontBytes = s2.DecodedData; } catch { }
+        }
+        else if (ff3 != null && _page.Document.Resolve(ff3) is Pdfe.Core.Primitives.PdfStream s3)
+        {
+            try { fontBytes = s3.DecodedData; } catch { }
+            var subtype = s3.GetNameOrNull("Subtype");
+            // Type1C and CIDFontType0C are raw CFF without SFNT wrapper; OpenType
+            // is already SFNT-wrapped and passes through.
+            isCff = subtype == "Type1C" || subtype == "CIDFontType0C";
+        }
+        if (fontBytes == null || fontBytes.Length == 0) return null;
 
-        byte[] bytes;
-        try { bytes = fontStream.DecodedData; }
-        catch { return null; }
-        if (bytes == null || bytes.Length == 0) return null;
+        // For raw CFF (Type1C / CIDFontType0C), the code path to synthesize an
+        // OpenType container exists in Fonts/CffToOpenType.cs but currently
+        // produces SFNT bytes Skia accepts yet renders with glyph/cmap
+        // mismatches — verified on CDC VIS. Leaving the wrapping disabled
+        // until the cmap/hmtx interaction is sorted out. Falling back to the
+        // system-font path for these fonts still produces the same
+        // font-substitution artifacts we had before this commit landed.
+        byte[] loadableBytes = fontBytes;
+        _ = isCff; // infrastructure ready; wiring deferred (see Fonts/ classes)
 
         SKTypeface? typeface;
         try
         {
-            // SKData.CreateCopy owns the memory; SKTypeface.FromData holds it
-            // until the typeface is disposed.
-            using var data = SKData.CreateCopy(bytes);
+            using var data = SKData.CreateCopy(loadableBytes);
             typeface = SKTypeface.FromData(data);
         }
-        catch
-        {
-            // Corrupt or unsupported font file — bail, caller falls back.
-            typeface = null;
-        }
+        catch { typeface = null; }
 
         if (typeface == null) return null;
         _embeddedTypefaces[fontName] = typeface;
         return typeface;
+    }
+
+    private byte[]? TryWrapCffAsOpenType(
+        byte[] cff,
+        Pdfe.Core.Primitives.PdfDictionary fontDict,
+        Pdfe.Core.Primitives.PdfDictionary descriptor)
+    {
+        var cffInfo = Fonts.CffParser.Parse(cff);
+        if (cffInfo == null) return null;
+
+        // Build Unicode → glyph-index map and glyph-index → PDF-width map.
+        // Both derive from walking the PDF's character codes 0..255, resolving
+        // each to (Unicode, glyph name) and then looking up the glyph index in
+        // the CFF charset.
+        var unicodeToGlyph = new Dictionary<char, int>(256);
+        var glyphWidths = new Dictionary<int, ushort>(256);
+        for (int code = 0; code < 256; code++)
+        {
+            char unicode = GetUnicodeForCode((byte)code);
+            if (unicode == '\0') continue;
+            if (!AdobeGlyphList.TryGetName(unicode, out var glyphName)) continue;
+            if (!cffInfo.GlyphNameToIndex.TryGetValue(glyphName, out var glyphIndex)) continue;
+
+            if (!unicodeToGlyph.ContainsKey(unicode))
+                unicodeToGlyph[unicode] = glyphIndex;
+
+            // If /Widths covers this code, use it as the per-glyph hmtx width.
+            if (_currentFontWidths != null)
+            {
+                int idx = code - _currentFontFirstChar;
+                if (idx >= 0 && idx < _currentFontWidths.Length)
+                    glyphWidths[glyphIndex] = (ushort)Math.Clamp(_currentFontWidths[idx], 0, 65535);
+            }
+        }
+
+        short xMin = cffInfo.XMin, yMin = cffInfo.YMin, xMax = cffInfo.XMax, yMax = cffInfo.YMax;
+        var bbox = ResolveArray(descriptor, "FontBBox");
+        if (bbox != null && bbox.Count >= 4)
+        {
+            xMin = (short)bbox.GetNumber(0);
+            yMin = (short)bbox.GetNumber(1);
+            xMax = (short)bbox.GetNumber(2);
+            yMax = (short)bbox.GetNumber(3);
+        }
+
+        var info = new Fonts.CffToOpenType.PdfFontInfo
+        {
+            PsName = descriptor.GetNameOrNull("FontName")
+                     ?? fontDict.GetNameOrNull("BaseFont")
+                     ?? "Unknown",
+            XMin = xMin, YMin = yMin, XMax = xMax, YMax = yMax,
+            Ascent = (short)descriptor.GetNumber("Ascent", 800),
+            Descent = (short)descriptor.GetNumber("Descent", -200),
+            WeightClass = (ushort)Math.Clamp((int)descriptor.GetNumber("FontWeight", 400), 1, 1000),
+            UnicodeToGlyph = unicodeToGlyph,
+            GlyphWidths = glyphWidths.Count > 0 ? glyphWidths : null,
+        };
+
+        return Fonts.CffToOpenType.Wrap(cff, cffInfo.NumGlyphs, info);
+    }
+
+    // Decode a raw PDF character code to its Unicode char under the current
+    // font's encoding. Prefers the /Differences-derived map when present,
+    // otherwise falls back to the named base encoding (WinAnsi/MacRoman).
+    private char GetUnicodeForCode(byte code)
+    {
+        if (_currentCodeToUnicode != null)
+            return _currentCodeToUnicode[code];
+        var encoding = _currentFontEncoding == "MacRomanEncoding"
+            ? Encoding.GetEncoding(10000)
+            : Encoding.GetEncoding(1252);
+        var s = encoding.GetString(new[] { code });
+        return s.Length > 0 ? s[0] : '\0';
     }
 
     // Build code→Unicode (and inverse) tables for a font whose /Encoding is a
