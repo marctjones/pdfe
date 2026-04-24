@@ -1,14 +1,24 @@
 using System.CommandLine;
 using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
+using Pdfe.Core.Text.Segmentation;
 using Pdfe.Rendering;
 using SkiaSharp;
+
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Pdfe.Cli.Tests")]
 
 namespace Pdfe.Cli;
 
 class Program
 {
-    static async Task<int> Main(string[] args)
+    static Task<int> Main(string[] args) => RunAsync(args);
+
+    /// <summary>
+    /// Build and invoke the root command. Exposed for tests so they can
+    /// exercise the CLI parsing + handler pipeline without spawning a
+    /// subprocess.
+    /// </summary>
+    internal static Task<int> RunAsync(string[] args)
     {
         var rootCommand = new RootCommand("pdfe - PDF toolkit powered by Pdfe.Core")
         {
@@ -17,10 +27,11 @@ class Program
             CreateLettersCommand(),
             CreateRenderCommand(),
             CreateDrawCommand(),
+            CreateRedactCommand(),
             CreateDemoCommand()
         };
 
-        return await rootCommand.InvokeAsync(args);
+        return rootCommand.InvokeAsync(args);
     }
 
     /// <summary>
@@ -345,6 +356,73 @@ class Program
         }, fileArg, outputOption, rectOption, colorOption);
 
         return command;
+    }
+
+    /// <summary>
+    /// pdfe redact &lt;input&gt; &lt;output&gt; &lt;text&gt; [--case-sensitive]
+    /// Remove every occurrence of a text string from a PDF at the
+    /// content-stream level (glyph removal, not visual overlay), then
+    /// save the result to a new file.
+    /// </summary>
+    static Command CreateRedactCommand()
+    {
+        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
+        var outputArg = new Argument<FileInfo>("output", "Output PDF path");
+        var textArg = new Argument<string>("text", "Text to remove (all occurrences)");
+        var caseSensitiveOption = new Option<bool>(
+            "--case-sensitive",
+            () => false,
+            "Match case exactly (default: case-insensitive)");
+
+        var command = new Command(
+            "redact",
+            "Remove text from a PDF (glyph-level removal; text extraction will not find it)")
+        {
+            inputArg, outputArg, textArg, caseSensitiveOption
+        };
+
+        command.SetHandler((FileInfo input, FileInfo output, string text, bool caseSensitive) =>
+        {
+            if (!input.Exists)
+            {
+                Console.Error.WriteLine($"File not found: {input.FullName}");
+                Environment.ExitCode = 1;
+                return;
+            }
+            if (string.IsNullOrEmpty(text))
+            {
+                Console.Error.WriteLine("Redaction text must not be empty.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            try
+            {
+                int count = RunRedact(input.FullName, output.FullName, text, caseSensitive);
+                Console.WriteLine($"Redacted {count} occurrence(s) of '{text}'");
+                Console.WriteLine($"Output: {output.FullName}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, inputArg, outputArg, textArg, caseSensitiveOption);
+
+        return command;
+    }
+
+    /// <summary>
+    /// Core redact-a-file operation — open, call Pdfe.Core's text
+    /// redaction, save. Exposed internally for tests.
+    /// </summary>
+    internal static int RunRedact(string inputPath, string outputPath, string text, bool caseSensitive)
+    {
+        var bytes = File.ReadAllBytes(inputPath);
+        using var doc = PdfDocument.Open(bytes);
+        var count = doc.RedactText(text, caseSensitive);
+        doc.Save(outputPath);
+        return count;
     }
 
     /// <summary>
