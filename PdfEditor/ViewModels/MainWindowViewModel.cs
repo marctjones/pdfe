@@ -311,6 +311,11 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             this.RaiseAndSetIfChanged(ref _currentPageIndex, value);
             this.RaisePropertyChanged(nameof(DisplayPageNumber));
+            // CurrentPage is computed (CurrentPageIndex + 1) and bound to
+            // PdfViewerControl.CurrentPage in MainWindow.axaml. Without this
+            // notification, thumbnail clicks updated the index but the viewer
+            // stayed on the previous page.
+            this.RaisePropertyChanged(nameof(CurrentPage));
             UpdateThumbnailSelection();
             UpdateSearchHighlights(); // Update highlights when page changes (fixes #310)
         }

@@ -1016,59 +1016,22 @@ internal class RenderContext
         return _textState.FontSize * yScale;
     }
 
-    // Glyph advance for a Unicode text chunk, in device-space points. When we
-    // loaded the PDF's own embedded font, trust Skia's MeasureText — the glyphs
-    // visually drawn and their advances both come from the same typeface, so
-    // measurement and drawing stay in sync. Otherwise, use the PDF's /Widths
-    // table so subset-font layout authored against the real font still works
-    // even when we substitute a system face.
-    private float MeasurePdfAdvance(string text, SKPaint fallback, float effectiveSize)
+    // Horizontal-to-vertical aspect ratio of the text matrix. Most PDFs use a
+    // uniform Tm (X-scale == Y-scale) so this is 1. When they don't — e.g. a
+    // condensed heading like SCOTUS's `14.2001 0 0 15 ... Tm` for SUPREME COURT
+    // — glyphs must render horizontally squeezed by this ratio and advance
+    // must scale by this ratio too, otherwise accumulated per-glyph error
+    // shows up as mid-word gaps.
+    private float GetTextMatrixXYRatio()
     {
-        if (_embeddedTypefaces.ContainsKey(_textState.FontName))
-            return fallback.MeasureText(text);
-
-        if (_currentFontWidths == null)
-            return fallback.MeasureText(text);
-
-        float sumThousandthsOfEm = 0f;
-
-        if (_currentUnicodeToCode != null)
-        {
-            // /Encoding dictionary path: use the inverse map built from
-            // /BaseEncoding + /Differences. Unknown Unicode chars fall back to
-            // /MissingWidth (which may be 0, matching Adobe's behavior).
-            foreach (var c in text)
-            {
-                byte code;
-                if (!_currentUnicodeToCode.TryGetValue(c, out code))
-                {
-                    sumThousandthsOfEm += _currentFontMissingWidth;
-                    continue;
-                }
-                int idx = code - _currentFontFirstChar;
-                sumThousandthsOfEm += (idx >= 0 && idx < _currentFontWidths.Length)
-                    ? _currentFontWidths[idx]
-                    : _currentFontMissingWidth;
-            }
-        }
-        else
-        {
-            // No /Differences: round-trip via the named codepage. WinAnsi/MacRoman
-            // are single-byte and bijective for the codepoints we care about.
-            var encoding = _currentFontEncoding == "MacRomanEncoding"
-                ? Encoding.GetEncoding(10000)
-                : Encoding.GetEncoding(1252);
-            var bytes = encoding.GetBytes(text);
-            foreach (var b in bytes)
-            {
-                int idx = b - _currentFontFirstChar;
-                sumThousandthsOfEm += (idx >= 0 && idx < _currentFontWidths.Length)
-                    ? _currentFontWidths[idx]
-                    : _currentFontMissingWidth;
-            }
-        }
-
-        return sumThousandthsOfEm * effectiveSize / 1000f;
+        var a = _textState.TextMatrixA;
+        var b = _textState.TextMatrixB;
+        var c = _textState.TextMatrixC;
+        var d = _textState.TextMatrixD;
+        var xScale = (float)Math.Sqrt(a * a + b * b);
+        var yScale = (float)Math.Sqrt(c * c + d * d);
+        if (xScale < 1e-6f || yScale < 1e-6f) return 1f;
+        return xScale / yScale;
     }
 
     private SKTypeface GetTypeface(string baseFont)
@@ -1169,12 +1132,14 @@ internal class RenderContext
             }
             else if (double.TryParse(operand, NumberStyles.Float, CultureInfo.InvariantCulture, out var adjustment))
             {
-                // TJ position adjustment, in thousandths of em of the effective
-                // font size (negative moves right, positive moves left). Must
-                // use effectiveSize (not raw FontSize) so kerning scales with
-                // any Tm matrix the PDF applies.
+                // TJ position adjustment is in thousandths of text-space units,
+                // which map to device-space X via the text matrix's X-scale
+                // (not Y-scale). For non-uniform Tm (e.g. SCOTUS "SUPREME COURT"
+                // with 14.2001/15 ratio), using yScale instead of xScale
+                // compounds a ~6% per-glyph error into visible mid-word gaps.
                 var effectiveSize = GetEffectiveFontSize();
-                var xOffset = (float)(-adjustment * effectiveSize / 1000.0);
+                var xyRatio = GetTextMatrixXYRatio();
+                var xOffset = (float)(-adjustment * effectiveSize / 1000.0) * xyRatio;
                 _textState.TextMatrixE += xOffset * _textState.HorizontalScale / 100.0f;
             }
         }
@@ -1186,6 +1151,7 @@ internal class RenderContext
             return;
 
         var effectiveSize = GetEffectiveFontSize();
+        var xyRatio = GetTextMatrixXYRatio();
 
         using var font = new SKFont(_currentTypeface, effectiveSize);
         using var paint = new SKPaint(font)
@@ -1200,31 +1166,30 @@ internal class RenderContext
 
         // The canvas has been transformed with Scale(scale, -scale) to flip Y for paths.
         // For text, we need to un-flip it so text appears right-side up.
-        // Save state, apply local transform to flip text back, draw, restore.
+        // When the text matrix has non-uniform scaling (xyRatio != 1), squeeze
+        // glyphs horizontally so their on-screen width matches the text-matrix's
+        // X-scale rather than the Y-scale we used for font height.
         _canvas.Save();
-
-        // Move to text position, then flip Y locally for this text
         _canvas.Translate(x, y);
-        _canvas.Scale(1, -1); // Flip back for text
-
-        // Draw text at origin (we've already translated)
+        _canvas.Scale(xyRatio, -1);
         _canvas.DrawText(text, 0, 0, paint);
-
         _canvas.Restore();
 
-        // Advance the cursor. Prefer Skia's MeasureText for embedded fonts so
-        // measurement and drawing stay in sync; otherwise use PDF /Widths so
-        // subset-font layout authored against the real font survives system-font
-        // substitution.
-        var width = MeasurePdfAdvance(text, paint, effectiveSize);
+        // Advance must match what Skia actually drew above, otherwise the
+        // cursor ends up past (or before) the visible glyph extent and the
+        // next Tj renders with a gap (or overlap). Always use paint.MeasureText
+        // — when the embedded font is loaded it reports the real widths; when
+        // we've substituted a system typeface, the system font's widths are
+        // what Skia drew with, and mixing in PDF /Widths here would diverge
+        // from the visible render. Multiply by xyRatio so the advance lives
+        // in the same scaled coordinate system as the drawn glyphs.
+        var width = paint.MeasureText(text) * xyRatio;
         var charCount = text.Length;
         var spaceCount = text.Count(c => c == ' ');
 
-        // PDF spec 9.4.4: Tc and Tw are in UNSCALED text space units. They must
-        // be scaled by the text matrix's X-scale before being added to a
-        // device-space advance — otherwise Tw-heavy layouts (common when a PDF
-        // producer combines a big Tw with TJ adjustments that cancel it out)
-        // produce 10x-too-small spacing and text visibly overlaps itself.
+        // PDF spec 9.4.4: Tc and Tw are in UNSCALED text space units. Scale by
+        // the text matrix's X-scale before adding to device-space advance,
+        // otherwise Tw-heavy layouts overlap themselves (birth-cert form).
         var tmA = _textState.TextMatrixA;
         var tmB = _textState.TextMatrixB;
         var xScale = (float)Math.Sqrt(tmA * tmA + tmB * tmB);
@@ -1251,6 +1216,7 @@ internal class RenderContext
             cids[i] = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
 
         var effectiveSize = GetEffectiveFontSize();
+        var xyRatio = GetTextMatrixXYRatio();
 
         using var font = new SKFont(_currentTypeface, effectiveSize);
         using var paint = new SKPaint(font)
@@ -1262,7 +1228,7 @@ internal class RenderContext
 
         _canvas.Save();
         _canvas.Translate(_textState.TextMatrixE, _textState.TextMatrixF + _textState.TextRise);
-        _canvas.Scale(1, -1);
+        _canvas.Scale(xyRatio, -1);
 
         // SKTextEncoding.GlyphId reads the byte buffer as native-endian ushort
         // glyph IDs. BlockCopy gives us exactly that on little-endian machines.
@@ -1281,7 +1247,7 @@ internal class RenderContext
                 ? w
                 : _currentCidDefaultWidth;
         }
-        var width = sumThousandthsOfEm * effectiveSize / 1000f;
+        var width = sumThousandthsOfEm * effectiveSize / 1000f * xyRatio;
         width *= _textState.HorizontalScale / 100.0f;
         _textState.TextMatrixE += width;
     }
