@@ -1198,16 +1198,25 @@ internal class RenderContext
 
         _canvas.Restore();
 
-        // Advance the cursor. Prefer the PDF's own /Widths when available so
-        // embedded subset fonts (prevalent in real-world documents) advance by
-        // their designed glyph widths instead of Skia's fallback metrics.
+        // Advance the cursor. Prefer Skia's MeasureText for embedded fonts so
+        // measurement and drawing stay in sync; otherwise use PDF /Widths so
+        // subset-font layout authored against the real font survives system-font
+        // substitution.
         var width = MeasurePdfAdvance(text, paint, effectiveSize);
         var charCount = text.Length;
         var spaceCount = text.Count(c => c == ' ');
 
-        // Apply character and word spacing
-        width += charCount * _textState.CharSpacing;
-        width += spaceCount * _textState.WordSpacing;
+        // PDF spec 9.4.4: Tc and Tw are in UNSCALED text space units. They must
+        // be scaled by the text matrix's X-scale before being added to a
+        // device-space advance — otherwise Tw-heavy layouts (common when a PDF
+        // producer combines a big Tw with TJ adjustments that cancel it out)
+        // produce 10x-too-small spacing and text visibly overlaps itself.
+        var tmA = _textState.TextMatrixA;
+        var tmB = _textState.TextMatrixB;
+        var xScale = (float)Math.Sqrt(tmA * tmA + tmB * tmB);
+        if (xScale < 1e-6f) xScale = 1f;
+        width += charCount * _textState.CharSpacing * xScale;
+        width += spaceCount * _textState.WordSpacing * xScale;
         width *= _textState.HorizontalScale / 100.0f;
 
         _textState.TextMatrixE += width;
