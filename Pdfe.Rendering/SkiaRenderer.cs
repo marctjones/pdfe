@@ -73,6 +73,17 @@ internal class RenderContext
     private int _currentFontFirstChar;
     private float _currentFontMissingWidth;
 
+    // Per-font character-code → Unicode map, built from /BaseEncoding +
+    // /Differences when /Encoding is a dictionary. Null for the common case
+    // of a simple name encoding (WinAnsiEncoding/MacRomanEncoding), in which
+    // case DecodeTextBytes uses the raw codepage.
+    private char[]? _currentCodeToUnicode;
+    // Inverse map, populated whenever _currentCodeToUnicode is; lets
+    // MeasurePdfAdvance go from Unicode text back to PDF byte codes for
+    // indexing /Widths. When a Unicode char appears at multiple codes we
+    // keep the first (lowest) to match the likely intent.
+    private Dictionary<char, byte>? _currentUnicodeToCode;
+
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
         _canvas = canvas;
@@ -632,10 +643,23 @@ internal class RenderContext
         // Try to get the font from page resources to determine the base font and encoding
         var fontDict = _page.GetFont(fontName);
         var baseFont = fontDict?.GetNameOrNull("BaseFont") ?? "Helvetica";
-        var encoding = fontDict?.GetNameOrNull("Encoding") ?? "WinAnsiEncoding";
 
-        // Store the encoding for text decoding
-        _currentFontEncoding = encoding;
+        // /Encoding can be either a Name (e.g. /WinAnsiEncoding) or a Dictionary
+        // with /BaseEncoding and /Differences. The dictionary form is how embedded
+        // subset fonts remap small character codes to specific glyphs — without
+        // handling it, text decodes as control characters and renders invisibly.
+        var encodingDict = fontDict?.GetDictionaryOrNull("Encoding");
+        var encodingName = fontDict?.GetNameOrNull("Encoding")
+                           ?? encodingDict?.GetNameOrNull("BaseEncoding")
+                           ?? "WinAnsiEncoding";
+
+        _currentFontEncoding = encodingName;
+        _currentCodeToUnicode = null;
+        _currentUnicodeToCode = null;
+        if (encodingDict != null)
+        {
+            BuildEncodingMaps(encodingDict, encodingName);
+        }
 
         // Map PDF font names to SkiaSharp typefaces
         _currentTypeface = GetTypeface(baseFont);
@@ -663,6 +687,69 @@ internal class RenderContext
         }
     }
 
+    // Build code→Unicode (and inverse) tables for a font whose /Encoding is a
+    // dictionary. Seeds from the named base encoding (WinAnsi/MacRoman), then
+    // overlays entries from the /Differences array. Per PDF spec 9.6.5:
+    // Differences is a sequence of numbers (starting code) and names (glyph
+    // names), e.g. [32 /space /exclam /quotedbl 39 /quoteright].
+    private void BuildEncodingMaps(Pdfe.Core.Primitives.PdfDictionary encodingDict, string baseEncoding)
+    {
+        var map = BuildBaseEncodingTable(baseEncoding);
+
+        var differences = encodingDict.GetArrayOrNull("Differences");
+        if (differences != null)
+        {
+            int currentCode = 0;
+            for (int i = 0; i < differences.Count; i++)
+            {
+                var item = differences[i];
+                if (item is Pdfe.Core.Primitives.PdfName name)
+                {
+                    if (currentCode >= 0 && currentCode < 256 &&
+                        AdobeGlyphList.TryGet(name.Value, out var ch))
+                    {
+                        map[currentCode] = ch;
+                    }
+                    currentCode++;
+                }
+                else if (item is Pdfe.Core.Primitives.PdfInteger intNum)
+                {
+                    currentCode = (int)intNum.Value;
+                }
+                else if (item is Pdfe.Core.Primitives.PdfReal realNum)
+                {
+                    currentCode = (int)realNum.Value;
+                }
+            }
+        }
+
+        _currentCodeToUnicode = map;
+        _currentUnicodeToCode = new Dictionary<char, byte>(256);
+        for (int b = 0; b < 256; b++)
+        {
+            var c = map[b];
+            if (c != '\0' && !_currentUnicodeToCode.ContainsKey(c))
+                _currentUnicodeToCode[c] = (byte)b;
+        }
+    }
+
+    private static char[] BuildBaseEncodingTable(string encodingName)
+    {
+        var encoding = encodingName == "MacRomanEncoding"
+            ? Encoding.GetEncoding(10000)
+            : Encoding.GetEncoding(1252);
+
+        var map = new char[256];
+        var buffer = new byte[1];
+        for (int b = 0; b < 256; b++)
+        {
+            buffer[0] = (byte)b;
+            var decoded = encoding.GetString(buffer);
+            map[b] = decoded.Length > 0 ? decoded[0] : '\0';
+        }
+        return map;
+    }
+
     // Effective font size applied to glyph drawing: raw Tf size scaled by the
     // text matrix's Y-scale (handles the common `1 Tf` + `s 0 0 s ... Tm` idiom).
     private float GetEffectiveFontSize()
@@ -682,22 +769,44 @@ internal class RenderContext
         if (_currentFontWidths == null)
             return fallback.MeasureText(text);
 
-        // Round-trip the decoded string back to bytes via the same encoding we
-        // used on the way in (WinAnsi/MacRoman are single-byte and bijective
-        // for valid code points). /Widths is indexed by raw PDF character code.
-        var encoding = _currentFontEncoding == "MacRomanEncoding"
-            ? Encoding.GetEncoding(10000)
-            : Encoding.GetEncoding(1252);
-        var bytes = encoding.GetBytes(text);
-
         float sumThousandthsOfEm = 0f;
-        foreach (var b in bytes)
+
+        if (_currentUnicodeToCode != null)
         {
-            int idx = b - _currentFontFirstChar;
-            sumThousandthsOfEm += (idx >= 0 && idx < _currentFontWidths.Length)
-                ? _currentFontWidths[idx]
-                : _currentFontMissingWidth;
+            // /Encoding dictionary path: use the inverse map built from
+            // /BaseEncoding + /Differences. Unknown Unicode chars fall back to
+            // /MissingWidth (which may be 0, matching Adobe's behavior).
+            foreach (var c in text)
+            {
+                byte code;
+                if (!_currentUnicodeToCode.TryGetValue(c, out code))
+                {
+                    sumThousandthsOfEm += _currentFontMissingWidth;
+                    continue;
+                }
+                int idx = code - _currentFontFirstChar;
+                sumThousandthsOfEm += (idx >= 0 && idx < _currentFontWidths.Length)
+                    ? _currentFontWidths[idx]
+                    : _currentFontMissingWidth;
+            }
         }
+        else
+        {
+            // No /Differences: round-trip via the named codepage. WinAnsi/MacRoman
+            // are single-byte and bijective for the codepoints we care about.
+            var encoding = _currentFontEncoding == "MacRomanEncoding"
+                ? Encoding.GetEncoding(10000)
+                : Encoding.GetEncoding(1252);
+            var bytes = encoding.GetBytes(text);
+            foreach (var b in bytes)
+            {
+                int idx = b - _currentFontFirstChar;
+                sumThousandthsOfEm += (idx >= 0 && idx < _currentFontWidths.Length)
+                    ? _currentFontWidths[idx]
+                    : _currentFontMissingWidth;
+            }
+        }
+
         return sumThousandthsOfEm * effectiveSize / 1000f;
     }
 
@@ -935,19 +1044,26 @@ internal class RenderContext
 
     private string DecodeTextBytes(byte[] bytes)
     {
-        // Use the appropriate encoding based on the current font
-        // WinAnsiEncoding is Windows-1252 (code page 1252)
-        // MacRomanEncoding would be different, but we'll default to Windows-1252 for now
+        // If the current font has an /Encoding dictionary, use the
+        // /BaseEncoding + /Differences-derived map. Without this, embedded
+        // subset fonts (which remap codes like 3 → "N", 4 → "A" via
+        // /Differences) decode as control characters and render invisibly.
+        if (_currentCodeToUnicode != null)
+        {
+            var sb = new StringBuilder(bytes.Length);
+            foreach (var b in bytes)
+            {
+                var c = _currentCodeToUnicode[b];
+                if (c != '\0') sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        // Named-encoding fast path. WinAnsiEncoding = cp1252 is the default
+        // for most modern PDFs.
         if (_currentFontEncoding == "MacRomanEncoding")
-        {
-            // Mac Roman encoding (code page 10000)
             return Encoding.GetEncoding(10000).GetString(bytes);
-        }
-        else
-        {
-            // WinAnsiEncoding (Windows-1252) is the default for most PDFs
-            return Encoding.GetEncoding(1252).GetString(bytes);
-        }
+        return Encoding.GetEncoding(1252).GetString(bytes);
     }
 
     #endregion
