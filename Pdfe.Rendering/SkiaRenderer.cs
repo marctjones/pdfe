@@ -90,6 +90,14 @@ internal class RenderContext
     // page don't re-parse. Disposed at the end of Render().
     private readonly Dictionary<string, SKTypeface> _embeddedTypefaces = new();
 
+    // Type0 / CID font state. Type0 fonts use 2-byte-per-character codes and
+    // index a descendant font's /W array for widths (different format from the
+    // simple-font /Widths). When _currentFontIsType0 is true, content-stream
+    // bytes must be parsed 2 at a time and rendered via glyph ID, not Unicode.
+    private bool _currentFontIsType0;
+    private Dictionary<int, float>? _currentCidWidths;
+    private float _currentCidDefaultWidth = 1000f;
+
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
         _canvas = canvas;
@@ -683,6 +691,24 @@ internal class RenderContext
         // is raw Type1 PostScript), fall through to the system-font mapping.
         _currentTypeface = TryLoadEmbeddedTypeface(fontName, fontDict) ?? GetTypeface(baseFont);
 
+        // Type0 (composite CID) fonts need a completely different content-stream
+        // parse (2 bytes per character, widths indexed via /W not /Widths).
+        _currentFontIsType0 = fontDict?.GetNameOrNull("Subtype") == "Type0";
+        _currentCidWidths = null;
+        _currentCidDefaultWidth = 1000f;
+        if (_currentFontIsType0 && fontDict != null)
+        {
+            var descendants = ResolveArray(fontDict, "DescendantFonts");
+            if (descendants != null && descendants.Count > 0 &&
+                _page.Document.Resolve(descendants[0]) is Pdfe.Core.Primitives.PdfDictionary cidFont)
+            {
+                _currentCidDefaultWidth = (float)cidFont.GetNumber("DW", 1000);
+                var w = ResolveArray(cidFont, "W");
+                if (w != null)
+                    _currentCidWidths = ParseWArray(w);
+            }
+        }
+
         // Parse the font's glyph width table. When present, we'll use PDF widths
         // for cursor advance instead of Skia's MeasureText (which uses the
         // fallback system typeface's metrics — wrong for embedded subset fonts).
@@ -727,6 +753,47 @@ internal class RenderContext
         var resolved = _page.Document.Resolve(obj);
         return resolved as Pdfe.Core.Primitives.PdfArray;
     }
+
+    // Parse the /W array of a CIDFont (PDF spec 9.7.4.3). Two forms are
+    // interleaved in a single array:
+    //   cid [w1 w2 w3 ...]     → assigns w1..wN to cid, cid+1, cid+2, ...
+    //   cid_start cid_end w    → assigns w to every CID in [cid_start, cid_end]
+    // Widths are in glyph units (1/1000 of the designed em).
+    private static Dictionary<int, float> ParseWArray(Pdfe.Core.Primitives.PdfArray w)
+    {
+        var map = new Dictionary<int, float>();
+        int i = 0;
+        while (i < w.Count)
+        {
+            if (!IsNumber(w[i])) { i++; continue; }
+            int cid = (int)w.GetNumber(i);
+            i++;
+            if (i >= w.Count) break;
+
+            if (w[i] is Pdfe.Core.Primitives.PdfArray inner)
+            {
+                for (int j = 0; j < inner.Count; j++)
+                    map[cid + j] = (float)inner.GetNumber(j);
+                i++;
+            }
+            else if (IsNumber(w[i]) && i + 1 < w.Count && IsNumber(w[i + 1]))
+            {
+                int endCid = (int)w.GetNumber(i);
+                float width = (float)w.GetNumber(i + 1);
+                for (int c = cid; c <= endCid; c++)
+                    map[c] = width;
+                i += 2;
+            }
+            else
+            {
+                i++; // Malformed — skip and recover.
+            }
+        }
+        return map;
+    }
+
+    private static bool IsNumber(Pdfe.Core.Primitives.PdfObject o) =>
+        o is Pdfe.Core.Primitives.PdfInteger || o is Pdfe.Core.Primitives.PdfReal;
 
     // Load the font's embedded file (TrueType or OpenType/CFF) as an SKTypeface
     // so glyphs render in the face the PDF actually specifies, with the widths
@@ -968,18 +1035,18 @@ internal class RenderContext
 
     private void ShowText(string textOperand)
     {
-        // Parse the string operand (removes parentheses and handles escapes)
-        var text = ParsePdfString(textOperand);
-        if (string.IsNullOrEmpty(text))
-            return;
+        var bytes = ParsePdfStringBytes(textOperand);
+        if (bytes.Length == 0) return;
 
-        RenderText(text);
+        if (_currentFontIsType0)
+            RenderCidBytes(bytes);
+        else
+            RenderText(DecodeTextBytes(bytes));
     }
 
     private void ShowTextArray(List<string> operands)
     {
-        // TJ operator: array of strings and position adjustments
-        // The operands come as tokens: [, string1, number, string2, ], etc.
+        // TJ operator: array of strings and position adjustments.
         foreach (var operand in operands)
         {
             if (operand == "[" || operand == "]")
@@ -987,10 +1054,12 @@ internal class RenderContext
 
             if (operand.StartsWith("(") || operand.StartsWith("<"))
             {
-                // It's a string
-                var text = ParsePdfString(operand);
-                if (!string.IsNullOrEmpty(text))
-                    RenderText(text);
+                var bytes = ParsePdfStringBytes(operand);
+                if (bytes.Length == 0) continue;
+                if (_currentFontIsType0)
+                    RenderCidBytes(bytes);
+                else
+                    RenderText(DecodeTextBytes(bytes));
             }
             else if (double.TryParse(operand, NumberStyles.Float, CultureInfo.InvariantCulture, out var adjustment))
             {
@@ -1052,32 +1121,78 @@ internal class RenderContext
         _textState.TextMatrixE += width;
     }
 
-    private string ParsePdfString(string operand)
+    // Type0 rendering path. Content-stream bytes come in 2-at-a-time as
+    // big-endian CIDs under /Identity-H (the only CMap we currently handle).
+    // CIDs are rendered as glyph IDs directly — correct for /CIDToGIDMap
+    // /Identity (the default and most common case for /CIDFontType2 fonts).
+    private void RenderCidBytes(byte[] bytes)
+    {
+        if (!_inTextBlock || _currentTypeface == null || bytes.Length < 2)
+            return;
+
+        var count = bytes.Length / 2;
+        var cids = new ushort[count];
+        for (int i = 0; i < count; i++)
+            cids[i] = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+
+        var effectiveSize = GetEffectiveFontSize();
+
+        using var font = new SKFont(_currentTypeface, effectiveSize);
+        using var paint = new SKPaint(font)
+        {
+            Color = _state.FillColor,
+            IsAntialias = _options.AntiAlias,
+            TextEncoding = SKTextEncoding.GlyphId,
+        };
+
+        _canvas.Save();
+        _canvas.Translate(_textState.TextMatrixE, _textState.TextMatrixF + _textState.TextRise);
+        _canvas.Scale(1, -1);
+
+        // SKTextEncoding.GlyphId reads the byte buffer as native-endian ushort
+        // glyph IDs. BlockCopy gives us exactly that on little-endian machines.
+        var glyphBytes = new byte[cids.Length * 2];
+        Buffer.BlockCopy(cids, 0, glyphBytes, 0, glyphBytes.Length);
+        _canvas.DrawText(glyphBytes, 0, 0, paint);
+
+        _canvas.Restore();
+
+        // Advance by summed widths from /W (with /DW as fallback per CID).
+        float sumThousandthsOfEm = 0f;
+        foreach (var cid in cids)
+        {
+            sumThousandthsOfEm += (_currentCidWidths != null &&
+                                   _currentCidWidths.TryGetValue(cid, out var w))
+                ? w
+                : _currentCidDefaultWidth;
+        }
+        var width = sumThousandthsOfEm * effectiveSize / 1000f;
+        width *= _textState.HorizontalScale / 100.0f;
+        _textState.TextMatrixE += width;
+    }
+
+    // Returns the raw PDF string bytes WITHOUT decoding via encoding. Simple
+    // fonts route these through DecodeTextBytes → Unicode → RenderText; Type0
+    // fonts interpret the bytes directly as 2-byte CIDs via RenderCidBytes.
+    private byte[] ParsePdfStringBytes(string operand)
     {
         if (string.IsNullOrEmpty(operand))
-            return "";
+            return Array.Empty<byte>();
 
         // Literal string: (text)
         if (operand.StartsWith("(") && operand.EndsWith(")"))
-        {
-            var content = operand.Substring(1, operand.Length - 2);
-            return UnescapePdfString(content);
-        }
+            return UnescapePdfStringBytes(operand.Substring(1, operand.Length - 2));
 
         // Hex string: <hexdata>
         if (operand.StartsWith("<") && operand.EndsWith(">"))
-        {
-            var hex = operand.Substring(1, operand.Length - 2);
-            return DecodeHexString(hex);
-        }
+            return DecodeHexStringBytes(operand.Substring(1, operand.Length - 2));
 
-        return operand;
+        return Encoding.Latin1.GetBytes(operand);
     }
 
-    private string UnescapePdfString(string s)
+    private static byte[] UnescapePdfStringBytes(string s)
     {
-        // First, unescape the PDF string to get the raw bytes as characters
-        var unescaped = new List<byte>();
+        var unescaped = new List<byte>(s.Length);
         var i = 0;
         while (i < s.Length)
         {
@@ -1095,15 +1210,12 @@ internal class RenderContext
                     case ')': unescaped.Add((byte)')'); i += 2; break;
                     case '\\': unescaped.Add((byte)'\\'); i += 2; break;
                     default:
-                        // Octal escape \ddd
                         if (char.IsDigit(next))
                         {
                             var octal = "";
                             i++;
                             while (i < s.Length && octal.Length < 3 && char.IsDigit(s[i]) && s[i] < '8')
-                            {
                                 octal += s[i++];
-                            }
                             unescaped.Add((byte)Convert.ToInt32(octal, 8));
                         }
                         else
@@ -1116,23 +1228,17 @@ internal class RenderContext
             }
             else
             {
-                // The content stream was decoded as Latin1, so the character value is the byte value
+                // The content stream was decoded as Latin1, so char = byte.
                 unescaped.Add((byte)s[i++]);
             }
         }
-
-        // Now decode the bytes using the font's encoding
-        return DecodeTextBytes(unescaped.ToArray());
+        return unescaped.ToArray();
     }
 
-    private string DecodeHexString(string hex)
+    private static byte[] DecodeHexStringBytes(string hex)
     {
-        // Remove whitespace
         hex = new string(hex.Where(c => !char.IsWhiteSpace(c)).ToArray());
-
-        // Pad with 0 if odd length
-        if (hex.Length % 2 != 0)
-            hex += "0";
+        if (hex.Length % 2 != 0) hex += "0";
 
         var bytes = new byte[hex.Length / 2];
         for (int i = 0; i < bytes.Length; i++)
@@ -1140,8 +1246,7 @@ internal class RenderContext
             if (byte.TryParse(hex.Substring(i * 2, 2), NumberStyles.HexNumber, null, out var b))
                 bytes[i] = b;
         }
-
-        return DecodeTextBytes(bytes);
+        return bytes;
     }
 
     private string DecodeTextBytes(byte[] bytes)
