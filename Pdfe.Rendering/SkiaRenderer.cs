@@ -84,6 +84,12 @@ internal class RenderContext
     // keep the first (lowest) to match the likely intent.
     private Dictionary<char, byte>? _currentUnicodeToCode;
 
+    // Typefaces loaded from the PDF's own embedded font streams
+    // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). Keyed by resource
+    // name (e.g. "TT0") so repeated SetFont calls for the same font within a
+    // page don't re-parse. Disposed at the end of Render().
+    private readonly Dictionary<string, SKTypeface> _embeddedTypefaces = new();
+
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
         _canvas = canvas;
@@ -101,25 +107,34 @@ internal class RenderContext
 
     public void Render()
     {
-        var contentBytes = _page.GetContentStreamBytes();
-        if (contentBytes.Length == 0)
-            return;
-
-        var content = Encoding.Latin1.GetString(contentBytes);
-        var tokens = Tokenize(content);
-        var operands = new List<string>();
-
-        foreach (var token in tokens)
+        try
         {
-            if (IsOperator(token))
+            var contentBytes = _page.GetContentStreamBytes();
+            if (contentBytes.Length == 0)
+                return;
+
+            var content = Encoding.Latin1.GetString(contentBytes);
+            var tokens = Tokenize(content);
+            var operands = new List<string>();
+
+            foreach (var token in tokens)
             {
-                ExecuteOperator(token, operands);
-                operands.Clear();
+                if (IsOperator(token))
+                {
+                    ExecuteOperator(token, operands);
+                    operands.Clear();
+                }
+                else
+                {
+                    operands.Add(token);
+                }
             }
-            else
-            {
-                operands.Add(token);
-            }
+        }
+        finally
+        {
+            foreach (var typeface in _embeddedTypefaces.Values)
+                typeface.Dispose();
+            _embeddedTypefaces.Clear();
         }
     }
 
@@ -648,7 +663,8 @@ internal class RenderContext
         // with /BaseEncoding and /Differences. The dictionary form is how embedded
         // subset fonts remap small character codes to specific glyphs — without
         // handling it, text decodes as control characters and renders invisibly.
-        var encodingDict = fontDict?.GetDictionaryOrNull("Encoding");
+        // Must resolve the indirect reference; most real PDFs use `/Encoding N 0 R`.
+        var encodingDict = fontDict != null ? ResolveDict(fontDict, "Encoding") : null;
         var encodingName = fontDict?.GetNameOrNull("Encoding")
                            ?? encodingDict?.GetNameOrNull("BaseEncoding")
                            ?? "WinAnsiEncoding";
@@ -661,8 +677,11 @@ internal class RenderContext
             BuildEncodingMaps(encodingDict, encodingName);
         }
 
-        // Map PDF font names to SkiaSharp typefaces
-        _currentTypeface = GetTypeface(baseFont);
+        // Prefer a typeface loaded from the PDF's own embedded font stream
+        // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). When no embedded
+        // data is present or the format isn't SkiaSharp-loadable (e.g. /FontFile
+        // is raw Type1 PostScript), fall through to the system-font mapping.
+        _currentTypeface = TryLoadEmbeddedTypeface(fontName, fontDict) ?? GetTypeface(baseFont);
 
         // Parse the font's glyph width table. When present, we'll use PDF widths
         // for cursor advance instead of Skia's MeasureText (which uses the
@@ -672,7 +691,7 @@ internal class RenderContext
         _currentFontMissingWidth = 0f;
         if (fontDict != null)
         {
-            var widthsArray = fontDict.GetArrayOrNull("Widths");
+            var widthsArray = ResolveArray(fontDict, "Widths");
             if (widthsArray != null && widthsArray.Count > 0)
             {
                 _currentFontFirstChar = fontDict.GetInt("FirstChar", 0);
@@ -681,10 +700,93 @@ internal class RenderContext
                     widths[i] = (float)widthsArray.GetNumber(i);
                 _currentFontWidths = widths;
             }
-            var descriptor = fontDict.GetDictionaryOrNull("FontDescriptor");
+            var descriptor = ResolveDict(fontDict, "FontDescriptor");
             if (descriptor != null)
                 _currentFontMissingWidth = (float)descriptor.GetNumber("MissingWidth", 0);
         }
+    }
+
+    // Resolve `dict[key]` as a dictionary, following indirect references.
+    // PdfDictionary.GetDictionaryOrNull does a direct type-check and misses the
+    // common case where the value is a `N 0 R` reference — most FontDescriptor,
+    // /Widths, and /Encoding entries in real PDFs are stored that way.
+    private Pdfe.Core.Primitives.PdfDictionary? ResolveDict(
+        Pdfe.Core.Primitives.PdfDictionary dict, string key)
+    {
+        var obj = dict.GetOptional(key);
+        if (obj == null) return null;
+        var resolved = _page.Document.Resolve(obj);
+        return resolved as Pdfe.Core.Primitives.PdfDictionary;
+    }
+
+    private Pdfe.Core.Primitives.PdfArray? ResolveArray(
+        Pdfe.Core.Primitives.PdfDictionary dict, string key)
+    {
+        var obj = dict.GetOptional(key);
+        if (obj == null) return null;
+        var resolved = _page.Document.Resolve(obj);
+        return resolved as Pdfe.Core.Primitives.PdfArray;
+    }
+
+    // Load the font's embedded file (TrueType or OpenType/CFF) as an SKTypeface
+    // so glyphs render in the face the PDF actually specifies, with the widths
+    // and kerning the PDF's /Widths table was authored against. Cached per-font
+    // for the life of this RenderContext; disposed at end of Render().
+    private SKTypeface? TryLoadEmbeddedTypeface(string fontName, Pdfe.Core.Primitives.PdfDictionary? fontDict)
+    {
+        if (_embeddedTypefaces.TryGetValue(fontName, out var cached))
+            return cached;
+
+        if (fontDict == null) return null;
+
+        // Handle both simple and Type0 (CID) fonts: Type0 carries the embedded
+        // file inside its /DescendantFonts[0]/FontDescriptor, not on itself.
+        var descriptor = ResolveDict(fontDict, "FontDescriptor");
+        if (descriptor == null)
+        {
+            var descendants = ResolveArray(fontDict, "DescendantFonts");
+            if (descendants != null && descendants.Count > 0)
+            {
+                var descendantObj = _page.Document.Resolve(descendants[0]);
+                if (descendantObj is Pdfe.Core.Primitives.PdfDictionary cidFontDict)
+                    descriptor = ResolveDict(cidFontDict, "FontDescriptor");
+            }
+        }
+        if (descriptor == null) return null;
+
+        // Prefer /FontFile2 (TrueType) and /FontFile3 (OpenType/CFF) — SkiaSharp
+        // loads both via SKTypeface.FromData. /FontFile is legacy Type1
+        // PostScript, which Skia can't load directly; skip it for now and let
+        // the caller fall back to system-font mapping.
+        var streamObj = descriptor.GetOptional("FontFile2")
+                        ?? descriptor.GetOptional("FontFile3");
+        if (streamObj == null) return null;
+
+        var resolved = _page.Document.Resolve(streamObj);
+        if (resolved is not Pdfe.Core.Primitives.PdfStream fontStream) return null;
+
+        byte[] bytes;
+        try { bytes = fontStream.DecodedData; }
+        catch { return null; }
+        if (bytes == null || bytes.Length == 0) return null;
+
+        SKTypeface? typeface;
+        try
+        {
+            // SKData.CreateCopy owns the memory; SKTypeface.FromData holds it
+            // until the typeface is disposed.
+            using var data = SKData.CreateCopy(bytes);
+            typeface = SKTypeface.FromData(data);
+        }
+        catch
+        {
+            // Corrupt or unsupported font file — bail, caller falls back.
+            typeface = null;
+        }
+
+        if (typeface == null) return null;
+        _embeddedTypefaces[fontName] = typeface;
+        return typeface;
     }
 
     // Build code→Unicode (and inverse) tables for a font whose /Encoding is a
@@ -696,7 +798,7 @@ internal class RenderContext
     {
         var map = BuildBaseEncodingTable(baseEncoding);
 
-        var differences = encodingDict.GetArrayOrNull("Differences");
+        var differences = ResolveArray(encodingDict, "Differences");
         if (differences != null)
         {
             int currentCode = 0;
