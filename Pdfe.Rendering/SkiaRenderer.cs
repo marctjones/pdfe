@@ -845,15 +845,16 @@ internal class RenderContext
         }
         if (fontBytes == null || fontBytes.Length == 0) return null;
 
-        // For raw CFF (Type1C / CIDFontType0C), the code path to synthesize an
-        // OpenType container exists in Fonts/CffToOpenType.cs but currently
-        // produces SFNT bytes Skia accepts yet renders with glyph/cmap
-        // mismatches — verified on CDC VIS. Leaving the wrapping disabled
-        // until the cmap/hmtx interaction is sorted out. Falling back to the
-        // system-font path for these fonts still produces the same
-        // font-substitution artifacts we had before this commit landed.
+        // For raw CFF (Type1C / CIDFontType0C), synthesize an OpenType container
+        // so Skia can load it. The wrapper's cmap has been independently verified
+        // (CffWrapperTests.Wrapped_CffSkiaCanResolveKnownGlyphs) — Skia resolves
+        // every Unicode char to the correct CFF glyph index.
         byte[] loadableBytes = fontBytes;
-        _ = isCff; // infrastructure ready; wiring deferred (see Fonts/ classes)
+        if (isCff)
+        {
+            var wrapped = TryWrapCffAsOpenType(fontBytes, fontDict, descriptor);
+            if (wrapped != null) loadableBytes = wrapped;
+        }
 
         SKTypeface? typeface;
         try
@@ -1015,11 +1016,17 @@ internal class RenderContext
         return _textState.FontSize * yScale;
     }
 
-    // Glyph advance for a Unicode text chunk, in device-space points. Uses the
-    // PDF font's /Widths array when available so embedded/subset fonts advance
-    // by their actual designed widths, not whatever Skia's fallback reports.
+    // Glyph advance for a Unicode text chunk, in device-space points. When we
+    // loaded the PDF's own embedded font, trust Skia's MeasureText — the glyphs
+    // visually drawn and their advances both come from the same typeface, so
+    // measurement and drawing stay in sync. Otherwise, use the PDF's /Widths
+    // table so subset-font layout authored against the real font still works
+    // even when we substitute a system face.
     private float MeasurePdfAdvance(string text, SKPaint fallback, float effectiveSize)
     {
+        if (_embeddedTypefaces.ContainsKey(_textState.FontName))
+            return fallback.MeasureText(text);
+
         if (_currentFontWidths == null)
             return fallback.MeasureText(text);
 
