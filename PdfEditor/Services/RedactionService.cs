@@ -12,6 +12,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using PdfEditor.Redaction;
+using PdfeCorePage = Pdfe.Core.Document.PdfPage;
+using PdfeCoreRect = Pdfe.Core.Document.PdfRectangle;
+using PdfeStrategy = Pdfe.Core.Text.Segmentation.GlyphRemovalStrategy;
+using Pdfe.Core.Text.Segmentation; // for PdfPageRedactionExtensions.RedactArea
 
 namespace PdfEditor.Services;
 
@@ -225,6 +229,99 @@ public class RedactionService
             // Throw the exception to notify the user that redaction failed
             throw new Exception($"Redaction failed: Could not remove content from PDF structure. {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Redact an area on a Pdfe.Core page — no PDFsharp, no PdfPig, no disk I/O.
+    /// This is the #235 replacement for <see cref="RedactArea"/>; callers on the
+    /// Pdfe.Core stack should prefer this path. Mutates <paramref name="corePage"/>
+    /// in place; caller owns saving the document back out.
+    /// </summary>
+    /// <param name="corePage">A Pdfe.Core PdfPage from an open PdfDocument.</param>
+    /// <param name="area">Selection area in rendered-image pixels (top-left origin).</param>
+    /// <param name="renderDpi">DPI the image was rendered at. Defaults to 72.</param>
+    /// <param name="strategy">Glyph-overlap rule for deciding what gets removed.</param>
+    /// <remarks>
+    /// Scope for this initial port: simple fonts, axis-aligned pages, glyph-level
+    /// content removal. NOT handled here yet (deliberately deferred):
+    /// <list type="bullet">
+    ///   <item>Page rotation — caller must pre-transform if the rendered image
+    ///     was built from a rotated page.</item>
+    ///   <item>Visual black-rectangle overlay. The structural removal is the
+    ///     security guarantee; visual confirmation lives in the existing
+    ///     <see cref="RedactArea"/> PDFsharp path and can be bridged in once
+    ///     content-stream append on Pdfe.Core has an equivalent helper.</item>
+    ///   <item>Metadata sanitization — call <see cref="SanitizeRedactedMetadata"/>
+    ///     separately on the caller's document.</item>
+    /// </list>
+    /// </remarks>
+    public void RedactAreaViaCore(
+        PdfeCorePage corePage,
+        Rect area,
+        int renderDpi = CoordinateConverter.PdfPointsPerInch,
+        PdfeStrategy strategy = PdfeStrategy.AnyOverlap)
+    {
+        if (corePage == null) throw new ArgumentNullException(nameof(corePage));
+
+        _logger.LogInformation(
+            "RedactAreaViaCore: ({X:F2},{Y:F2},{W:F2}x{H:F2}) at {Dpi} DPI",
+            area.X, area.Y, area.Width, area.Height, renderDpi);
+
+        // Avalonia Rect (top-left, pixels) → PDF points (top-left).
+        var scaled = CoordinateConverter.ImageSelectionToPdfPointsTopLeft(area, renderDpi);
+
+        // PDF-point top-left → PDF-point bottom-left, which is what
+        // Pdfe.Core.PdfRectangle and TextExtractor's letter boxes use.
+        // page.MediaBox uses bottom-left origin already.
+        var mediaBox = corePage.MediaBox;
+        double pageHeight = mediaBox.Top - mediaBox.Bottom;
+        var pdfRect = new PdfeCoreRect(
+            Left: scaled.X,
+            Bottom: pageHeight - scaled.Y - scaled.Height,
+            Right: scaled.X + scaled.Width,
+            Top: pageHeight - scaled.Y);
+
+        // Snapshot the text that will be removed BEFORE the redaction so the
+        // metadata-sanitization pass can scrub it from the document info dict.
+        // After RedactArea rewrites the content stream the letters are gone,
+        // so we can't ask for them later.
+        var termsBeingRemoved = corePage.Letters
+            .Where(l => MatchesStrategy(l.GlyphRectangle, pdfRect, strategy))
+            .Select(l => l.Value)
+            .ToList();
+        if (termsBeingRemoved.Count > 0)
+        {
+            var joined = string.Concat(termsBeingRemoved);
+            if (!string.IsNullOrWhiteSpace(joined))
+                _redactedTerms.Add(joined);
+        }
+
+        var sw = Stopwatch.StartNew();
+        corePage.RedactArea(pdfRect, strategy);
+        sw.Stop();
+        _logger.LogInformation(
+            "RedactAreaViaCore: removed {LetterCount} glyphs in {Ms} ms",
+            termsBeingRemoved.Count, sw.ElapsedMilliseconds);
+    }
+
+    private static bool MatchesStrategy(
+        PdfeCoreRect glyph, PdfeCoreRect area, PdfeStrategy strategy)
+    {
+        var g = glyph.Normalize();
+        var a = area.Normalize();
+        if (!g.IntersectsWith(a)) return false;
+
+        bool fullyContained =
+            a.Contains(g.Left, g.Bottom) && a.Contains(g.Right, g.Top) &&
+            a.Contains(g.Left, g.Top) && a.Contains(g.Right, g.Bottom);
+
+        return strategy switch
+        {
+            PdfeStrategy.FullyContained => fullyContained,
+            PdfeStrategy.CenterPoint => a.Contains(
+                (g.Left + g.Right) * 0.5, (g.Bottom + g.Top) * 0.5),
+            _ => true,
+        };
     }
 
     /// <summary>
