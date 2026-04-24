@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Pdfe.Core.Content;
 using Pdfe.Core.Document;
 
@@ -35,19 +36,29 @@ public static class PdfPageRedactionExtensions
     {
         if (page == null) throw new System.ArgumentNullException(nameof(page));
 
-        var letters = page.Letters;
         var content = page.GetContentStream();
 
         // Short-circuit on empty pages — no ops means no work, and building
         // an empty content stream would overwrite any (legal-but-empty)
         // stream that was there.
-        if (content.Operators.Count == 0 || letters.Count == 0)
-            return;
+        if (content.Operators.Count == 0) return;
 
-        var remover = new GlyphRemover();
-        var newOps = remover.ProcessOperations(content.Operators, letters, area, strategy);
+        IReadOnlyList<ContentOperator> working = content.Operators;
 
-        page.SetContentStream(new ContentStream(newOps));
+        // Pass 1: text glyph removal (if there's any text on the page).
+        var letters = page.Letters;
+        if (letters.Count > 0)
+        {
+            var remover = new GlyphRemover();
+            working = remover.ProcessOperations(working, letters, area, strategy);
+        }
+
+        // Pass 2: image XObject removal (#279). Walks the operator list
+        // tracking CTM and drops image Do invocations whose transformed
+        // unit-square AABB overlaps the redaction area.
+        working = ImageRedactor.ProcessOperations(working, page, area, strategy, out _);
+
+        page.SetContentStream(new ContentStream(working));
     }
 
     /// <summary>
