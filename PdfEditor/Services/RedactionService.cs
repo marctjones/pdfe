@@ -11,7 +11,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using PdfEditor.Redaction;
+using PdfeCoreLetter = Pdfe.Core.Text.Letter;
 using PdfeCorePage = Pdfe.Core.Document.PdfPage;
 using PdfeCoreRect = Pdfe.Core.Document.PdfRectangle;
 using PdfeStrategy = Pdfe.Core.Text.Segmentation.GlyphRemovalStrategy;
@@ -69,7 +72,6 @@ public class RedactionOptions
 public class RedactionService
 {
     private readonly ILogger<RedactionService> _logger;
-    private readonly TextRedactor _textRedactor;
     private readonly MetadataSanitizer _metadataSanitizer;
     private readonly ILoggerFactory _loggerFactory;
 
@@ -91,12 +93,9 @@ public class RedactionService
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
-
-        // Use PdfEditor.Redaction library for TRUE glyph-level redaction
-        _textRedactor = new TextRedactor(_loggerFactory.CreateLogger<TextRedactor>());
         _metadataSanitizer = new MetadataSanitizer(_loggerFactory.CreateLogger<MetadataSanitizer>());
 
-        _logger.LogDebug("RedactionService created using PdfEditor.Redaction library for glyph-level redaction");
+        _logger.LogDebug("RedactionService created (area + text redaction share one Pdfe.Core pipeline)");
     }
 
     /// <summary>
@@ -333,8 +332,6 @@ public class RedactionService
             var pdfRight = area.X + area.Width;
             var pdfTop = pageHeight - area.Y;  // Convert to bottom-left origin
 
-            var pdfRectangle = new PdfEditor.Redaction.PdfRectangle(pdfLeft, pdfBottom, pdfRight, pdfTop);
-
             _logger.LogInformation("Redacting area: Avalonia({X:F2},{Y:F2},{W:F2}x{H:F2}) → PDF({L:F2},{B:F2},{R:F2},{T:F2})",
                 area.X, area.Y, area.Width, area.Height,
                 pdfLeft, pdfBottom, pdfRight, pdfTop);
@@ -403,81 +400,6 @@ public class RedactionService
             _logger.LogError(ex, "CRITICAL: Library redaction failed");
 
             throw;
-        }
-    }
-
-    /// <summary>
-    /// Get content stream bytes from a page
-    /// </summary>
-    private byte[] GetPageContentBytes(PdfPage page)
-    {
-        if (page.Contents.Elements.Count == 0)
-            return Array.Empty<byte>();
-
-        using var ms = new MemoryStream();
-        foreach (var item in page.Contents.Elements)
-        {
-            PdfDictionary? dict = null;
-            if (item is PdfReference pdfRef)
-                dict = pdfRef.Value as PdfDictionary;
-            else if (item is PdfDictionary directDict)
-                dict = directDict;
-
-            if (dict?.Stream?.Value != null)
-            {
-                ms.Write(dict.Stream.Value, 0, dict.Stream.Value.Length);
-                ms.WriteByte((byte)'\n');
-            }
-        }
-        return ms.ToArray();
-    }
-
-    /// <summary>
-    /// Extract text from a page for tracking redacted terms
-    /// </summary>
-    private string ExtractPageText(PdfPage page)
-    {
-        try
-        {
-            // Simple text extraction - just for tracking what was redacted
-            // This is NOT security-critical, just for metadata sanitization
-            using var tempFile = new TempFile();
-            using (var doc = new PdfDocument())
-            {
-                doc.AddPage(page);
-                doc.Save(tempFile.Path);
-            }
-
-            using var pdfPigDoc = UglyToad.PdfPig.PdfDocument.Open(tempFile.Path);
-            var pdfPigPage = pdfPigDoc.GetPage(1);
-            return pdfPigPage.Text;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    /// <summary>
-    /// Helper for temporary file management
-    /// </summary>
-    private class TempFile : IDisposable
-    {
-        public string Path { get; }
-
-        public TempFile()
-        {
-            Path = System.IO.Path.GetTempFileName();
-        }
-
-        public void Dispose()
-        {
-            try
-            {
-                if (File.Exists(Path))
-                    File.Delete(Path);
-            }
-            catch { }
         }
     }
 
@@ -600,46 +522,180 @@ public class RedactionService
     }
 
     /// <summary>
-    /// Redact all occurrences of specific text from a PDF file.
-    /// This uses the proven TextRedactor.RedactText() API that bypasses coordinate conversion.
-    /// Added to fix issue #190: GUI scripting fails on corpus PDFs due to coordinate issues.
+    /// Redact all occurrences of <paramref name="textToRedact"/> in the PDF at
+    /// <paramref name="inputPath"/>, writing the result to
+    /// <paramref name="outputPath"/>.
     /// </summary>
-    /// <param name="inputPath">Path to the input PDF file</param>
-    /// <param name="outputPath">Path to save the redacted PDF</param>
-    /// <param name="textToRedact">Text to search for and redact</param>
-    /// <param name="caseSensitive">Whether to match case-sensitively (default: false)</param>
-    /// <returns>Result indicating success and number of redactions</returns>
+    /// <remarks>
+    /// Shares the same Pdfe.Core glyph-removal pipeline as
+    /// <see cref="RedactArea(PdfPage, Rect, string, int)"/> — find glyphs,
+    /// rewrite content stream without them, append a black rectangle overlay.
+    /// The only thing the scripting path adds is page-level text search to
+    /// derive bounding boxes from a search string.
+    /// </remarks>
     public PdfEditor.Redaction.RedactionResult RedactText(string inputPath, string outputPath, string textToRedact, bool caseSensitive = false)
     {
         _logger.LogInformation("RedactText: Searching for '{Text}' in {Input}", textToRedact, inputPath);
 
-        var options = new PdfEditor.Redaction.RedactionOptions
+        // Drop any cached area-redaction state for a different file path; the
+        // Core doc we're about to load is fresh and self-contained.
+        ClearCoreDocCache();
+
+        try
         {
-            CaseSensitive = caseSensitive,
-            UseGlyphLevelRedaction = true,
-            DrawVisualMarker = true,
-            MarkerColor = (0, 0, 0)  // Black
-        };
+            var bytes = File.ReadAllBytes(inputPath);
+            using var doc = Pdfe.Core.Document.PdfDocument.Open(bytes);
 
-        var result = _textRedactor.RedactText(inputPath, outputPath, textToRedact, options);
+            int totalMatches = 0;
+            var affectedPages = new HashSet<int>();
+            var details = new List<PdfEditor.Redaction.RedactionDetail>();
 
-        if (result.Success)
-        {
-            _logger.LogInformation("RedactText: Successfully redacted {Count} occurrences of '{Text}'",
-                result.RedactionCount, textToRedact);
-
-            // Track redacted text for metadata sanitization
-            if (result.RedactionCount > 0)
+            for (int pageNum = 1; pageNum <= doc.PageCount; pageNum++)
             {
-                _redactedTerms.Add(textToRedact);
+                var page = doc.GetPage(pageNum);
+                var letters = page.Letters;
+                if (letters.Count == 0) continue;
+
+                var matches = FindTextMatches(letters, textToRedact, caseSensitive);
+                if (matches.Count == 0) continue;
+
+                foreach (var matchLetters in matches)
+                {
+                    var bbox = BoundingBoxOf(matchLetters);
+                    page.RedactArea(bbox, PdfeStrategy.AnyOverlap);
+                    AppendBlackRectangleToCorePage(page, bbox);
+                    details.Add(new PdfEditor.Redaction.RedactionDetail
+                    {
+                        PageNumber = pageNum,
+                        RedactedText = textToRedact,
+                        Location = new PdfEditor.Redaction.PdfRectangle(
+                            bbox.Left, bbox.Bottom, bbox.Right, bbox.Top)
+                    });
+                }
+
+                totalMatches += matches.Count;
+                affectedPages.Add(pageNum);
             }
+
+            doc.Save(outputPath);
+
+            if (totalMatches > 0)
+                _redactedTerms.Add(textToRedact);
+
+            _logger.LogInformation(
+                "RedactText: redacted {Count} occurrences of '{Text}' across {Pages} page(s)",
+                totalMatches, textToRedact, affectedPages.Count);
+
+            return PdfEditor.Redaction.RedactionResult.Succeeded(totalMatches, affectedPages, details);
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogError("RedactText: Failed to redact '{Text}': {Error}", textToRedact, result.ErrorMessage);
+            _logger.LogError(ex, "RedactText failed for '{Text}'", textToRedact);
+            return PdfEditor.Redaction.RedactionResult.Failed($"Redaction failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Bounding box that encloses all <paramref name="letters"/>.
+    /// </summary>
+    private static PdfeCoreRect BoundingBoxOf(IReadOnlyList<PdfeCoreLetter> letters)
+    {
+        return new PdfeCoreRect(
+            letters.Min(l => l.GlyphRectangle.Left),
+            letters.Min(l => l.GlyphRectangle.Bottom),
+            letters.Max(l => l.GlyphRectangle.Right),
+            letters.Max(l => l.GlyphRectangle.Top));
+    }
+
+    /// <summary>
+    /// Page-level text search: find every occurrence of
+    /// <paramref name="searchText"/> in the concatenated letter sequence and
+    /// return the letter-slices that spell each match.
+    /// </summary>
+    /// <remarks>
+    /// Character sequence is built by concatenating <c>Letter.Value</c> in
+    /// reading order (already rotation-aware via TextExtractor). Text is
+    /// normalized (curly→straight quotes, en/em dash→hyphen, whitespace
+    /// collapse) before comparison so typographic variation doesn't prevent
+    /// a match. Matches are non-overlapping (greedy left-to-right).
+    /// </remarks>
+    private static List<List<PdfeCoreLetter>> FindTextMatches(
+        IReadOnlyList<PdfeCoreLetter> letters, string searchText, bool caseSensitive)
+    {
+        var matches = new List<List<PdfeCoreLetter>>();
+        if (string.IsNullOrEmpty(searchText) || letters.Count == 0)
+            return matches;
+
+        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+        var sb = new StringBuilder(letters.Count);
+        foreach (var l in letters) sb.Append(l.Value);
+        var fullText = sb.ToString();
+
+        var needle = NormalizeText(searchText);
+        if (needle.Length == 0) return matches;
+
+        int i = 0;
+        while (i <= fullText.Length - needle.Length)
+        {
+            // Normalize may collapse whitespace so a window of 2× needle length
+            // is a safe upper bound for "does the text here start with needle?"
+            var windowLen = Math.Min(needle.Length * 2, fullText.Length - i);
+            var normWindow = NormalizeText(fullText.Substring(i, windowLen));
+
+            if (normWindow.StartsWith(needle, comparison))
+            {
+                // Expand one original character at a time until the normalized
+                // prefix equals the needle — that's the minimum letter span
+                // that covers the match.
+                int endIndex = i;
+                while (endIndex < fullText.Length)
+                {
+                    var cur = NormalizeText(fullText.Substring(i, endIndex - i + 1));
+                    if (cur.Equals(needle, comparison)) break;
+                    if (cur.Length >= needle.Length) break;
+                    endIndex++;
+                }
+
+                var matchLen = endIndex - i + 1;
+                if (matchLen > 0 && i + matchLen <= letters.Count)
+                {
+                    var slice = new List<PdfeCoreLetter>(matchLen);
+                    for (int k = 0; k < matchLen; k++)
+                        slice.Add(letters[i + k]);
+                    matches.Add(slice);
+                    i = endIndex + 1;
+                    continue;
+                }
+            }
+
+            i++;
         }
 
-        return result;
+        return matches;
+    }
+
+    /// <summary>
+    /// Normalize typographic variants (curly quotes, en/em dashes) and
+    /// collapse whitespace so that string comparison isn't defeated by
+    /// inconsequential differences between the search term and the text as
+    /// encoded in the PDF.
+    /// </summary>
+    private static string NormalizeText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        var normalized = text
+            .Replace('’', '\'')  // right single quote
+            .Replace('‘', '\'')  // left single quote
+            .Replace('ʼ', '\'')  // modifier letter apostrophe
+            .Replace('′', '\'')  // prime
+            .Replace('–', '-')   // en dash
+            .Replace('—', '-')   // em dash
+            .Replace('−', '-')   // minus sign
+            .Trim();
+
+        return Regex.Replace(normalized, @"\s+", " ");
     }
 
     /// <summary>
