@@ -79,6 +79,14 @@ public class RedactionService
     /// </summary>
     private readonly List<string> _redactedTerms = new();
 
+    // Cache of the most recently opened Pdfe.Core document, keyed by file path.
+    // RedactArea needs this across sequential calls on the same page so each
+    // redaction accumulates on the Core doc's in-memory content stream —
+    // re-opening from disk would drop prior redactions. PDFsharp can't be
+    // re-serialized after Save, so snapshot-per-call isn't an option either.
+    private string? _cachedCoreDocPath;
+    private Pdfe.Core.Document.PdfDocument? _cachedCoreDoc;
+
     public RedactionService(ILogger<RedactionService> logger, ILoggerFactory loggerFactory)
     {
         _logger = logger;
@@ -133,40 +141,21 @@ public class RedactionService
             "Starting redaction. Input area: ({X:F2},{Y:F2},{W:F2}x{H:F2}) at {Dpi} DPI [image pixels, top-left origin]",
             area.X, area.Y, area.Width, area.Height, renderDpi);
 
-        // Convert from image pixels to PDF points using centralized converter
-        // Both input and output use top-left origin (Avalonia convention)
+        // Convert from image pixels to PDF points (both top-left origin).
         var scaledArea = CoordinateConverter.ImageSelectionToPdfPointsTopLeft(area, renderDpi);
 
-        // Check for page rotation
+        // Sanity-check that the selection overlaps the page — a noisy log
+        // rather than a hard failure, because UI rubber-band selections can
+        // slightly overrun page bounds and still want to redact.
         var rotation = GetPageRotation(page);
-        var pageWidth = page.Width.Point;
-        var pageHeight = page.Height.Point;
-
-        // IMPORTANT: scaledArea is in VISUAL coordinates (what the user sees)
-        // For glyph-level redaction: PdfPig already provides letters in visual coordinates, so NO rotation transform
-        // For drawing black rectangle: We need to transform to content stream coordinates
-
-        // Calculate transformed area for drawing the black rectangle (content stream uses rotated coords)
-        var transformedAreaForDrawing = scaledArea;
-        if (rotation != 0)
-        {
-            _logger.LogInformation("Page has rotation: {Rotation}°. Will transform coordinates for drawing.", rotation);
-            transformedAreaForDrawing = CoordinateConverter.TransformForRotation(scaledArea, rotation, pageWidth, pageHeight);
-        }
-
-        _logger.LogInformation(
-            "Coordinate conversion via CoordinateConverter: " +
-            "({X:F2},{Y:F2},{W:F2}x{H:F2}) → visual ({ScaledX:F2},{ScaledY:F2},{ScaledW:F2}x{ScaledH:F2}) [PDF points]",
-            area.X, area.Y, area.Width, area.Height,
-            scaledArea.X, scaledArea.Y, scaledArea.Width, scaledArea.Height);
-
-        // Validate coordinates are reasonable for this page (use visual dimensions for rotated pages)
-        var (effectiveWidth, effectiveHeight) = CoordinateConverter.GetRotatedPageDimensions(pageWidth, pageHeight, rotation);
+        var (effectiveWidth, effectiveHeight) = CoordinateConverter.GetRotatedPageDimensions(
+            page.Width.Point, page.Height.Point, rotation);
         if (!CoordinateConverter.IsValidForPage(scaledArea, effectiveWidth, effectiveHeight))
         {
             _logger.LogWarning(
                 "Selection area may be outside page bounds. Page: ({W}x{H}), Selection: ({X},{Y},{SW}x{SH})",
-                pageWidth, pageHeight, scaledArea.X, scaledArea.Y, scaledArea.Width, scaledArea.Height);
+                page.Width.Point, page.Height.Point,
+                scaledArea.X, scaledArea.Y, scaledArea.Width, scaledArea.Height);
         }
 
         var sw = Stopwatch.StartNew();
@@ -194,30 +183,10 @@ public class RedactionService
                 _logger.LogError("Redaction failed in {ElapsedMs}ms. Content removal threw exception.", sw.ElapsedMilliseconds);
             }
 
-            // Step 2: Draw black rectangle over the area (OPTIONAL - visual confirmation only)
-            // This is done by directly appending PDF operators to avoid XGraphics issues
-            // IMPORTANT: For rotated pages, we use transformedAreaForDrawing which is in content stream coords
-            _logger.LogDebug("Step 2: Drawing black rectangle for visual confirmation");
-            try
-            {
-                DrawBlackRectangleDirectly(page, transformedAreaForDrawing);
-                result.VisualCoverageDrawn = true;
-                _logger.LogDebug("Visual black rectangle drawn successfully");
-            }
-            catch (Exception visualEx)
-            {
-                // Visual drawing failed, but if content was removed, redaction is still secure
-                result.VisualCoverageDrawn = false;
-
-                if (result.Mode == RedactionMode.TrueRedaction)
-                {
-                    _logger.LogWarning(visualEx, "Could not draw visual black rectangle, but content was successfully removed. Redaction is secure.");
-                }
-                else
-                {
-                    _logger.LogError(visualEx, "CRITICAL: Visual rectangle drawing failed AND content was not removed. Redaction completely failed.");
-                }
-            }
+            // Visual black rectangle is appended inside RemoveContentInArea,
+            // in the same content-stream rewrite as the glyph removal, so
+            // sequential redactions accumulate overlays correctly.
+            result.VisualCoverageDrawn = result.Mode == RedactionMode.TrueRedaction;
         }
         catch (Exception ex)
         {
@@ -232,76 +201,81 @@ public class RedactionService
     }
 
     /// <summary>
-    /// Redact an area on a Pdfe.Core page — no PDFsharp, no PdfPig, no disk I/O.
-    /// This is the #235 replacement for <see cref="RedactArea"/>; callers on the
-    /// Pdfe.Core stack should prefer this path. Mutates <paramref name="corePage"/>
-    /// in place; caller owns saving the document back out.
+    /// Open the Pdfe.Core document for <paramref name="path"/>, or return the
+    /// cached instance from a prior call so sequential RedactArea calls on the
+    /// same file accumulate their redactions on one Core document. Disposes
+    /// the previous cache entry when the path changes.
     /// </summary>
-    /// <param name="corePage">A Pdfe.Core PdfPage from an open PdfDocument.</param>
-    /// <param name="area">Selection area in rendered-image pixels (top-left origin).</param>
-    /// <param name="renderDpi">DPI the image was rendered at. Defaults to 72.</param>
-    /// <param name="strategy">Glyph-overlap rule for deciding what gets removed.</param>
-    /// <remarks>
-    /// Scope for this initial port: simple fonts, axis-aligned pages, glyph-level
-    /// content removal. NOT handled here yet (deliberately deferred):
-    /// <list type="bullet">
-    ///   <item>Page rotation — caller must pre-transform if the rendered image
-    ///     was built from a rotated page.</item>
-    ///   <item>Visual black-rectangle overlay. The structural removal is the
-    ///     security guarantee; visual confirmation lives in the existing
-    ///     <see cref="RedactArea"/> PDFsharp path and can be bridged in once
-    ///     content-stream append on Pdfe.Core has an equivalent helper.</item>
-    ///   <item>Metadata sanitization — call <see cref="SanitizeRedactedMetadata"/>
-    ///     separately on the caller's document.</item>
-    /// </list>
-    /// </remarks>
-    public void RedactAreaViaCore(
-        PdfeCorePage corePage,
-        Rect area,
-        int renderDpi = CoordinateConverter.PdfPointsPerInch,
-        PdfeStrategy strategy = PdfeStrategy.AnyOverlap)
+    private Pdfe.Core.Document.PdfDocument GetOrOpenCoreDoc(string path)
     {
-        if (corePage == null) throw new ArgumentNullException(nameof(corePage));
+        if (_cachedCoreDocPath == path && _cachedCoreDoc != null)
+            return _cachedCoreDoc;
 
-        _logger.LogInformation(
-            "RedactAreaViaCore: ({X:F2},{Y:F2},{W:F2}x{H:F2}) at {Dpi} DPI",
-            area.X, area.Y, area.Width, area.Height, renderDpi);
+        _cachedCoreDoc?.Dispose();
+        var bytes = File.ReadAllBytes(path);
+        _cachedCoreDoc = Pdfe.Core.Document.PdfDocument.Open(bytes);
+        _cachedCoreDocPath = path;
+        return _cachedCoreDoc;
+    }
 
-        // Avalonia Rect (top-left, pixels) → PDF points (top-left).
-        var scaled = CoordinateConverter.ImageSelectionToPdfPointsTopLeft(area, renderDpi);
+    /// <summary>
+    /// Release any cached Pdfe.Core document. Callers should invoke this
+    /// after the containing PDFsharp document has been saved / closed so the
+    /// stale Core-side copy isn't reused for a future redaction session on
+    /// the same path.
+    /// </summary>
+    public void ClearCoreDocCache()
+    {
+        _cachedCoreDoc?.Dispose();
+        _cachedCoreDoc = null;
+        _cachedCoreDocPath = null;
+    }
 
-        // PDF-point top-left → PDF-point bottom-left, which is what
-        // Pdfe.Core.PdfRectangle and TextExtractor's letter boxes use.
-        // page.MediaBox uses bottom-left origin already.
-        var mediaBox = corePage.MediaBox;
-        double pageHeight = mediaBox.Top - mediaBox.Bottom;
-        var pdfRect = new PdfeCoreRect(
-            Left: scaled.X,
-            Bottom: pageHeight - scaled.Y - scaled.Height,
-            Right: scaled.X + scaled.Width,
-            Top: pageHeight - scaled.Y);
+    /// <summary>
+    /// 0-based index of <paramref name="page"/> within its owning document.
+    /// </summary>
+    private static int IndexOfPdfSharpPage(PdfPage page)
+    {
+        var pages = page.Owner.Pages;
+        for (int i = 0; i < pages.Count; i++)
+            if (pages[i] == page) return i;
+        throw new InvalidOperationException("Page not found in its owning document");
+    }
 
-        // Snapshot the text that will be removed BEFORE the redaction so the
-        // metadata-sanitization pass can scrub it from the document info dict.
-        // After RedactArea rewrites the content stream the letters are gone,
-        // so we can't ask for them later.
-        var termsBeingRemoved = corePage.Letters
-            .Where(l => MatchesStrategy(l.GlyphRectangle, pdfRect, strategy))
-            .Select(l => l.Value)
-            .ToList();
-        if (termsBeingRemoved.Count > 0)
-        {
-            var joined = string.Concat(termsBeingRemoved);
-            if (!string.IsNullOrWhiteSpace(joined))
-                _redactedTerms.Add(joined);
-        }
+    /// <summary>
+    /// Append the visual-confirmation black rectangle as a fill op in the
+    /// Pdfe.Core page's content stream. Emits the standard
+    /// <c>q 0 0 0 rg X Y W H re f Q</c> sequence in bottom-left PDF coords.
+    /// </summary>
+    private static void AppendBlackRectangleToCorePage(
+        Pdfe.Core.Document.PdfPage corePage, PdfeCoreRect rect)
+    {
+        var content = corePage.GetContentStream();
+        var ops = content.Operators.ToList();
+        ops.Add(Pdfe.Core.Content.ContentOperator.SaveState());
+        ops.Add(Pdfe.Core.Content.ContentOperator.SetFillRgb(0, 0, 0));
+        ops.Add(Pdfe.Core.Content.ContentOperator.Rectangle(
+            rect.Left, rect.Bottom, rect.Right - rect.Left, rect.Top - rect.Bottom));
+        ops.Add(Pdfe.Core.Content.ContentOperator.Fill());
+        ops.Add(Pdfe.Core.Content.ContentOperator.RestoreState());
+        corePage.SetContentStream(new Pdfe.Core.Content.ContentStream(ops));
+    }
 
-        var sw = Stopwatch.StartNew();
-        corePage.RedactArea(pdfRect, strategy);
-        sw.Stop();
-        _logger.LogInformation(
-            "RedactAreaViaCore: removed {LetterCount} glyphs in {Ms} ms",
-            termsBeingRemoved.Count, sw.ElapsedMilliseconds);
+    /// <summary>
+    /// Replace a PDFsharp page's content stream with the given bytes. Used to
+    /// mirror a Pdfe.Core-rewritten content stream onto the PDFsharp page so
+    /// downstream <c>document.Save()</c> captures the redaction.
+    /// </summary>
+    private static void ReplacePdfSharpContentStream(PdfPage page, byte[] newContent)
+    {
+        page.Contents.Elements.Clear();
+        var newStream = new PdfDictionary(page.Owner);
+        newStream.CreateStream(newContent);
+        page.Owner.Internals.AddObject(newStream);
+        if (newStream.Reference == null)
+            throw new InvalidOperationException(
+                "Failed to create indirect reference for rewritten content stream");
+        page.Contents.Elements.Add(newStream.Reference);
     }
 
     private static bool MatchesStrategy(
@@ -325,79 +299,7 @@ public class RedactionService
     }
 
     /// <summary>
-    /// Draw a black rectangle by directly appending PDF operators to the content stream.
-    /// This method works even after content stream has been modified (unlike XGraphics).
-    ///
-    /// COORDINATE HANDLING:
-    /// ===================
-    /// Input: PDF points with top-left origin (Avalonia convention)
-    /// PDF operators: Use BOTTOM-LEFT origin (PDF native coordinates)
-    /// Result: Y-coordinate is flipped to PDF bottom-left origin
-    /// </summary>
-    /// <param name="page">The PDF page to draw on</param>
-    /// <param name="area">Area in PDF points (72 DPI, top-left origin)</param>
-    private void DrawBlackRectangleDirectly(PdfPage page, Rect area)
-    {
-        var pageHeight = page.Height.Point;
-
-        // Convert from Avalonia coordinates (top-left) to PDF coordinates (bottom-left)
-        var pdfX = area.X;
-        var pdfY = pageHeight - area.Y - area.Height;  // Flip Y axis
-        var pdfWidth = area.Width;
-        var pdfHeight = area.Height;
-
-        // Build PDF operators to draw a filled black rectangle
-        // PDF operator sequence:
-        // q                          Save graphics state
-        // 0 0 0 rg                   Set fill color to black (RGB)
-        // x y width height re        Draw rectangle path
-        // f                          Fill the path
-        // Q                          Restore graphics state
-        var operators = $"q\n0 0 0 rg\n{pdfX:F2} {pdfY:F2} {pdfWidth:F2} {pdfHeight:F2} re\nf\nQ\n";
-        var operatorBytes = System.Text.Encoding.ASCII.GetBytes(operators);
-
-        // Append to existing content stream or create new one
-        if (page.Contents.Elements.Count > 0)
-        {
-            // Append to first content stream
-            var content = page.Contents.Elements.GetDictionary(0);
-            if (content != null)
-            {
-                if (content.Stream != null)
-                {
-                    // Existing stream - append to it
-                    var stream = content.Stream;
-                    var existingBytes = stream.Value ?? Array.Empty<byte>();
-                    var newBytes = new byte[existingBytes.Length + operatorBytes.Length];
-                    Array.Copy(existingBytes, newBytes, existingBytes.Length);
-                    Array.Copy(operatorBytes, 0, newBytes, existingBytes.Length, operatorBytes.Length);
-                    stream.Value = newBytes;
-                }
-                else
-                {
-                    // Dictionary exists but no stream - create stream
-                    content.CreateStream(operatorBytes);
-                }
-            }
-        }
-        else
-        {
-            // No existing content, create new stream with black rectangle
-            // IMPORTANT: Must create as indirect object, not direct dictionary
-            // Adding a direct dictionary corrupts the PDF structure
-            var newContent = new PdfDictionary(page.Owner);
-            newContent.CreateStream(operatorBytes);
-            page.Owner.Internals.AddObject(newContent);
-            page.Contents.Elements.Add(newContent.Reference!);
-        }
-
-        _logger.LogDebug(
-            "Drew black rectangle at PDF coords({X:F2},{Y:F2},{W:F2}x{H:F2}) [converted from Avalonia({AX:F2},{AY:F2})]",
-            pdfX, pdfY, pdfWidth, pdfHeight, area.X, area.Y);
-    }
-
-    /// <summary>
-    /// Remove content within the specified area using PdfEditor.Redaction library.
+    /// Remove content within the specified area using Pdfe.Core glyph-level redaction.
     /// This is TRUE glyph-level redaction - removes individual characters from PDF structure.
     /// </summary>
     /// <remarks>
@@ -437,64 +339,57 @@ public class RedactionService
                 area.X, area.Y, area.Width, area.Height,
                 pdfLeft, pdfBottom, pdfRight, pdfTop);
 
-            // CRITICAL: Extract letters for TRUE glyph-level redaction
-            // We extract from the ORIGINAL file (not the in-memory document) to avoid "already saved" issue
-            int pageNumber = PdfEditor.Redaction.PdfPig.PdfPigHelper.GetPageNumber(page);
-            var letters = PdfEditor.Redaction.PdfPig.PdfPigHelper.ExtractLettersFromFile(
-                pdfFilePath,
-                pageNumber,
-                _logger);
+            // #235 migrated path: use Pdfe.Core's glyph-level redaction.
+            int pageIndex = IndexOfPdfSharpPage(page);
+            var coreRect = new PdfeCoreRect(pdfLeft, pdfBottom, pdfRight, pdfTop);
+            var coreDoc = GetOrOpenCoreDoc(pdfFilePath);
+            var corePage = coreDoc.GetPage(pageIndex + 1);
 
-            _logger.LogDebug("Extracted {Count} letters for TRUE glyph-level redaction from page {PageNumber}", letters.Count, pageNumber);
+            // Snapshot the words about to be removed for metadata sanitization.
+            // After RedactArea rewrites the content stream the letters are gone,
+            // so extraction has to happen first.
+            var removed = corePage.Letters
+                .Where(l => MatchesStrategy(l.GlyphRectangle, coreRect, PdfeStrategy.AnyOverlap))
+                .Select(l => l.Value)
+                .ToList();
 
-            // Use RedactPage() API with TRUE glyph-level redaction
-            var redactionOptions = new PdfEditor.Redaction.RedactionOptions
-            {
-                UseGlyphLevelRedaction = true,  // TRUE GLYPH-LEVEL!
-                DrawVisualMarker = true,
-                MarkerColor = (0, 0, 0),  // Black
-                RedactImagesPartially = false  // Security: Remove entire images (issue #282)
-            };
+            corePage.RedactArea(coreRect, PdfeStrategy.AnyOverlap);
 
-            var libraryResult = _textRedactor.RedactPage(page, new[] { pdfRectangle }, redactionOptions, pageLetters: letters);
+            // Append the visual black rectangle INSIDE the Core page's content
+            // stream (not via PDFsharp afterwards). If we drew it on the
+            // PDFsharp page, the next RedactArea call would mirror the Core
+            // doc's bytes back over it and erase the rectangle — sequential
+            // redactions would end up with only the last rect visible. Keeping
+            // the rect inside Core means the cached doc accumulates all
+            // overlays across calls.
+            AppendBlackRectangleToCorePage(corePage, coreRect);
 
-            if (!libraryResult.Success)
-            {
-                throw new InvalidOperationException($"Library redaction failed: {libraryResult.ErrorMessage}");
-            }
+            // Mirror the rewritten /Contents onto the PDFsharp page.
+            var newContent = corePage.GetContentStreamBytes();
+            ReplacePdfSharpContentStream(page, newContent);
 
             sw.Stop();
             _logger.LogDebug("In-memory redaction completed in {ElapsedMs}ms", sw.ElapsedMilliseconds);
 
-            // Set result from library redaction
-            // Issue #269: Now tracking image operations removed
             result.Mode = RedactionMode.TrueRedaction;
-            result.ContentRemoved = libraryResult.RedactionCount > 0 || libraryResult.ImageRedactionCount > 0;
-            result.TextOperationsRemoved = libraryResult.RedactionCount;
-            result.ImageOperationsRemoved = libraryResult.ImageRedactionCount;
+            result.ContentRemoved = removed.Count > 0;
+            result.TextOperationsRemoved = removed.Count;
+            result.ImageOperationsRemoved = 0; // #279: image redaction not yet ported to Pdfe.Core
             result.GraphicsOperationsRemoved = 0;
 
-            // Track redacted text from library details
-            if (libraryResult.RedactionCount > 0)
+            if (removed.Count > 0)
             {
-                foreach (var detail in libraryResult.Details)
+                var joined = string.Concat(removed);
+                foreach (var word in joined.Split(
+                    new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (!string.IsNullOrWhiteSpace(detail.RedactedText))
-                    {
-                        // Split redacted text into words and track them
-                        var words = detail.RedactedText.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (var word in words)
-                        {
-                            _redactedTerms.Add(word);
-                        }
-                    }
+                    _redactedTerms.Add(word);
                 }
             }
 
-            // MANDATORY LOGGING
-            Console.WriteLine($"[REDACTION-SECURITY] IN-MEMORY GLYPH-LEVEL REDACTION: Removed {libraryResult.RedactionCount} text segments, {libraryResult.ImageRedactionCount} images using PdfEditor.Redaction library");
-            _logger.LogWarning("IN-MEMORY GLYPH-LEVEL REDACTION PERFORMED: {TextCount} text segments, {ImageCount} images removed via RedactPage() API in {ElapsedMs}ms",
-                libraryResult.RedactionCount, libraryResult.ImageRedactionCount, sw.ElapsedMilliseconds);
+            _logger.LogInformation(
+                "Glyph-level redaction via Pdfe.Core removed {Count} characters in {Ms}ms",
+                removed.Count, sw.ElapsedMilliseconds);
 
             return result;
         }
