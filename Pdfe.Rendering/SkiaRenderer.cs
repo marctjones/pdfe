@@ -66,6 +66,13 @@ internal class RenderContext
     private SKTypeface? _currentTypeface;
     private string _currentFontEncoding;
 
+    // Glyph widths parsed from the current font dictionary's /Widths array.
+    // Null when unavailable (e.g. standard 14 fonts that omit /Widths), in which
+    // case we fall back to Skia's MeasureText on the system typeface.
+    private float[]? _currentFontWidths;
+    private int _currentFontFirstChar;
+    private float _currentFontMissingWidth;
+
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
         _canvas = canvas;
@@ -632,6 +639,66 @@ internal class RenderContext
 
         // Map PDF font names to SkiaSharp typefaces
         _currentTypeface = GetTypeface(baseFont);
+
+        // Parse the font's glyph width table. When present, we'll use PDF widths
+        // for cursor advance instead of Skia's MeasureText (which uses the
+        // fallback system typeface's metrics — wrong for embedded subset fonts).
+        _currentFontWidths = null;
+        _currentFontFirstChar = 0;
+        _currentFontMissingWidth = 0f;
+        if (fontDict != null)
+        {
+            var widthsArray = fontDict.GetArrayOrNull("Widths");
+            if (widthsArray != null && widthsArray.Count > 0)
+            {
+                _currentFontFirstChar = fontDict.GetInt("FirstChar", 0);
+                var widths = new float[widthsArray.Count];
+                for (int i = 0; i < widthsArray.Count; i++)
+                    widths[i] = (float)widthsArray.GetNumber(i);
+                _currentFontWidths = widths;
+            }
+            var descriptor = fontDict.GetDictionaryOrNull("FontDescriptor");
+            if (descriptor != null)
+                _currentFontMissingWidth = (float)descriptor.GetNumber("MissingWidth", 0);
+        }
+    }
+
+    // Effective font size applied to glyph drawing: raw Tf size scaled by the
+    // text matrix's Y-scale (handles the common `1 Tf` + `s 0 0 s ... Tm` idiom).
+    private float GetEffectiveFontSize()
+    {
+        var c = _textState.TextMatrixC;
+        var d = _textState.TextMatrixD;
+        var yScale = (float)Math.Sqrt(c * c + d * d);
+        if (yScale < 1e-6f) yScale = 1f;
+        return _textState.FontSize * yScale;
+    }
+
+    // Glyph advance for a Unicode text chunk, in device-space points. Uses the
+    // PDF font's /Widths array when available so embedded/subset fonts advance
+    // by their actual designed widths, not whatever Skia's fallback reports.
+    private float MeasurePdfAdvance(string text, SKPaint fallback, float effectiveSize)
+    {
+        if (_currentFontWidths == null)
+            return fallback.MeasureText(text);
+
+        // Round-trip the decoded string back to bytes via the same encoding we
+        // used on the way in (WinAnsi/MacRoman are single-byte and bijective
+        // for valid code points). /Widths is indexed by raw PDF character code.
+        var encoding = _currentFontEncoding == "MacRomanEncoding"
+            ? Encoding.GetEncoding(10000)
+            : Encoding.GetEncoding(1252);
+        var bytes = encoding.GetBytes(text);
+
+        float sumThousandthsOfEm = 0f;
+        foreach (var b in bytes)
+        {
+            int idx = b - _currentFontFirstChar;
+            sumThousandthsOfEm += (idx >= 0 && idx < _currentFontWidths.Length)
+                ? _currentFontWidths[idx]
+                : _currentFontMissingWidth;
+        }
+        return sumThousandthsOfEm * effectiveSize / 1000f;
     }
 
     private SKTypeface GetTypeface(string baseFont)
@@ -716,9 +783,12 @@ internal class RenderContext
             }
             else if (double.TryParse(operand, NumberStyles.Float, CultureInfo.InvariantCulture, out var adjustment))
             {
-                // It's a position adjustment (in thousandths of em)
-                // Negative values move right, positive move left
-                var xOffset = (float)(-adjustment * _textState.FontSize / 1000.0);
+                // TJ position adjustment, in thousandths of em of the effective
+                // font size (negative moves right, positive moves left). Must
+                // use effectiveSize (not raw FontSize) so kerning scales with
+                // any Tm matrix the PDF applies.
+                var effectiveSize = GetEffectiveFontSize();
+                var xOffset = (float)(-adjustment * effectiveSize / 1000.0);
                 _textState.TextMatrixE += xOffset * _textState.HorizontalScale / 100.0f;
             }
         }
@@ -729,16 +799,7 @@ internal class RenderContext
         if (!_inTextBlock || _currentTypeface == null)
             return;
 
-        // Many PDFs set `1 Tf` and encode the real glyph size via the text matrix
-        // (e.g. `10.02 0 0 10.02 x y Tm`). The effective point size is FontSize
-        // multiplied by the text-matrix Y-scale sqrt(c^2 + d^2). Default matrix
-        // (A=D=1, B=C=0) yields yScale=1, preserving behavior for PDFs that
-        // don't use Tm scaling.
-        var mc = _textState.TextMatrixC;
-        var md = _textState.TextMatrixD;
-        var yScale = (float)Math.Sqrt(mc * mc + md * md);
-        if (yScale < 1e-6f) yScale = 1f;
-        var effectiveSize = _textState.FontSize * yScale;
+        var effectiveSize = GetEffectiveFontSize();
 
         using var font = new SKFont(_currentTypeface, effectiveSize);
         using var paint = new SKPaint(font)
@@ -765,8 +826,10 @@ internal class RenderContext
 
         _canvas.Restore();
 
-        // Advance the text position
-        var width = paint.MeasureText(text);
+        // Advance the cursor. Prefer the PDF's own /Widths when available so
+        // embedded subset fonts (prevalent in real-world documents) advance by
+        // their designed glyph widths instead of Skia's fallback metrics.
+        var width = MeasurePdfAdvance(text, paint, effectiveSize);
         var charCount = text.Length;
         var spaceCount = text.Count(c => c == ' ');
 
