@@ -12,7 +12,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using PdfEditor.Redaction;
 using PdfeCoreLetter = Pdfe.Core.Text.Letter;
 using PdfeCoreRect = Pdfe.Core.Document.PdfRectangle;
 using PdfeStrategy = Pdfe.Core.Text.Segmentation.GlyphRemovalStrategy;
@@ -517,7 +516,7 @@ public class RedactionService
     /// The only thing the scripting path adds is page-level text search to
     /// derive bounding boxes from a search string.
     /// </remarks>
-    public PdfEditor.Redaction.RedactionResult RedactText(string inputPath, string outputPath, string textToRedact, bool caseSensitive = false)
+    public TextRedactionResult RedactText(string inputPath, string outputPath, string textToRedact, bool caseSensitive = false)
     {
         _logger.LogInformation("RedactText: Searching for '{Text}' in {Input}", textToRedact, inputPath);
 
@@ -531,8 +530,7 @@ public class RedactionService
             using var doc = Pdfe.Core.Document.PdfDocument.Open(bytes);
 
             int totalMatches = 0;
-            var affectedPages = new HashSet<int>();
-            var details = new List<PdfEditor.Redaction.RedactionDetail>();
+            int pagesAffected = 0;
 
             for (int pageNum = 1; pageNum <= doc.PageCount; pageNum++)
             {
@@ -548,17 +546,10 @@ public class RedactionService
                     var bbox = BoundingBoxOf(matchLetters);
                     page.RedactArea(bbox, PdfeStrategy.AnyOverlap);
                     AppendBlackRectangleToCorePage(page, bbox);
-                    details.Add(new PdfEditor.Redaction.RedactionDetail
-                    {
-                        PageNumber = pageNum,
-                        RedactedText = textToRedact,
-                        Location = new PdfEditor.Redaction.PdfRectangle(
-                            bbox.Left, bbox.Bottom, bbox.Right, bbox.Top)
-                    });
                 }
 
                 totalMatches += matches.Count;
-                affectedPages.Add(pageNum);
+                pagesAffected++;
             }
 
             doc.Save(outputPath);
@@ -568,14 +559,14 @@ public class RedactionService
 
             _logger.LogInformation(
                 "RedactText: redacted {Count} occurrences of '{Text}' across {Pages} page(s)",
-                totalMatches, textToRedact, affectedPages.Count);
+                totalMatches, textToRedact, pagesAffected);
 
-            return PdfEditor.Redaction.RedactionResult.Succeeded(totalMatches, affectedPages, details);
+            return TextRedactionResult.Succeeded(totalMatches);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "RedactText failed for '{Text}'", textToRedact);
-            return PdfEditor.Redaction.RedactionResult.Failed($"Redaction failed: {ex.Message}");
+            return TextRedactionResult.Failed($"Redaction failed: {ex.Message}");
         }
     }
 

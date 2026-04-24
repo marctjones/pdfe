@@ -59,7 +59,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PdfEditor.Redaction\PdfEditor.Redaction.csproj" />
     <ProjectReference Include="..\Pdfe.Core\Pdfe.Core.csproj" />
     <ProjectReference Include="..\Pdfe.Rendering\Pdfe.Rendering.csproj" />
   </ItemGroup>
