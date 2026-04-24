@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Pdfe.Rendering;
@@ -15,6 +16,28 @@ namespace Pdfe.Rendering;
 /// </summary>
 internal static class AdobeGlyphList
 {
+    private static readonly Lazy<Dictionary<char, string>> _reverse =
+        new(() =>
+        {
+            var inv = new Dictionary<char, string>(_map.Count);
+            foreach (var kvp in _map)
+                if (!inv.ContainsKey(kvp.Value))
+                    inv[kvp.Value] = kvp.Key;
+            return inv;
+        });
+
+    /// <summary>Reverse lookup: Unicode → glyph name.</summary>
+    public static bool TryGetName(char unicode, out string glyphName)
+    {
+        if (_reverse.Value.TryGetValue(unicode, out var name))
+        {
+            glyphName = name;
+            return true;
+        }
+        glyphName = string.Empty;
+        return false;
+    }
+
     public static bool TryGet(string glyphName, out char unicode)
     {
         if (_map.TryGetValue(glyphName, out unicode))
