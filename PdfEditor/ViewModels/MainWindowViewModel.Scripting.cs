@@ -332,12 +332,6 @@ public partial class MainWindowViewModel
             this.RaisePropertyChanged(nameof(StatusBarText));
 
             _logger.LogInformation("[SCRIPT] SaveDocumentCommand completed successfully, current path updated to: {Path}", filePath);
-
-            // Run verification if enabled
-            if (RunVerifyAfterSave)
-            {
-                await RunVerifyAsync(filePath);
-            }
         }
         catch (Exception ex)
         {
@@ -378,9 +372,9 @@ public partial class MainWindowViewModel
 /// </summary>
 public class CurrentDocumentInfo
 {
-    private readonly PdfSharp.Pdf.PdfDocument? _document;
+    private readonly Pdfe.Core.Document.PdfDocument? _document;
 
-    public CurrentDocumentInfo(PdfSharp.Pdf.PdfDocument? document, string filePath, int pageCount)
+    public CurrentDocumentInfo(Pdfe.Core.Document.PdfDocument? document, string filePath, int pageCount)
     {
         _document = document;
         FilePath = filePath;
@@ -400,5 +394,5 @@ public class CurrentDocumentInfo
     /// <summary>
     /// The underlying PdfDocument (for advanced scenarios).
     /// </summary>
-    public PdfSharp.Pdf.PdfDocument? Document => _document;
+    public Pdfe.Core.Document.PdfDocument? Document => _document;
 }

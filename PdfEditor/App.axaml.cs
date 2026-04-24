@@ -99,9 +99,7 @@ public partial class App : Application
         services.AddSingleton<RedactionService>();
         services.AddSingleton<PdfTextExtractionService>();
         services.AddSingleton<PdfSearchService>();
-        services.AddSingleton<PdfOcrService>();
         services.AddSingleton<SignatureVerificationService>();
-        services.AddSingleton<PdfEditor.Services.Verification.RedactionVerifier>();
         services.AddSingleton<FilenameSuggestionService>();
 
         // Register ViewModels

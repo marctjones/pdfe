@@ -149,9 +149,7 @@ public class FileOperationsTests : IDisposable
     [Fact]
     public void LoadDocument_InvalidPath_ThrowsException()
     {
-        // Act & Assert
-        // The service wraps the error in a generic Exception
-        var ex = Assert.Throws<Exception>(() =>
+        var ex = Assert.Throws<FileNotFoundException>(() =>
             _documentService.LoadDocument("nonexistent.pdf"));
         Assert.Contains("not found", ex.Message);
     }

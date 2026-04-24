@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using PdfEditor.Controls;
 using PdfEditor.Models;
 using PdfEditor.Services;
-using PdfEditor.Services.Verification;
 using ReactiveUI;
 using System;
 using System.Collections.Generic;
@@ -30,9 +29,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly PdfRenderService _renderService;
     private readonly RedactionService _redactionService;
     private readonly PdfTextExtractionService _textExtractionService;
-    private readonly PdfOcrService _ocrService;
     private readonly SignatureVerificationService _signatureService;
-    private readonly RedactionVerifier _verifier;
     private readonly FilenameSuggestionService _filenameSuggestionService;
 
     // State managers
@@ -54,19 +51,12 @@ public partial class MainWindowViewModel : ViewModelBase
     private double _viewportWidth = 800;
     private double _viewportHeight = 600;
     private ObservableCollection<Rect> _currentPageSearchHighlights = new();
-    private bool _runVerifyAfterSave = true; // Enabled by default for security
 #if DEBUG
     private bool _debugVerifyRedaction = true; // Debug mode: enabled in DEBUG builds, disabled in RELEASE
 #else
     private bool _debugVerifyRedaction = false; // Debug mode: disabled in RELEASE builds
 #endif
-    private string _ocrLanguages = "eng";
-    private int _ocrBaseDpi = 350;
-    private int _ocrHighDpi = 450;
-    private double _ocrLowConfidence = 0.6;
     private int _renderCacheMax = 20;
-    private string _lastVerifyStatus = string.Empty;
-    private bool _lastVerifyFailed;
     private string _operationStatus = string.Empty;
     private bool _hasInMemoryModifications; // Tracks if document has been modified in-memory (e.g., redactions applied)
 
@@ -86,9 +76,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _redactionService = new RedactionService(Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionService>.Instance, nullLoggerFactory);
         _textExtractionService = new PdfTextExtractionService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfTextExtractionService>.Instance);
         _searchService = new PdfSearchService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfSearchService>.Instance);
-        _ocrService = new PdfOcrService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfOcrService>.Instance, renderService);
         _signatureService = new SignatureVerificationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<SignatureVerificationService>.Instance);
-        _verifier = new RedactionVerifier(Microsoft.Extensions.Logging.Abstractions.NullLogger<RedactionVerifier>.Instance, nullLoggerFactory);
         _filenameSuggestionService = new FilenameSuggestionService();
 
         // Initialize state managers
@@ -143,16 +131,6 @@ public partial class MainWindowViewModel : ViewModelBase
         AboutCommand = ReactiveCommand.Create(ShowAbout);
         ShowShortcutsCommand = ReactiveCommand.Create(ShowKeyboardShortcuts);
         ShowDocumentationCommand = ReactiveCommand.Create(ShowDocumentation);
-        RunVerifyNowCommand = ReactiveCommand.CreateFromTask(async () =>
-        {
-            if (!string.IsNullOrEmpty(_currentFilePath))
-            {
-                await RunVerifyAsync(_currentFilePath);
-            }
-        });
-
-        RunOcrCommand = ReactiveCommand.CreateFromTask(RunOcrOnCurrentPageAsync);
-        RunOcrAllPagesCommand = ReactiveCommand.CreateFromTask(RunOcrOnAllPagesAsync);
         VerifySignaturesCommand = ReactiveCommand.CreateFromTask(VerifySignaturesAsync);
         ShowPreferencesCommand = ReactiveCommand.Create(ShowPreferences);
 
@@ -173,9 +151,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RedactionService redactionService,
         PdfTextExtractionService textExtractionService,
         PdfSearchService searchService,
-        PdfOcrService ocrService,
         SignatureVerificationService signatureService,
-        RedactionVerifier verifier,
         FilenameSuggestionService filenameSuggestionService)
     {
         _logger = logger;
@@ -185,9 +161,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _redactionService = redactionService;
         _textExtractionService = textExtractionService;
         _searchService = searchService;
-        _ocrService = ocrService;
         _signatureService = signatureService;
-        _verifier = verifier;
         _filenameSuggestionService = filenameSuggestionService;
 
         // Initialize state managers
@@ -248,17 +222,8 @@ public partial class MainWindowViewModel : ViewModelBase
         AboutCommand = ReactiveCommand.Create(ShowAbout);
         ShowShortcutsCommand = ReactiveCommand.Create(ShowKeyboardShortcuts);
         ShowDocumentationCommand = ReactiveCommand.Create(ShowDocumentation);
-        RunVerifyNowCommand = ReactiveCommand.CreateFromTask(async () =>
-        {
-            if (!string.IsNullOrEmpty(_currentFilePath))
-            {
-                await RunVerifyAsync(_currentFilePath);
-            }
-        });
 
         // Tools menu commands
-        RunOcrCommand = ReactiveCommand.CreateFromTask(RunOcrOnCurrentPageAsync);
-        RunOcrAllPagesCommand = ReactiveCommand.CreateFromTask(RunOcrOnAllPagesAsync);
         VerifySignaturesCommand = ReactiveCommand.CreateFromTask(VerifySignaturesAsync);
         ShowPreferencesCommand = ReactiveCommand.Create(ShowPreferences);
 
@@ -278,7 +243,6 @@ public partial class MainWindowViewModel : ViewModelBase
     // Properties
     public ObservableCollection<PageThumbnail> PageThumbnails { get; }
     public ObservableCollection<ClipboardEntry> ClipboardHistory { get; }
-    public ReactiveCommand<Unit, Unit> RunVerifyNowCommand { get; }
 
     public Bitmap? CurrentPageImage
     {
@@ -410,40 +374,10 @@ public partial class MainWindowViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _selectedText, value);
     }
 
-    public bool RunVerifyAfterSave
-    {
-        get => _runVerifyAfterSave;
-        set => this.RaiseAndSetIfChanged(ref _runVerifyAfterSave, value);
-    }
-
     public bool DebugVerifyRedaction
     {
         get => _debugVerifyRedaction;
         set => this.RaiseAndSetIfChanged(ref _debugVerifyRedaction, value);
-    }
-
-    public string OcrLanguages
-    {
-        get => _ocrLanguages;
-        set => this.RaiseAndSetIfChanged(ref _ocrLanguages, value);
-    }
-
-    public int OcrBaseDpi
-    {
-        get => _ocrBaseDpi;
-        set => this.RaiseAndSetIfChanged(ref _ocrBaseDpi, value);
-    }
-
-    public int OcrHighDpi
-    {
-        get => _ocrHighDpi;
-        set => this.RaiseAndSetIfChanged(ref _ocrHighDpi, value);
-    }
-
-    public double OcrLowConfidence
-    {
-        get => _ocrLowConfidence;
-        set => this.RaiseAndSetIfChanged(ref _ocrLowConfidence, value);
     }
 
     public int RenderCacheMax
@@ -454,18 +388,6 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaiseAndSetIfChanged(ref _renderCacheMax, value);
             _renderService.MaxCacheEntries = Math.Max(1, value);
         }
-    }
-
-    public string LastVerifyStatus
-    {
-        get => _lastVerifyStatus;
-        set => this.RaiseAndSetIfChanged(ref _lastVerifyStatus, value);
-    }
-
-    public bool LastVerifyFailed
-    {
-        get => _lastVerifyFailed;
-        set => this.RaiseAndSetIfChanged(ref _lastVerifyFailed, value);
     }
 
     public string StatusText => _documentService.IsDocumentLoaded
@@ -589,8 +511,6 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> ExportCurrentPageCommand { get; }
     public ReactiveCommand<Unit, Unit> ExportPagesCommand { get; }
     public ReactiveCommand<Unit, Unit> PrintCommand { get; }
-    public ReactiveCommand<Unit, Unit> RunOcrCommand { get; }
-    public ReactiveCommand<Unit, Unit> RunOcrAllPagesCommand { get; }
     public ReactiveCommand<Unit, Unit> VerifySignaturesCommand { get; }
     public ReactiveCommand<Unit, Unit> ShowPreferencesCommand { get; }
 
@@ -829,11 +749,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _documentService.SaveDocument();
             _logger.LogInformation("Document saved successfully");
-
-            if (RunVerifyAfterSave && !string.IsNullOrEmpty(_currentFilePath))
-            {
-                await RunVerifyAsync(_currentFilePath);
-            }
         }
         catch (Exception ex)
         {
@@ -1193,7 +1108,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 var page = document.Pages[pageIndex];
 
                 // pending.Area is in 150 DPI image pixels (screen coordinates)
-                _redactionService.RedactArea(page, pending.Area, _currentFilePath, renderDpi: 150);
+                _redactionService.RedactArea(page, pending.Area, renderDpi: 150);
             }
 
             // Save the redacted document
@@ -1287,7 +1202,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             var page = document.Pages[CurrentPageIndex];
             // UI selections are in rendered image pixels at the render DPI (150)
-            _redactionService.RedactArea(page, areaToRedact, _currentFilePath, CoordinateConverter.DefaultRenderDpi);
+            _redactionService.RedactArea(page, areaToRedact, CoordinateConverter.DefaultRenderDpi);
 
             // Mark document as modified in-memory (render cache must use in-memory stream)
             _hasInMemoryModifications = true;
@@ -1906,11 +1821,6 @@ public partial class MainWindowViewModel : ViewModelBase
             _currentFilePath = filePath;
             this.RaisePropertyChanged(nameof(DocumentName));
             _logger.LogInformation("Document saved successfully to: {FilePath}", filePath);
-
-            if (RunVerifyAfterSave)
-            {
-                await RunVerifyAsync(filePath);
-            }
         }
         catch (Exception ex)
         {
@@ -1918,55 +1828,6 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         await Task.CompletedTask;
-    }
-
-    private Task RunVerifyAsync(string filePath)
-    {
-        return Task.Run(() =>
-        {
-            try
-            {
-                using var doc = PdfSharp.Pdf.IO.PdfReader.Open(filePath, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
-                var result = _verifier.Verify(doc);
-
-                if (result.Passed)
-                {
-                    // MANDATORY logging - cannot be silenced
-                    Console.WriteLine($"[REDACTION-VERIFICATION] ✓ PASSED - No text leaks detected");
-                    _logger.LogInformation("Verification passed for {File}", filePath);
-                    LastVerifyFailed = false;
-                    LastVerifyStatus = "Verification passed";
-                }
-                else
-                {
-                    // MANDATORY logging - cannot be silenced
-                    Console.WriteLine($"[REDACTION-VERIFICATION] ✗ FAILED - {result.Leaks.Count} text leak(s) detected!");
-                    foreach (var leak in result.Leaks.Take(5))
-                    {
-                        Console.WriteLine($"[REDACTION-VERIFICATION]   Page {leak.PageIndex + 1}: '{leak.Text}' at ({leak.BoundingBox.X:F1},{leak.BoundingBox.Y:F1})");
-                    }
-                    if (result.Leaks.Count > 5)
-                    {
-                        Console.WriteLine($"[REDACTION-VERIFICATION]   ... and {result.Leaks.Count - 5} more leak(s)");
-                    }
-
-                    _logger.LogWarning("Verification FAILED for {File}. Leaks: {Count}", filePath, result.Leaks.Count);
-                    foreach (var leak in result.Leaks.Take(5))
-                    {
-                        _logger.LogWarning("Leak on page {Page}: '{Text}' at ({X:F1},{Y:F1})",
-                            leak.PageIndex + 1, leak.Text, leak.BoundingBox.X, leak.BoundingBox.Y);
-                    }
-                    LastVerifyFailed = true;
-                    LastVerifyStatus = $"Verification failed ({result.Leaks.Count} leaks)";
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Verification failed for {FilePath}", filePath);
-                LastVerifyFailed = true;
-                LastVerifyStatus = "Verification failed";
-            }
-        });
     }
 
     private void CloseDocument()
@@ -2554,129 +2415,8 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // OCR Commands
-    private async Task RunOcrOnCurrentPageAsync()
-    {
-        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
-        {
-            _logger.LogWarning("No document loaded for OCR");
-            OperationStatus = "No document loaded";
-            return;
-        }
-
-        try
-        {
-            _logger.LogInformation("Running OCR on current page {PageNumber}", CurrentPageIndex + 1);
-            OperationStatus = $"Running OCR on page {CurrentPageIndex + 1}...";
-
-            if (!_ocrService.IsOcrAvailable())
-            {
-                _logger.LogInformation("OCR data not available. Will auto-download on first use.");
-                OperationStatus = "Downloading OCR language data (one-time setup)...";
-                // Note: The OCR service will auto-download the data when PerformOcrAsync is called
-            }
-
-            var options = new OcrOptions
-            {
-                Languages = OcrLanguages,
-                BaseDpi = OcrBaseDpi,
-                HighDpi = OcrHighDpi,
-                LowConfidenceThreshold = (float)OcrLowConfidence
-            };
-
-            // For now, OCR the entire document and show only current page result
-            // TODO: Implement single-page OCR extraction
-            var result = await _ocrService.PerformOcrAsync(_currentFilePath, options);
-
-            if (!string.IsNullOrWhiteSpace(result))
-            {
-                _logger.LogInformation("OCR completed. Extracted {CharCount} characters", result.Length);
-
-                // Add to clipboard history
-                ClipboardHistory.Insert(0, new ClipboardEntry
-                {
-                    Text = result,
-                    PageNumber = CurrentPageIndex + 1,
-                    Timestamp = DateTime.Now,
-                    IsRedacted = false
-                });
-
-                _logger.LogInformation("OCR text added to clipboard history");
-                OperationStatus = $"OCR complete: Extracted {result.Length} characters (see Clipboard History)";
-
-                await ShowMessageDialog("OCR Complete",
-                    $"Successfully extracted {result.Length} characters from page {CurrentPageIndex + 1}.\n\n" +
-                    $"The text has been added to the Clipboard History panel.");
-            }
-            else
-            {
-                OperationStatus = "OCR complete: No text found";
-                await ShowMessageDialog("OCR Complete",
-                    "No text was extracted from the page.\n\n" +
-                    "This may be because:\n" +
-                    "• The page contains no text\n" +
-                    "• The text quality is too poor\n" +
-                    "• The language setting doesn't match the document");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error running OCR");
-            OperationStatus = $"OCR Error: {ex.Message}";
-            await ShowMessageDialog("OCR Error",
-                $"An error occurred while running OCR:\n\n{ex.Message}");
-        }
-    }
-
-    private async Task RunOcrOnAllPagesAsync()
-    {
-        if (!_documentService.IsDocumentLoaded || string.IsNullOrEmpty(_currentFilePath))
-        {
-            _logger.LogWarning("No document loaded for OCR");
-            return;
-        }
-
-        try
-        {
-            _logger.LogInformation("Running OCR on all {PageCount} pages", TotalPages);
-
-            if (!_ocrService.IsOcrAvailable())
-            {
-                _logger.LogWarning("OCR not available - tessdata files missing");
-                // TODO: Show dialog to user
-                return;
-            }
-
-            var options = new OcrOptions
-            {
-                Languages = OcrLanguages,
-                BaseDpi = OcrBaseDpi,
-                HighDpi = OcrHighDpi,
-                LowConfidenceThreshold = (float)OcrLowConfidence
-            };
-
-            var result = await _ocrService.PerformOcrAsync(_currentFilePath, options);
-
-            if (!string.IsNullOrWhiteSpace(result))
-            {
-                // Add to clipboard history
-                ClipboardHistory.Insert(0, new ClipboardEntry
-                {
-                    Text = result,
-                    PageNumber = 0, // All pages
-                    Timestamp = DateTime.Now,
-                    IsRedacted = false
-                });
-
-                _logger.LogInformation("OCR completed for all pages. Total characters: {CharCount}", result.Length);
-                // TODO: Show completion dialog
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error running OCR on all pages");
-        }
-    }
+    // OCR removed in the pure-Pdfe.Core migration; to be reintroduced as
+    // a pdfe CLI subcommand built on Pdfe.Rendering + Tesseract.
 
     // Signature Verification Command
     private async Task VerifySignaturesAsync()
