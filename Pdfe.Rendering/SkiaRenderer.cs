@@ -1100,9 +1100,23 @@ internal class RenderContext
 
     private void TextMove(double tx, double ty)
     {
-        // Td operator: Move to start of next line, offset by (tx, ty)
-        _textState.TextMatrixE = _textState.LineMatrixE + (float)tx;
-        _textState.TextMatrixF = _textState.LineMatrixF + (float)ty;
+        // PDF spec 9.4.2: Td's (tx, ty) are in UNSCALED text space units; the
+        // new text matrix is [1 0 0 1 tx ty] × TextLineMatrix. The translation
+        // lives in the right-hand side, so after composition:
+        //   new_e = a*tx + c*ty + e
+        //   new_f = b*tx + d*ty + f
+        // Previously we added tx/ty directly to device-space e/f, which under
+        // any Tm scale (e.g. `1 Tf` + `10.02 0 0 10.02 Tm`) produced line
+        // breaks ~10x too small and pulled subsequent text up under the
+        // previous line.
+        var a = _textState.TextMatrixA;
+        var b = _textState.TextMatrixB;
+        var c = _textState.TextMatrixC;
+        var d = _textState.TextMatrixD;
+        var dx = a * tx + c * ty;
+        var dy = b * tx + d * ty;
+        _textState.TextMatrixE = _textState.LineMatrixE + (float)dx;
+        _textState.TextMatrixF = _textState.LineMatrixF + (float)dy;
         _textState.LineMatrixE = _textState.TextMatrixE;
         _textState.LineMatrixF = _textState.TextMatrixF;
     }
