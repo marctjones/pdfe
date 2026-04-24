@@ -5,7 +5,6 @@ using PdfEditor.Services.Redaction;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.Advanced;
-using PdfSharp.Pdf.IO;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -15,7 +14,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using PdfEditor.Redaction;
 using PdfeCoreLetter = Pdfe.Core.Text.Letter;
-using PdfeCorePage = Pdfe.Core.Document.PdfPage;
 using PdfeCoreRect = Pdfe.Core.Document.PdfRectangle;
 using PdfeStrategy = Pdfe.Core.Text.Segmentation.GlyphRemovalStrategy;
 using Pdfe.Core.Text.Segmentation; // for PdfPageRedactionExtensions.RedactArea
@@ -46,26 +44,23 @@ public class RedactionOptions
 }
 
 /// <summary>
-/// Service for redacting content from PDF pages
-/// Implements TRUE content-level redaction by parsing and filtering PDF content streams
-/// Uses PdfSharpCore (MIT License) for low-level PDF manipulation
+/// GUI-facing redaction orchestrator. Delegates glyph removal to Pdfe.Core
+/// and mirrors the rewritten content stream onto the PDFsharp page that the
+/// rest of the app is editing.
 /// </summary>
 /// <remarks>
 /// ⚠️ CRITICAL FOR AI CODING ASSISTANTS:
 ///
-/// This service implements GLYPH-LEVEL REMOVAL - text is removed from PDF structure,
-/// not just visually covered. This is a SECURITY-CRITICAL feature.
+/// Redaction is TRUE GLYPH-LEVEL REMOVAL — glyphs are deleted from the PDF
+/// content stream, not just visually covered. Text-extraction tools must not
+/// be able to recover redacted text. Do not replace the content-stream
+/// rewrite with a visual-only black box; that is a security regression.
 ///
-/// DO NOT:
-/// - Replace with visual-only redaction (just drawing black boxes)
-/// - Remove the content stream parsing (ParseContentStream)
-/// - Remove the content stream rebuilding (BuildContentStream)
-/// - Simplify by skipping the RemoveContentInArea method
+/// Pipeline: find glyphs in area → rewrite content stream without them →
+/// append black-rectangle overlay → mirror bytes onto PDFsharp page.
 ///
-/// The correct flow is: parse → filter → rebuild → replace → draw
-///
-/// Tests verify that text extraction FAILS after redaction.
-/// If you break this, redacted text becomes extractable = SECURITY VULNERABILITY.
+/// Covered by ContentRemovalVerificationTests. If those fail, redacted text
+/// can be recovered by downstream tools = SECURITY VULNERABILITY.
 ///
 /// See REDACTION_AI_GUIDELINES.md for complete documentation.
 /// </remarks>
@@ -298,23 +293,16 @@ public class RedactionService
     }
 
     /// <summary>
-    /// Remove content within the specified area using Pdfe.Core glyph-level redaction.
-    /// This is TRUE glyph-level redaction - removes individual characters from PDF structure.
+    /// Remove the glyphs inside <paramref name="area"/> from the page's
+    /// content stream via Pdfe.Core, then append a black-rectangle overlay
+    /// for visual confirmation. The rewritten content stream is mirrored
+    /// onto the PDFsharp page so the eventual document-level Save captures it.
     /// </summary>
     /// <remarks>
-    /// ⚠️ CRITICAL METHOD - USES PdfEditor.Redaction LIBRARY
-    ///
-    /// This method delegates to the proven PdfEditor.Redaction library for TRUE glyph-level removal:
-    /// 1. Library uses PdfPig for accurate letter positions
-    /// 2. Spatial matching finds exact characters in redaction area
-    /// 3. Text operations are split at character boundaries
-    /// 4. Kept segments are reconstructed with proper positioning (Tm operators)
-    /// 5. Content stream is rebuilt without redacted characters
-    ///
-    /// After this method runs, text extraction tools CANNOT find the removed text.
-    /// This is the security-critical part of redaction.
-    ///
-    /// The library is fully tested (208/209 tests passing) and handles Unicode normalization.
+    /// This is TRUE glyph-level redaction: after this method runs, text-
+    /// extraction tools cannot find the removed characters in the PDF
+    /// structure. Don't replace the content-stream rewrite with a visual-
+    /// only black box — that's a security regression.
     /// </remarks>
     private Models.RedactionResult RemoveContentInArea(PdfPage page, Rect area, string pdfFilePath)
     {
@@ -322,7 +310,6 @@ public class RedactionService
 
         try
         {
-            _logger.LogDebug("Using PdfEditor.Redaction library RedactPage() API for TRUE glyph-level redaction");
             var sw = Stopwatch.StartNew();
 
             // Convert Avalonia coordinates (top-left) to PDF coordinates (bottom-left)
@@ -440,9 +427,6 @@ public class RedactionService
             throw;
         }
     }
-
-    // RemoveImagesInArea method removed - PdfEditor.Redaction library handles all content types
-    // including images, paths, and text in a unified way
 
     /// <summary>
     /// Redact multiple areas on a page
