@@ -33,12 +33,6 @@
     <!-- Assertions and Mocking -->
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
 
-    <!-- PDF Libraries (same as main project) -->
-    <PackageReference Include="PDFsharp" Version="6.2.2" />
-    <PackageReference Include="PdfPig" Version="0.1.11" />
-
-    <!-- Image Processing for Visual Tests -->
-    <PackageReference Include="PDFtoImage" Version="4.0.2" />
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
 
     <!-- Avalonia Headless Testing -->
