@@ -58,8 +58,8 @@
   <ItemGroup>
     <!-- Visual regression baselines: copy committed PNGs alongside the test DLL -->
     <Content Include="UI\baselines\*.png" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Real-world test PDFs shared with the redaction test project -->
-    <Content Include="..\PdfEditor.Redaction.Tests\Resources\sample-pdfs\birth-certificate-request-scrambled.pdf"
+    <!-- Real-world test PDFs -->
+    <Content Include="Resources\sample-pdfs\birth-certificate-request-scrambled.pdf"
              Link="UI\test-pdfs\birth-certificate-request-scrambled.pdf"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

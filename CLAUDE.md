@@ -170,7 +170,7 @@ ViewModel (MainWindowViewModel)
     ↓ Calls Services
 Service Layer (PdfDocumentService, RedactionService, etc.)
     ↓ Uses Libraries
-PDF Libraries (PdfSharpCore, PdfPig, PDFtoImage)
+PDF Libraries (Pdfe.Core for parsing/redaction, Pdfe.Rendering for Skia render, PDFsharp for save)
 ```
 
 When modifying the UI, update the XAML and bind to ViewModel properties. Never put business logic in code-behind.
@@ -576,35 +576,20 @@ For maximum security, also remove metadata and flatten the PDF after redaction.
 
 #### Implementation Files
 
-**Glyph-Level Redaction Library** (`PdfEditor.Redaction/GlyphLevel/`):
+**Glyph-Level Redaction** (`Pdfe.Core/Text/Segmentation/`):
 - ✅ `GlyphRemover.cs` - Orchestrates glyph-level redaction
 - ✅ `LetterFinder.cs` - Text-based letter matching (issue #90 fix)
-- ✅ `TextSegmenter.cs` - Splits text into keep/remove segments
-- ✅ `OperationReconstructor.cs` - Rebuilds operations with positioning
-
-**Content Stream Building** (`PdfEditor.Redaction/ContentStream/Building/`):
-- ✅ `ContentStreamBuilder.cs` - Builds content streams with Tf injection (issue #167 fix)
-
-**Integration** (`PdfEditor.Redaction/`):
-- ✅ `TextRedactor.cs` - Main API with RedactPage()
-- ✅ `ContentStreamRedactor.cs` - Core redaction engine
+- ✅ `OperationReconstructor.cs` - Rebuilds BT/Tf/Tj blocks with positioning
+- ✅ `PdfPageRedactionExtensions.cs` - `page.RedactArea(rect)` / `RedactAreas(rects)` entry points
 
 **GUI Integration** (`PdfEditor/`):
-- ✅ `RedactionService.cs` - Extracts letters from file, calls RedactPage()
-- ✅ `MainWindowViewModel.Scripting.cs` - Timeout support (issue #93 fix)
+- ✅ `Services/RedactionService.cs` - Unified area + text redaction; mirrors the
+  rewritten content stream onto the PDFsharp page
+- ✅ `ViewModels/MainWindowViewModel.Scripting.cs` - Scripting surface
 
-#### Test Results
-
-```
-PdfEditor.Redaction.Tests:        300/301 passing ✅ (1 skipped)
-PdfEditor.Redaction.Cli.Tests:     74/74 passing ✅
-RealWorldBirthCertificateTests:     8/8 passing ✅
-```
-
-#### Known Remaining Issues
-
-- **#135** - 9 in-memory PDF tests need save-first pattern
-- **#136** - 6 automation script tests need ViewModel API updates
+The separate `PdfEditor.Redaction` library (the PdfPig/PDFsharp-based
+`TextRedactor` engine and its `pdfer` CLI) was removed once both the
+area-click and scripting paths were unified onto Pdfe.Core.
 
 ## Task Tracking and GitHub Issues
 
@@ -883,33 +868,16 @@ This downloads:
 
 Files are stored in `test-pdfs/` which is gitignored.
 
-### Corpus Test Structure
-
-The `PdfEditor.Redaction.Cli.Tests` project includes corpus-based tests:
-
-```
-PdfEditor.Redaction.Cli.Tests/
-├── Integration/
-│   └── VeraPdfCorpusTests.cs    # Tests against veraPDF corpus
-├── Unit/
-│   ├── RedactCommandTests.cs    # pdfer redact command
-│   ├── VerifyCommandTests.cs    # pdfer verify command
-│   ├── SearchCommandTests.cs    # pdfer search command
-│   └── InfoCommandTests.cs      # pdfer info command
-└── TestHelpers/
-    ├── PdferTestRunner.cs       # CLI test runner
-    └── TestPdfCreator.cs        # Creates test PDFs
-```
-
 ### Running Corpus Tests
+
+Corpus coverage now lives under `Pdfe.Rendering.Tests/Corpus/` (smoke
+corpus of real-world government PDFs) and the Pdfe.Core test suite.
 
 ```bash
 # Download corpus first (if not already done)
 ./scripts/download-test-pdfs.sh
 
-# Run corpus tests
-cd PdfEditor.Redaction.Cli.Tests
-dotnet test --filter "Category=Corpus"
+dotnet test Pdfe.Rendering.Tests --filter "FullyQualifiedName~Corpus"
 ```
 
 ## IdlerGear Usage
