@@ -1,8 +1,10 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using PdfEditor.Services;
+using PdfEditor.Tests.Utilities;
 using PdfEditor.ViewModels;
 using Xunit;
 using Xunit.Abstractions;
@@ -106,34 +108,27 @@ public class ScriptedGuiTests
         result.ReturnValue.Should().NotBeNull();
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - LoadDocumentCommand not yet implemented")]
+    [Fact]
     public async Task Script_LoadDocument_UpdatesViewModel()
     {
         // Arrange
         var viewModel = new MainWindowViewModel();
         var testPdf = CreateTestPdf();
 
-        // Act
+        // Act — escape path separators for the script string literal
         var result = await ExecuteScriptAsync(viewModel, $@"
-            // Load a PDF document
-            await LoadDocumentCommand.Execute(""{testPdf}"");
-
-            // Verify document is loaded
+            await LoadDocumentCommand(@""{testPdf}"");
             var isLoaded = CurrentDocument != null;
             var filePath = CurrentDocument?.FilePath;
-
-            return new {{
-                IsLoaded = isLoaded,
-                FilePath = filePath
-            }};
+            return new {{ IsLoaded = isLoaded, FilePath = filePath }};
         ");
 
         // Assert
-        result.Success.Should().BeTrue();
-        // TODO: Add assertions once LoadDocumentCommand exists
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ReturnValue.Should().NotBeNull();
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - RedactTextCommand not yet implemented")]
+    [Fact]
     public async Task Script_RedactText_CreatesRedactionArea()
     {
         // Arrange
@@ -142,66 +137,50 @@ public class ScriptedGuiTests
 
         // Act
         var result = await ExecuteScriptAsync(viewModel, $@"
-            // Load document and redact text
-            await LoadDocumentCommand.Execute(""{testPdf}"");
-            await RedactTextCommand.Execute(""SECRET"");
-
-            // Check pending redactions
-            var count = PendingRedactions.Count;
-
-            return count;
+            await LoadDocumentCommand(@""{testPdf}"");
+            await RedactTextCommand(""SECRET"");
+            return PendingRedactions.Count;
         ");
 
         // Assert
-        result.Success.Should().BeTrue();
-        // TODO: Verify redaction count once RedactTextCommand exists
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ReturnValue.Should().Be(1,
+            "queueing one text-redaction adds one pending-redaction marker");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Full workflow not yet implemented")]
+    [Fact]
     public async Task Script_CompleteRedactionWorkflow_EndToEnd()
     {
         // Arrange
         var viewModel = new MainWindowViewModel();
         var sourcePdf = CreateTestPdf();
-        var outputPdf = Path.Combine(_testDataDir, "redacted_output.pdf");
+        var outputPdf = Path.Combine(_testDataDir, $"redacted_output_{Guid.NewGuid():N}.pdf");
 
-        // Act - Complete workflow: Load → Redact → Save
+        // Act — complete load → redact → apply → save workflow through scripting
         var result = await ExecuteScriptAsync(viewModel, $@"
-            using System.IO;
-
-            // 1. Load document
-            await LoadDocumentCommand.Execute(""{sourcePdf}"");
-            Console.WriteLine($""Loaded: {{CurrentDocument.FilePath}}"");
-
-            // 2. Perform redactions
-            await RedactTextCommand.Execute(""SECRET"");
-            await RedactTextCommand.Execute(""CONFIDENTIAL"");
-            Console.WriteLine($""Pending redactions: {{PendingRedactions.Count}}"");
-
-            // 3. Apply redactions
-            await ApplyRedactionsCommand.Execute();
-            Console.WriteLine(""Redactions applied"");
-
-            // 4. Save document
-            await SaveDocumentCommand.Execute(""{outputPdf}"");
-            Console.WriteLine($""Saved to: {outputPdf}"");
-
-            // 5. Verify file exists
-            var outputExists = File.Exists(""{outputPdf}"");
-
-            return new {{
-                Success = true,
-                OutputExists = outputExists,
-                PendingCount = PendingRedactions.Count
-            }};
+            await LoadDocumentCommand(@""{sourcePdf}"");
+            await RedactTextCommand(""SECRET"");
+            await RedactTextCommand(""CONFIDENTIAL"");
+            await ApplyRedactionsCommand();
+            await SaveDocumentCommand(@""{outputPdf}"");
+            return System.IO.File.Exists(@""{outputPdf}"");
         ");
 
         // Assert
-        result.Success.Should().BeTrue();
-        // TODO: Verify output PDF and redaction once commands exist
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ReturnValue.Should().Be(true);
+        File.Exists(outputPdf).Should().BeTrue("SaveDocumentCommand must produce a file");
+
+        // Verify the text was actually removed — this is the security
+        // guarantee for scripted redaction. Open the saved file with
+        // Pdfe.Core and confirm neither phrase appears.
+        using var doc = Pdfe.Core.Document.PdfDocument.Open(File.ReadAllBytes(outputPdf));
+        var text = string.Concat(doc.GetPage(1).Letters.Select(l => l.Value));
+        text.Should().NotContain("SECRET");
+        text.Should().NotContain("CONFIDENTIAL");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Birth certificate test")]
+    [Fact]
     public async Task Script_BirthCertificateRedaction_Success()
     {
         // Arrange
@@ -233,131 +212,113 @@ public class ScriptedGuiTests
             return;
         }
 
-        // Act - Birth certificate redaction workflow
+        // Act — birth certificate redaction workflow
         var result = await ExecuteScriptAsync(viewModel, $@"
-            using System.IO;
-
-            // Load birth certificate
-            await LoadDocumentCommand.Execute(""{birthCertPath}"");
-            Console.WriteLine(""Birth certificate loaded"");
-
-            // Redact sensitive information
-            var termsToRedact = new[] {{
-                ""TORRINGTON"",
-                ""CERTIFICATE"",
-                ""BIRTH"",
-                ""CITY CLERK""
-            }};
-
-            foreach (var term in termsToRedact)
-            {{
-                await RedactTextCommand.Execute(term);
-                Console.WriteLine($""Redacting: {{term}}"");
-            }}
-
-            Console.WriteLine($""Total pending redactions: {{PendingRedactions.Count}}"");
-
-            // Apply all redactions
-            await ApplyRedactionsCommand.Execute();
-
-            // Save redacted document
-            await SaveDocumentCommand.Execute(""{outputPdf}"");
-
-            return new {{
-                Success = File.Exists(""{outputPdf}""),
-                RedactionCount = PendingRedactions.Count
-            }};
+            await LoadDocumentCommand(@""{birthCertPath}"");
+            var terms = new[] {{ ""TORRINGTON"", ""CERTIFICATE"", ""BIRTH"", ""CITY CLERK"" }};
+            foreach (var term in terms)
+                await RedactTextCommand(term);
+            await ApplyRedactionsCommand();
+            await SaveDocumentCommand(@""{outputPdf}"");
+            return System.IO.File.Exists(@""{outputPdf}"");
         ");
 
         // Assert
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ReturnValue.Should().Be(true);
         File.Exists(outputPdf).Should().BeTrue("redacted PDF should be created");
 
-        // TODO: Verify text removal using external tool (pdfer verify)
+        // Verify the sensitive terms are actually gone from the saved file.
+        using var doc = Pdfe.Core.Document.PdfDocument.Open(File.ReadAllBytes(outputPdf));
+        var allText = string.Concat(
+            Enumerable.Range(1, doc.PageCount)
+                .SelectMany(p => doc.GetPage(p).Letters.Select(l => l.Value)));
+        allText.Should().NotContain("TORRINGTON");
+        allText.Should().NotContain("CERTIFICATE");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Error handling test")]
+    [Fact]
     public async Task Script_LoadNonexistentFile_HandlesError()
     {
         // Arrange
         var viewModel = new MainWindowViewModel();
-        var nonexistentFile = "/tmp/does-not-exist.pdf";
+        var nonexistentFile = Path.Combine(Path.GetTempPath(), $"does-not-exist-{Guid.NewGuid():N}.pdf");
 
-        // Act
+        // Act — the script should observe FileNotFoundException from the command
         var result = await ExecuteScriptAsync(viewModel, $@"
             try
             {{
-                await LoadDocumentCommand.Execute(""{nonexistentFile}"");
+                await LoadDocumentCommand(@""{nonexistentFile}"");
                 return false; // Should not reach here
             }}
-            catch (FileNotFoundException ex)
+            catch (FileNotFoundException)
             {{
-                Console.WriteLine($""Caught expected error: {{ex.Message}}"");
                 return true;
             }}
         ");
 
         // Assert
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeTrue(result.ErrorMessage);
         result.ReturnValue.Should().Be(true, "script should catch FileNotFoundException");
     }
 
-    [Fact(Skip = "Requires GUI integration (#59) - Multi-page test")]
+    [Fact]
     public async Task Script_RedactMultiplePages_AllPagesProcessed()
     {
         // Arrange
         var viewModel = new MainWindowViewModel();
         var multiPagePdf = CreateMultiPageTestPdf();
-        var outputPdf = Path.Combine(_testDataDir, "multipage-redacted.pdf");
+        var outputPdf = Path.Combine(_testDataDir, $"multipage-redacted-{Guid.NewGuid():N}.pdf");
 
-        // Act
+        // Act — CreateMultiPageTestPdf seeds "Secret on Page N" on each page;
+        // we ask scripting to redact that common substring.
         var result = await ExecuteScriptAsync(viewModel, $@"
-            // Load multi-page document
-            await LoadDocumentCommand.Execute(""{multiPagePdf}"");
+            await LoadDocumentCommand(@""{multiPagePdf}"");
             var pageCount = CurrentDocument.PageCount;
-            Console.WriteLine($""Document has {{pageCount}} pages"");
-
-            // Redact text that appears on multiple pages
-            await RedactTextCommand.Execute(""CONFIDENTIAL"");
-
-            var redactionCount = PendingRedactions.Count;
-            Console.WriteLine($""Created {{redactionCount}} redaction areas"");
-
-            // Apply and save
-            await ApplyRedactionsCommand.Execute();
-            await SaveDocumentCommand.Execute(""{outputPdf}"");
-
-            return new {{
-                PageCount = pageCount,
-                RedactionCount = redactionCount
-            }};
+            await RedactTextCommand(""Secret"");
+            await ApplyRedactionsCommand();
+            await SaveDocumentCommand(@""{outputPdf}"");
+            return pageCount;
         ");
 
         // Assert
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ReturnValue.Should().Be(3, "CreateMultiPageTestPdf returns 3 pages");
         File.Exists(outputPdf).Should().BeTrue();
+
+        // "Secret" must be absent from every page of the redacted file.
+        using var doc = Pdfe.Core.Document.PdfDocument.Open(File.ReadAllBytes(outputPdf));
+        for (int p = 1; p <= doc.PageCount; p++)
+        {
+            var text = string.Concat(doc.GetPage(p).Letters.Select(l => l.Value));
+            text.Should().NotContain("Secret",
+                $"page {p} must not leak 'Secret' after scripted multi-page redaction");
+        }
     }
 
     /// <summary>
-    /// Helper to create a simple test PDF.
+    /// Create a single-page PDF containing the sentinel strings "SECRET"
+    /// and "CONFIDENTIAL" that the scripting tests redact.
     /// </summary>
     private string CreateTestPdf()
     {
-        var pdfPath = Path.Combine(_testDataDir, "test_simple.pdf");
-
-        // TODO: Use TestPdfGenerator to create PDF with known content
-        // For now, return placeholder path
+        var pdfPath = Path.Combine(_testDataDir, $"test_simple_{Guid.NewGuid():N}.pdf");
+        TestPdfGenerator.CreateTextOnlyPdf(pdfPath, new[]
+        {
+            "This document contains SECRET information.",
+            "Also marked CONFIDENTIAL for good measure.",
+        });
         return pdfPath;
     }
 
     /// <summary>
-    /// Helper to create a multi-page test PDF.
+    /// Create a 3-page PDF where every page carries a "Secret on Page N"
+    /// line — lets multi-page tests verify every page was touched.
     /// </summary>
     private string CreateMultiPageTestPdf()
     {
-        var pdfPath = Path.Combine(_testDataDir, "test_multipage.pdf");
-
-        // TODO: Use TestPdfGenerator to create multi-page PDF
+        var pdfPath = Path.Combine(_testDataDir, $"test_multipage_{Guid.NewGuid():N}.pdf");
+        TestPdfGenerator.CreateMultiPagePdf(pdfPath, pageCount: 3);
         return pdfPath;
     }
 }
