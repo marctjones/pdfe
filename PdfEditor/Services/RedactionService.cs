@@ -10,9 +10,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using PdfeCoreLetter = Pdfe.Core.Text.Letter;
 using PdfeCoreRect = Pdfe.Core.Document.PdfRectangle;
 using PdfeStrategy = Pdfe.Core.Text.Segmentation.GlyphRemovalStrategy;
 using Pdfe.Core.Text.Segmentation; // for PdfPageRedactionExtensions.RedactArea
@@ -529,28 +526,7 @@ public class RedactionService
             var bytes = File.ReadAllBytes(inputPath);
             using var doc = Pdfe.Core.Document.PdfDocument.Open(bytes);
 
-            int totalMatches = 0;
-            int pagesAffected = 0;
-
-            for (int pageNum = 1; pageNum <= doc.PageCount; pageNum++)
-            {
-                var page = doc.GetPage(pageNum);
-                var letters = page.Letters;
-                if (letters.Count == 0) continue;
-
-                var matches = FindTextMatches(letters, textToRedact, caseSensitive);
-                if (matches.Count == 0) continue;
-
-                foreach (var matchLetters in matches)
-                {
-                    var bbox = BoundingBoxOf(matchLetters);
-                    page.RedactArea(bbox, PdfeStrategy.AnyOverlap);
-                    AppendBlackRectangleToCorePage(page, bbox);
-                }
-
-                totalMatches += matches.Count;
-                pagesAffected++;
-            }
+            int totalMatches = doc.RedactText(textToRedact, caseSensitive);
 
             doc.Save(outputPath);
 
@@ -558,8 +534,8 @@ public class RedactionService
                 _redactedTerms.Add(textToRedact);
 
             _logger.LogInformation(
-                "RedactText: redacted {Count} occurrences of '{Text}' across {Pages} page(s)",
-                totalMatches, textToRedact, pagesAffected);
+                "RedactText: redacted {Count} occurrences of '{Text}'",
+                totalMatches, textToRedact);
 
             return TextRedactionResult.Succeeded(totalMatches);
         }
@@ -568,109 +544,6 @@ public class RedactionService
             _logger.LogError(ex, "RedactText failed for '{Text}'", textToRedact);
             return TextRedactionResult.Failed($"Redaction failed: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Bounding box that encloses all <paramref name="letters"/>.
-    /// </summary>
-    private static PdfeCoreRect BoundingBoxOf(IReadOnlyList<PdfeCoreLetter> letters)
-    {
-        return new PdfeCoreRect(
-            letters.Min(l => l.GlyphRectangle.Left),
-            letters.Min(l => l.GlyphRectangle.Bottom),
-            letters.Max(l => l.GlyphRectangle.Right),
-            letters.Max(l => l.GlyphRectangle.Top));
-    }
-
-    /// <summary>
-    /// Page-level text search: find every occurrence of
-    /// <paramref name="searchText"/> in the concatenated letter sequence and
-    /// return the letter-slices that spell each match.
-    /// </summary>
-    /// <remarks>
-    /// Character sequence is built by concatenating <c>Letter.Value</c> in
-    /// reading order (already rotation-aware via TextExtractor). Text is
-    /// normalized (curly→straight quotes, en/em dash→hyphen, whitespace
-    /// collapse) before comparison so typographic variation doesn't prevent
-    /// a match. Matches are non-overlapping (greedy left-to-right).
-    /// </remarks>
-    private static List<List<PdfeCoreLetter>> FindTextMatches(
-        IReadOnlyList<PdfeCoreLetter> letters, string searchText, bool caseSensitive)
-    {
-        var matches = new List<List<PdfeCoreLetter>>();
-        if (string.IsNullOrEmpty(searchText) || letters.Count == 0)
-            return matches;
-
-        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-
-        var sb = new StringBuilder(letters.Count);
-        foreach (var l in letters) sb.Append(l.Value);
-        var fullText = sb.ToString();
-
-        var needle = NormalizeText(searchText);
-        if (needle.Length == 0) return matches;
-
-        int i = 0;
-        while (i <= fullText.Length - needle.Length)
-        {
-            // Normalize may collapse whitespace so a window of 2× needle length
-            // is a safe upper bound for "does the text here start with needle?"
-            var windowLen = Math.Min(needle.Length * 2, fullText.Length - i);
-            var normWindow = NormalizeText(fullText.Substring(i, windowLen));
-
-            if (normWindow.StartsWith(needle, comparison))
-            {
-                // Expand one original character at a time until the normalized
-                // prefix equals the needle — that's the minimum letter span
-                // that covers the match.
-                int endIndex = i;
-                while (endIndex < fullText.Length)
-                {
-                    var cur = NormalizeText(fullText.Substring(i, endIndex - i + 1));
-                    if (cur.Equals(needle, comparison)) break;
-                    if (cur.Length >= needle.Length) break;
-                    endIndex++;
-                }
-
-                var matchLen = endIndex - i + 1;
-                if (matchLen > 0 && i + matchLen <= letters.Count)
-                {
-                    var slice = new List<PdfeCoreLetter>(matchLen);
-                    for (int k = 0; k < matchLen; k++)
-                        slice.Add(letters[i + k]);
-                    matches.Add(slice);
-                    i = endIndex + 1;
-                    continue;
-                }
-            }
-
-            i++;
-        }
-
-        return matches;
-    }
-
-    /// <summary>
-    /// Normalize typographic variants (curly quotes, en/em dashes) and
-    /// collapse whitespace so that string comparison isn't defeated by
-    /// inconsequential differences between the search term and the text as
-    /// encoded in the PDF.
-    /// </summary>
-    private static string NormalizeText(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return text;
-
-        var normalized = text
-            .Replace('’', '\'')  // right single quote
-            .Replace('‘', '\'')  // left single quote
-            .Replace('ʼ', '\'')  // modifier letter apostrophe
-            .Replace('′', '\'')  // prime
-            .Replace('–', '-')   // en dash
-            .Replace('—', '-')   // em dash
-            .Replace('−', '-')   // minus sign
-            .Trim();
-
-        return Regex.Replace(normalized, @"\s+", " ");
     }
 
     /// <summary>
