@@ -22,7 +22,7 @@ public class SignatureVerificationResult
 
 /// <summary>
 /// Service for verifying digital signatures in PDF documents
-/// Uses PdfSharp for parsing and BouncyCastle for cryptographic validation
+/// Uses Pdfe.Core for parsing and BouncyCastle for cryptographic validation
 /// </summary>
 public class SignatureVerificationService
 {
@@ -146,7 +146,7 @@ public class SignatureVerificationService
             }
 
             // Convert hex string to bytes
-            // PdfSharp might return it as raw string or hex. 
+            // The backend might return it as raw string or hex. 
             // Usually /Contents is a hex string in angle brackets <...>
             // We need to parse it.
             byte[] signatureBytes = ParseHexString(contents);

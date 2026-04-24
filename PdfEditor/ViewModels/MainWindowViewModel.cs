@@ -2415,8 +2415,8 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // OCR removed in the pure-Pdfe.Core migration; to be reintroduced as
-    // a pdfe CLI subcommand built on Pdfe.Rendering + Tesseract.
+    // OCR removed in the pure-Pdfe.Core migration. Reintroduce later
+    // as a pdfe CLI subcommand if needed.
 
     // Signature Verification Command
     private async Task VerifySignaturesAsync()

@@ -10,8 +10,8 @@ namespace Pdfe.Core.Tests.Document;
 /// <summary>
 /// Tests for the from-scratch authoring API: <see cref="PdfDocument.CreateNew"/>
 /// plus <see cref="PageCollection.AddBlank"/> plus
-/// <see cref="PdfPage.GetGraphics"/>. These replace PdfSharp's XGraphics-
-/// based test-fixture authoring once the surrounding migration lands.
+/// <see cref="PdfPage.GetGraphics"/>. End-to-end round-trip checks:
+/// author pages in memory, draw text, save, reopen, verify.
 /// </summary>
 public class PdfDocumentAuthoringTests
 {
