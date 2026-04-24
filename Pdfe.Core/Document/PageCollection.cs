@@ -69,14 +69,19 @@ public class PageCollection : IReadOnlyList<PdfPage>
             return 0;
 
         int count = 0;
-        foreach (var kidRef in kids)
+        foreach (var kidObj in kids)
         {
-            if (kidRef is not PdfReference kr)
-                continue;
-
-            var kid = _document.GetObject(kr) as PdfDictionary;
-            if (kid == null)
-                continue;
+            // Kids may be either indirect references (standard) or inline
+            // dictionaries (our mutation path — AddBlank/Insert — writes
+            // inline dicts because a full indirect-object registry isn't
+            // wired up yet). Handle both.
+            PdfDictionary? kid = kidObj switch
+            {
+                PdfReference kr => _document.GetObject(kr) as PdfDictionary,
+                PdfDictionary kd => kd,
+                _ => null,
+            };
+            if (kid == null) continue;
 
             count += LoadPagesRecursive(kid, pageNumber + count);
         }
@@ -110,6 +115,37 @@ public class PageCollection : IReadOnlyList<PdfPage>
     public void Add(PdfPage page)
     {
         Insert(_pages.Count, page);
+    }
+
+    /// <summary>
+    /// Append a blank page of the given size (in points) to the document
+    /// and return it. Default size is US Letter (612 × 792 points).
+    /// </summary>
+    public PdfPage AddBlank(double widthPoints = 612, double heightPoints = 792)
+    {
+        // Build a minimal page dictionary: Type / Parent / MediaBox /
+        // Resources. Contents is omitted — callers get one on demand via
+        // page.SetContentStreamBytes (or GetGraphics + Flush).
+        var pageDict = new PdfDictionary();
+        pageDict["Type"] = new PdfName("Page");
+        pageDict["Parent"] = _document.Catalog.GetReference("Pages");
+        var mediaBox = new PdfArray();
+        mediaBox.Add(0.0);
+        mediaBox.Add(0.0);
+        mediaBox.Add(widthPoints);
+        mediaBox.Add(heightPoints);
+        pageDict["MediaBox"] = mediaBox;
+        pageDict["Resources"] = new PdfDictionary();
+
+        // Register as an indirect object so the writer produces a proper
+        // `N 0 obj … endobj` frame, and reference it from /Kids.
+        var pageRef = _document.AddIndirectObject(pageDict);
+        _kidsArray.Add(pageRef);
+        _pagesDict["Kids"] = _kidsArray;
+        _pagesDict.SetInt("Count", _pages.Count + 1);
+
+        LoadPages();
+        return _pages[^1];
     }
 
     /// <summary>

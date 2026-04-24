@@ -178,11 +178,11 @@ public class PdfPage
 
         if (contentsObj == null)
         {
-            // Create a new content stream
+            // Create a new content stream as a proper indirect object —
+            // PDF streams are not valid inline in a dictionary.
             var newStream = new PdfStream(data);
-            // For now, store directly in page dictionary (simplified)
-            // A full implementation would create a new indirect object
-            _pageDict["Contents"] = newStream;
+            var streamRef = _document.AddIndirectObject(newStream);
+            _pageDict["Contents"] = streamRef;
             return;
         }
 

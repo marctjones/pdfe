@@ -31,12 +31,37 @@ public class PdfDocument : IDisposable
     /// <summary>
     /// Number of pages in the document.
     /// </summary>
-    public int PageCount { get; }
+    public int PageCount => Pages.Count;
 
     /// <summary>
     /// PDF version (e.g., "1.4", "1.7", "2.0").
     /// </summary>
     public string Version { get; }
+
+    /// <summary>
+    /// Register <paramref name="obj"/> as a new indirect object in this
+    /// document. Allocates the next free object number, wires it into
+    /// the xref and object cache, and returns a reference callers can
+    /// drop into other dictionaries or arrays.
+    /// </summary>
+    /// <remarks>
+    /// Used by mutation paths (AddBlank, SetContentStreamBytes, …) that
+    /// need to produce objects the writer can serialize at the top level
+    /// with a real <c>N 0 obj … endobj</c> frame — critical for stream
+    /// objects which are not valid inline in PDF syntax.
+    /// </remarks>
+    internal PdfReference AddIndirectObject(PdfObject obj)
+    {
+        int next = _xref.Count == 0 ? 1 : _xref.Keys.Max() + 1;
+        _xref[next] = new Pdfe.Core.Parsing.XRefEntry
+        {
+            Offset = 0, // filled in by the writer at serialize time
+            Generation = 0,
+            InUse = true,
+        };
+        _objectCache[next] = obj;
+        return new PdfReference(next, 0);
+    }
 
     /// <summary>
     /// Whether this document is encrypted.
@@ -82,14 +107,6 @@ public class PdfDocument : IDisposable
         var catalogRef = trailer.Get<PdfReference>("Root");
         Catalog = GetObject(catalogRef) as PdfDictionary
             ?? throw new PdfParseException("Could not load document catalog");
-
-        // Get page count from page tree
-        var pagesRef = Catalog.GetReferenceOrNull("Pages");
-        if (pagesRef != null)
-        {
-            var pages = GetObject(pagesRef) as PdfDictionary;
-            PageCount = pages?.GetInt("Count", 0) ?? 0;
-        }
 
         // Get info dictionary
         var infoRef = trailer.GetReferenceOrNull("Info");
@@ -164,6 +181,67 @@ public class PdfDocument : IDisposable
     }
 
     /// <summary>
+    /// Create a new empty in-memory PDF document. The returned document
+    /// has a <c>/Catalog</c>, an empty <c>/Pages</c> tree, and no pages.
+    /// Use <see cref="Pages"/>.<see cref="PageCollection.AddBlank"/> to
+    /// append pages.
+    /// </summary>
+    /// <remarks>
+    /// Implementation goes through a <c>Open(bytes)</c> round-trip so the
+    /// new document is fully initialized with parser / xref / object
+    /// cache in the same shape as a document loaded from disk — mutation
+    /// paths then work identically on freshly-created and loaded docs.
+    /// </remarks>
+    public static PdfDocument CreateNew(string version = "1.7")
+    {
+        return Open(BuildMinimalEmptyPdfBytes(version));
+    }
+
+    /// <summary>
+    /// Raw-bytes writer that produces a minimal valid empty PDF: header,
+    /// catalog object, empty pages object, xref, trailer. Just enough
+    /// for the parser to accept and for AddBlank to latch onto.
+    /// </summary>
+    private static byte[] BuildMinimalEmptyPdfBytes(string version)
+    {
+        using var ms = new MemoryStream();
+        using var w = new StreamWriter(ms, new System.Text.UTF8Encoding(false), leaveOpen: true) { NewLine = "\n" };
+
+        w.WriteLine($"%PDF-{version}");
+        w.Flush();
+
+        var offsets = new long[3];
+
+        offsets[1] = ms.Position;
+        w.WriteLine("1 0 obj");
+        w.WriteLine("<< /Type /Catalog /Pages 2 0 R >>");
+        w.WriteLine("endobj");
+        w.Flush();
+
+        offsets[2] = ms.Position;
+        w.WriteLine("2 0 obj");
+        w.WriteLine("<< /Type /Pages /Kids [] /Count 0 >>");
+        w.WriteLine("endobj");
+        w.Flush();
+
+        long xrefPos = ms.Position;
+        w.WriteLine("xref");
+        w.WriteLine("0 3");
+        w.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 2; i++)
+            w.WriteLine($"{offsets[i]:D10} 00000 n ");
+        w.Flush();
+        w.WriteLine("trailer");
+        w.WriteLine("<< /Root 1 0 R /Size 3 >>");
+        w.WriteLine("startxref");
+        w.WriteLine(xrefPos.ToString());
+        w.WriteLine("%%EOF");
+        w.Flush();
+
+        return ms.ToArray();
+    }
+
+    /// <summary>
     /// Read the PDF version from the header.
     /// </summary>
     private static string ReadVersion(Stream stream)
@@ -192,12 +270,9 @@ public class PdfDocument : IDisposable
         if (pageNumber < 1 || pageNumber > PageCount)
             throw new ArgumentOutOfRangeException(nameof(pageNumber), $"Page number must be between 1 and {PageCount}");
 
-        var pagesRef = Catalog.GetReference("Pages");
-        var pagesDict = GetObject(pagesRef) as PdfDictionary
-            ?? throw new PdfParseException("Invalid page tree");
-
-        var pageDict = FindPage(pagesDict, pageNumber - 1, 0);
-        return new PdfPage(this, pageDict, pageNumber);
+        // Delegate to the PageCollection, which already handles both
+        // indirect-reference and inline-dictionary kids uniformly.
+        return Pages[pageNumber - 1];
     }
 
     /// <summary>
