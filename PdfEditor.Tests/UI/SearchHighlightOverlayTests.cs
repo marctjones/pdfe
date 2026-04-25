@@ -49,9 +49,10 @@ public class SearchHighlightOverlayTests
         // Trigger search the same way Ctrl+F → typing does in the GUI.
         vm.SearchText = "open source";
 
-        // Poll for SearchMatches population, which fires through
-        // Dispatcher.UIThread.Post inside the VM.
-        var deadline = DateTime.UtcNow.AddSeconds(60);
+        // Poll for SearchMatches population — the VM debounces ~300 ms
+        // and then walks the document. Cross-test dispatcher contention
+        // can stretch this, so we give it generous slack.
+        var deadline = DateTime.UtcNow.AddSeconds(90);
         while (DateTime.UtcNow < deadline && vm.SearchMatches.Count == 0)
             await Task.Delay(100);
 
@@ -59,7 +60,7 @@ public class SearchHighlightOverlayTests
         //   VM.UpdateSearchHighlights → CurrentPageSearchHighlights.Add →
         //   MainWindow.OnSearchHighlightsChanged →
         //   PdfViewerControl.AddSearchHighlight → Rectangle in Canvas.
-        await Task.Delay(500);
+        await Task.Delay(800);
 
         vm.SearchMatches.Should().NotBeEmpty(
             "service is known to find 481 matches for 'open source'");

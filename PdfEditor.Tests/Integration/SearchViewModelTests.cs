@@ -39,11 +39,11 @@ public class SearchViewModelTests
         var vm = new MainWindowViewModel();
         await vm.LoadDocumentAsync(PragmaticBook);
 
-        // Setting SearchText fires Task.Run(PerformSearch); wait for it
-        // to complete by polling.
+        // Setting SearchText schedules a debounced search (300 ms wait
+        // + service walk + Dispatcher.UIThread.Post to publish results).
         vm.SearchText = "open source";
 
-        var deadline = DateTime.UtcNow.AddSeconds(60);
+        var deadline = DateTime.UtcNow.AddSeconds(90);
         while (DateTime.UtcNow < deadline && vm.SearchMatches.Count == 0)
             await Task.Delay(200);
 
@@ -69,13 +69,13 @@ public class SearchViewModelTests
         await vm.LoadDocumentAsync(PragmaticBook);
 
         vm.SearchText = "Open Source";
-        var deadline = DateTime.UtcNow.AddSeconds(60);
+        var deadline = DateTime.UtcNow.AddSeconds(90);
         while (DateTime.UtcNow < deadline && vm.SearchMatches.Count == 0)
             await Task.Delay(200);
 
         // After NavigateToSearchMatch the VM jumps to the page with the
         // first match and UpdateSearchHighlights computes screenRects.
-        await Task.Delay(500); // let the dispatcher post settle
+        await Task.Delay(800); // let the dispatcher post settle
 
         _out.WriteLine(
             $"After search: CurrentPageIndex={vm.CurrentPageIndex}, " +
@@ -107,10 +107,13 @@ public class SearchViewModelTests
         await vm.LoadDocumentAsync(PragmaticBook);
 
         vm.SearchText = "Brasseur";
-        var deadline = DateTime.UtcNow.AddSeconds(30);
+        // Wait long enough to cover the 300 ms search debounce + the
+        // service walk + dispatcher post; cross-test contention on the
+        // shared headless dispatcher can stretch this on a busy run.
+        var deadline = DateTime.UtcNow.AddSeconds(90);
         while (DateTime.UtcNow < deadline && vm.SearchMatches.Count == 0)
             await Task.Delay(200);
-        await Task.Delay(500);
+        await Task.Delay(800);
 
         var page = vm.PdfCoreDocument!.GetPage(vm.CurrentPageIndex + 1);
         // Bitmap dimensions at 120 DPI:
