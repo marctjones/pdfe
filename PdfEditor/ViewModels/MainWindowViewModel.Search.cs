@@ -136,8 +136,24 @@ public partial class MainWindowViewModel
     public bool IsSearchVisible
     {
         get => _isSearchVisible;
-        set => this.RaiseAndSetIfChanged(ref _isSearchVisible, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isSearchVisible, value);
+            // Right-sidebar panel selection depends on this flag.
+            this.RaisePropertyChanged(nameof(ShowSearchResultsPanel));
+            this.RaisePropertyChanged(nameof(ShowPendingRedactionsPanel));
+            this.RaisePropertyChanged(nameof(ShowClipboardHistoryPanel));
+        }
     }
+
+    /// <summary>
+    /// Sidebar mode selectors. The right sidebar shows exactly one panel
+    /// at a time; computing the booleans here keeps the XAML readable
+    /// (no MultiBinding gymnastics) and keeps invariants in one place.
+    /// </summary>
+    public bool ShowSearchResultsPanel => IsSearchVisible;
+    public bool ShowPendingRedactionsPanel => IsRedactionMode && !IsSearchVisible;
+    public bool ShowClipboardHistoryPanel => !IsRedactionMode && !IsSearchVisible;
 
     // Search Commands
     public ReactiveCommand<Unit, Unit>? ToggleSearchCommand { get; private set; }
@@ -145,6 +161,7 @@ public partial class MainWindowViewModel
     public ReactiveCommand<Unit, Unit>? FindPreviousCommand { get; private set; }
     public ReactiveCommand<Unit, Unit>? CloseSearchCommand { get; private set; }
     public ReactiveCommand<Unit, Unit>? FindCommand { get; private set; }
+    public ReactiveCommand<PdfSearchService.SearchMatch, Unit>? JumpToSearchMatchCommand { get; private set; }
 
     /// <summary>
     /// Initialize search commands (call from main constructor)
@@ -159,6 +176,9 @@ public partial class MainWindowViewModel
         // bypasses the debounce. Bound to the Find button and to the
         // Enter key in the search box (handled in MainWindow.axaml.cs).
         FindCommand = ReactiveCommand.Create(FindNow);
+        // Click on a row in the search-results sidebar.
+        JumpToSearchMatchCommand =
+            ReactiveCommand.Create<PdfSearchService.SearchMatch>(JumpToSearchMatch);
     }
 
     /// <summary>
@@ -308,6 +328,20 @@ public partial class MainWindowViewModel
 
         _logger.LogDebug("Navigated to previous match: {Index} of {Total}",
             CurrentSearchMatchIndex + 1, SearchMatches.Count);
+    }
+
+    /// <summary>
+    /// Public entry-point used by the search-results sidebar. Jumps the
+    /// viewer to the page containing <paramref name="match"/> and selects
+    /// it so the prev/next buttons resume from there.
+    /// </summary>
+    public void JumpToSearchMatch(PdfSearchService.SearchMatch match)
+    {
+        if (match == null) return;
+        var index = SearchMatches.IndexOf(match);
+        if (index < 0) return;
+        CurrentSearchMatchIndex = index;
+        NavigateToSearchMatch(match);
     }
 
     /// <summary>
