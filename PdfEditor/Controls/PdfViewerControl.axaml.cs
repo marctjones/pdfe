@@ -12,8 +12,10 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Pdfe.Core.Document;
+using Pdfe.Core.Text;
 using Pdfe.Rendering;
 using PdfEditor.Imaging;
+using PdfEditor.Services;
 using SkiaSharp;
 
 namespace PdfEditor.Controls;
@@ -174,6 +176,16 @@ public partial class PdfViewerControl : UserControl
 
     // Tracks the in-flight render so rapid paging cancels stale work.
     private CancellationTokenSource? _renderCts;
+
+    // Text-selection state. Cached letters are in PDF points (Y-up) for
+    // the page currently displayed; we look them up at the same DPI the
+    // viewer renders at to map screen-DIP pointer coords into PDF coords.
+    private const double TextSelectionRenderDpi = 120.0;
+    private int _lettersPageNumber = -1;
+    private List<Letter>? _currentPageLetters; // raw glyph order
+    private List<Letter>? _readingOrderedLetters; // for range slicing
+    private Letter? _selectionAnchor;
+    private Letter? _selectionFocus;
 
     #endregion
 
@@ -395,9 +407,15 @@ public partial class PdfViewerControl : UserControl
     {
         // Drop cached bitmaps from the prior document (would render at wrong
         // pages otherwise) and cancel any render that was still finishing
-        // for that document.
+        // for that document. Same for the page-letters cache used by
+        // text-selection — if it referenced a page from the old document
+        // we'd hit-test against stale glyphs.
         InvalidatePageCache();
         _renderCts?.Cancel();
+        _currentPageLetters = null;
+        _readingOrderedLetters = null;
+        _lettersPageNumber = -1;
+        ClearSelectionHighlight();
 
         if (Document != null)
         {
@@ -413,6 +431,16 @@ public partial class PdfViewerControl : UserControl
     {
         if (Document != null && CurrentPage >= 1 && CurrentPage <= Document.PageCount)
         {
+            // Drop selection state from the previous page — the cached
+            // letters won't match the new page's geometry and we'd
+            // otherwise hit-test against stale glyphs.
+            _currentPageLetters = null;
+            _readingOrderedLetters = null;
+            _lettersPageNumber = -1;
+            _selectionAnchor = null;
+            _selectionFocus = null;
+            ClearSelectionHighlight();
+
             await RenderCurrentPageAsync();
             PageChanged?.Invoke(this, new PageChangedEventArgs(CurrentPage));
         }
@@ -561,6 +589,19 @@ public partial class PdfViewerControl : UserControl
         _dragStart = point;
         _isDragging = true;
 
+        if (InteractionMode == InteractionMode.TextSelection)
+        {
+            // Text-selection mode: hit-test letters instead of drawing a
+            // 2-D rectangle. Anchor is the letter under (or nearest to)
+            // the press point; focus tracks pointer-moved.
+            EnsurePageLettersLoaded();
+            _selectionAnchor = HitTestLetterAt(point);
+            _selectionFocus = _selectionAnchor;
+            ClearSelectionHighlight();
+            if (_selectionAnchor != null)
+                DrawSelectionRange(new[] { _selectionAnchor });
+        }
+
         e.Handled = true;
     }
 
@@ -573,13 +614,20 @@ public partial class PdfViewerControl : UserControl
 
         if (InteractionMode == InteractionMode.Redaction)
         {
-            // Draw temporary redaction rectangle
             DrawTemporaryRedactionRectangle(_dragStart, currentPoint);
         }
         else if (InteractionMode == InteractionMode.TextSelection)
         {
-            // Draw temporary selection rectangle
-            DrawTemporarySelectionRectangle(_dragStart, currentPoint);
+            // Letter-by-letter highlight as the user drags from anchor.
+            if (_selectionAnchor == null || _readingOrderedLetters == null) return;
+            var hit = HitTestLetterAt(currentPoint);
+            if (hit == null) return;
+            // Re-draw only when focus actually moves to a different letter.
+            if (ReferenceEquals(hit, _selectionFocus)) return;
+            _selectionFocus = hit;
+            var range = TextSelectionEngine.RangeBetween(
+                _readingOrderedLetters, _selectionAnchor, _selectionFocus);
+            DrawSelectionRange(range);
         }
 
         e.Handled = true;
@@ -592,30 +640,133 @@ public partial class PdfViewerControl : UserControl
 
         _isDragging = false;
 
-        var endPoint = e.GetPosition(_interactionLayer);
-        var rect = CreateRect(_dragStart, endPoint);
-
-        // Adjust for zoom level
-        var adjustedRect = new Rect(
-            rect.X / ZoomLevel,
-            rect.Y / ZoomLevel,
-            rect.Width / ZoomLevel,
-            rect.Height / ZoomLevel
-        );
-
         if (InteractionMode == InteractionMode.Redaction)
         {
+            var endPoint = e.GetPosition(_interactionLayer);
+            var rect = CreateRect(_dragStart, endPoint);
+            var adjustedRect = new Rect(
+                rect.X / ZoomLevel, rect.Y / ZoomLevel,
+                rect.Width / ZoomLevel, rect.Height / ZoomLevel);
             RedactionDrawn?.Invoke(this, new RedactionDrawnEventArgs(adjustedRect));
+            ClearTemporaryDrawings();
         }
-        else if (InteractionMode == InteractionMode.TextSelection)
+        else if (InteractionMode == InteractionMode.TextSelection &&
+                 _selectionAnchor != null && _selectionFocus != null &&
+                 _readingOrderedLetters != null)
         {
-            TextSelected?.Invoke(this, new TextSelectedEventArgs(adjustedRect));
+            var range = TextSelectionEngine.RangeBetween(
+                _readingOrderedLetters, _selectionAnchor, _selectionFocus);
+            var text = TextSelectionEngine.JoinText(range);
+            var letterDips = range
+                .Select(l => PdfRectangleToDips(l.GlyphRectangle))
+                .ToList();
+            // Bounding box of the whole run — keeps backwards compat with
+            // listeners that just want a single Rect.
+            Rect? bbox = letterDips.Count > 0
+                ? UnionRects(letterDips)
+                : (Rect?)null;
+            TextSelected?.Invoke(this, new TextSelectedEventArgs(
+                bbox ?? new Rect(), text, letterDips));
         }
-
-        // Clear temporary drawings
-        ClearTemporaryDrawings();
+        else
+        {
+            ClearTemporaryDrawings();
+        }
 
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Cache the current page's letters (in PDF points) keyed by page
+    /// number so repeated text-selection drags on the same page don't
+    /// re-extract. Letters are always re-fetched when CurrentPage changes.
+    /// </summary>
+    private void EnsurePageLettersLoaded()
+    {
+        if (Document == null) return;
+        if (_lettersPageNumber == CurrentPage && _currentPageLetters != null) return;
+        try
+        {
+            var page = Document.GetPage(CurrentPage);
+            _currentPageLetters = page.Letters?.ToList() ?? new List<Letter>();
+            _readingOrderedLetters = TextSelectionEngine.SortReadingOrder(_currentPageLetters);
+            _lettersPageNumber = CurrentPage;
+        }
+        catch
+        {
+            _currentPageLetters = new List<Letter>();
+            _readingOrderedLetters = new List<Letter>();
+            _lettersPageNumber = CurrentPage;
+        }
+    }
+
+    private Letter? HitTestLetterAt(Point dipPoint)
+    {
+        if (_currentPageLetters == null || _currentPageLetters.Count == 0) return null;
+        if (Document == null) return null;
+        var page = Document.GetPage(CurrentPage);
+        // Pointer coords are in pre-zoom DIPs of the InteractionLayer
+        // (which sits inside the LayoutTransformControl wrapper, so the
+        // wrapper's zoom doesn't apply here — we get the natural DIPs of
+        // the rendered bitmap). Convert to PDF points and flip Y.
+        var pdfX = dipPoint.X * 72.0 / TextSelectionRenderDpi;
+        var pdfY = page.Height - (dipPoint.Y * 72.0 / TextSelectionRenderDpi);
+        return TextSelectionEngine.HitTest(_currentPageLetters, pdfX, pdfY);
+    }
+
+    private Rect PdfRectangleToDips(Pdfe.Core.Document.PdfRectangle r)
+    {
+        if (Document == null) return default;
+        var page = Document.GetPage(CurrentPage);
+        const double s = TextSelectionRenderDpi / 72.0;
+        // PDF Y-up → DIP Y-down: dipTop = (page.Height - pdfTop) * s.
+        var dipX = r.Left * s;
+        var dipY = (page.Height - r.Top) * s;
+        var dipW = (r.Right - r.Left) * s;
+        var dipH = (r.Top - r.Bottom) * s;
+        return new Rect(dipX, dipY, dipW, dipH);
+    }
+
+    private static Rect UnionRects(IReadOnlyList<Rect> rects)
+    {
+        var x1 = double.PositiveInfinity; var y1 = double.PositiveInfinity;
+        var x2 = double.NegativeInfinity; var y2 = double.NegativeInfinity;
+        foreach (var r in rects)
+        {
+            if (r.X < x1) x1 = r.X;
+            if (r.Y < y1) y1 = r.Y;
+            if (r.Right > x2) x2 = r.Right;
+            if (r.Bottom > y2) y2 = r.Bottom;
+        }
+        return new Rect(x1, y1, x2 - x1, y2 - y1);
+    }
+
+    private void DrawSelectionRange(IReadOnlyList<Letter> letters)
+    {
+        var layer = this.FindControl<Canvas>("TextSelectionLayer");
+        if (layer == null) return;
+        layer.Children.Clear();
+        var fill = new SolidColorBrush(Color.FromArgb(0x60, 0x33, 0x99, 0xFF));
+        foreach (var l in letters)
+        {
+            var r = PdfRectangleToDips(l.GlyphRectangle);
+            var rect = new Rectangle
+            {
+                Fill = fill,
+                Width = r.Width,
+                Height = r.Height
+            };
+            Canvas.SetLeft(rect, r.X);
+            Canvas.SetTop(rect, r.Y);
+            layer.Children.Add(rect);
+        }
+    }
+
+    /// <summary>Clear any in-progress text selection (e.g. switching pages).</summary>
+    public void ClearSelectionHighlight()
+    {
+        var layer = this.FindControl<Canvas>("TextSelectionLayer");
+        layer?.Children.Clear();
     }
 
     private static Rect CreateRect(Point p1, Point p2)
@@ -871,12 +1022,22 @@ public class RedactionDrawnEventArgs : EventArgs
 /// </summary>
 public class TextSelectedEventArgs : EventArgs
 {
+    /// <summary>Joined text of the selected letter run, in reading order.</summary>
+    public string Text { get; }
+    /// <summary>Per-letter bounding boxes in viewer-DIP coordinates.</summary>
+    public IReadOnlyList<Rect> LetterBoundsDips { get; }
+    /// <summary>Bounding box of the entire selection. Backwards-compat with the rect-only listeners.</summary>
     public Rect Area { get; }
 
-    public TextSelectedEventArgs(Rect area)
+    public TextSelectedEventArgs(Rect area, string text, IReadOnlyList<Rect> letterBoundsDips)
     {
         Area = area;
+        Text = text;
+        LetterBoundsDips = letterBoundsDips;
     }
+
+    /// <summary>Backwards-compat ctor — area only, empty text/bounds.</summary>
+    public TextSelectedEventArgs(Rect area) : this(area, string.Empty, System.Array.Empty<Rect>()) { }
 }
 
 /// <summary>
