@@ -133,6 +133,9 @@
                 <MenuItem Header="Fit _Width" Command="{Binding ZoomFitWidthCommand}" InputGesture="Ctrl+1"/>
                 <MenuItem Header="Fit _Page" Command="{Binding ZoomFitPageCommand}" InputGesture="Ctrl+2"/>
                 <Separator/>
+                <MenuItem Header="Show _Outline"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsOutlineSidebarVisible, Mode=TwoWay}"/>
                 <MenuItem Header="Show _Thumbnails"
                           ToggleType="CheckBox"
                           IsChecked="{Binding IsThumbnailsSidebarVisible, Mode=TwoWay}"/>
@@ -397,14 +400,74 @@
              column. -->
         <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto">
 
-            <!-- Thumbnail Sidebar -->
+            <!-- Thumbnail Sidebar — split into Outline (top) + Thumbnails (bottom).
+                 The outline pane only takes screen space when the document
+                 actually has a table of contents (HasOutline) AND the user
+                 hasn't toggled it off via View → Show Outline. -->
             <Border Grid.Column="0"
-                    Width="200"
+                    Width="220"
                     IsVisible="{Binding IsThumbnailsSidebarVisible}"
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
-                <ScrollViewer>
+              <Grid RowDefinitions="*,Auto,*">
+
+                <!-- Outline / Table of Contents -->
+                <Grid Grid.Row="0" RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsOutlineSidebarVisible}">
+                    <Border Grid.Row="0"
+                            Background="{DynamicResource SecondaryBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="10,6">
+                        <TextBlock Text="Outline"
+                                   FontWeight="SemiBold" FontSize="12"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    </Border>
+                    <ScrollViewer Grid.Row="1">
+                        <TreeView Name="OutlineTree"
+                                  ItemsSource="{Binding OutlineNodes}"
+                                  Background="Transparent"
+                                  BorderThickness="0">
+                            <TreeView.ItemTemplate>
+                                <TreeDataTemplate ItemsSource="{Binding Children}">
+                                    <Button Content="{Binding DisplayText}"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="2,2"
+                                            Cursor="Hand"
+                                            FontSize="11"
+                                            Foreground="{DynamicResource TextPrimaryBrush}"
+                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).JumpToOutlineCommand}"
+                                            CommandParameter="{Binding}"/>
+                                </TreeDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- Splitter between outline and thumbnails (only when both visible). -->
+                <GridSplitter Grid.Row="1"
+                              Height="2"
+                              Background="{DynamicResource BorderBrush}"
+                              HorizontalAlignment="Stretch"
+                              ResizeDirection="Rows"
+                              IsVisible="{Binding IsOutlineSidebarVisible}"/>
+
+                <!-- Thumbnails -->
+                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                    <Border Grid.Row="0"
+                            Background="{DynamicResource SecondaryBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="10,6">
+                        <TextBlock Text="Thumbnails"
+                                   FontWeight="SemiBold" FontSize="12"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    </Border>
+                    <ScrollViewer Grid.Row="1">
                     <ItemsControl ItemsSource="{Binding PageThumbnails}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -454,6 +517,8 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+                </Grid>
+              </Grid>
             </Border>
 
             <!-- PDF Viewer -->
@@ -497,6 +562,7 @@
                                                HiddenTextHighlights="{Binding HiddenTextHighlights}"
                                                RedactionDrawn="OnRedactionDrawn"
                                                TextSelected="OnTextSelected"
+                                               LinkClicked="OnLinkClicked"
                                                PageChanged="OnPageChanged" />
                 </Grid>
             </Border>

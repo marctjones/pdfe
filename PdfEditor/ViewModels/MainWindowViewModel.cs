@@ -257,6 +257,22 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Properties
     public ObservableCollection<PageThumbnail> PageThumbnails { get; }
+
+    /// <summary>
+    /// Top-level outline nodes (PDF table of contents). Empty when the
+    /// document has no /Outlines entry. Each node carries its own children
+    /// for nested chapters/sections; the View binds via TreeView.
+    /// </summary>
+    public ObservableCollection<Models.OutlineNode> OutlineNodes { get; } = new();
+
+    /// <summary>True when the loaded document has at least one outline entry.</summary>
+    public bool HasOutline => OutlineNodes.Count > 0;
+    private bool _isOutlineSidebarVisible = true;
+    public bool IsOutlineSidebarVisible
+    {
+        get => _isOutlineSidebarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isOutlineSidebarVisible, value);
+    }
     public ObservableCollection<ClipboardEntry> ClipboardHistory { get; }
 
     public Bitmap? CurrentPageImage
@@ -481,6 +497,22 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public void ToggleClipboardSidebar() =>
         IsClipboardSidebarVisible = !IsClipboardSidebarVisible;
+
+    public void ToggleOutlineSidebar() =>
+        IsOutlineSidebarVisible = !IsOutlineSidebarVisible;
+
+    /// <summary>
+    /// Click handler for an outline tree row. Jumps to the node's page
+    /// (1-based) if the destination resolved during parse; no-op otherwise.
+    /// Bound via JumpToOutlineCommand on the TreeView item template.
+    /// </summary>
+    public void JumpToOutline(Models.OutlineNode? node)
+    {
+        if (node?.PageNumber == null) return;
+        var idx = node.PageNumber.Value - 1;
+        if (idx < 0 || idx >= TotalPages) return;
+        CurrentPageIndex = idx;
+    }
 
     public string DocumentName => string.IsNullOrEmpty(_currentFilePath)
         ? "No document open"
@@ -713,6 +745,9 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> NextPageCommand { get; }
     public ReactiveCommand<Unit, Unit> PreviousPageCommand { get; }
     public ReactiveCommand<int, Unit> GoToPageCommand { get; }
+    public ReactiveCommand<Models.OutlineNode, Unit> JumpToOutlineCommand =>
+        _jumpToOutline ??= ReactiveCommand.Create<Models.OutlineNode>(JumpToOutline);
+    private ReactiveCommand<Models.OutlineNode, Unit>? _jumpToOutline;
 
     // Rotation Commands
     public ReactiveCommand<Unit, Unit> RotatePageLeftCommand { get; }
@@ -875,6 +910,24 @@ public partial class MainWindowViewModel : ViewModelBase
 
             _logger.LogInformation(">>> STEP 8: Creating thumbnail placeholders (lazy load)");
             await LoadPageThumbnailsAsync();
+
+            // Parse the document's table-of-contents outline (if any).
+            // Cheap — just a tree walk over the catalog's /Outlines, no
+            // text extraction needed. Populates the left-sidebar tree.
+            try
+            {
+                var outline = Pdfe.Core.Document.PdfOutlineParser.Parse(PdfCoreDocument!);
+                OutlineNodes.Clear();
+                foreach (var item in outline)
+                    OutlineNodes.Add(Models.OutlineNode.From(item));
+                this.RaisePropertyChanged(nameof(HasOutline));
+                _logger.LogInformation(">>> STEP 8b: Outline parsed — {Count} top-level entries", outline.Count);
+            }
+            catch (Exception outlineEx)
+            {
+                _logger.LogWarning(outlineEx, "Failed to parse document outline");
+                OutlineNodes.Clear();
+            }
 
             // Kick off the text index build in the background. First
             // search after this completes is sub-second instead of the
