@@ -1371,7 +1371,7 @@ internal class RenderContext
         return Encoding.Latin1.GetBytes(operand);
     }
 
-    private static byte[] UnescapePdfStringBytes(string s)
+    internal static byte[] UnescapePdfStringBytes(string s)
     {
         var unescaped = new List<byte>(s.Length);
         var i = 0;
@@ -1390,6 +1390,15 @@ internal class RenderContext
                     case '(': unescaped.Add((byte)'('); i += 2; break;
                     case ')': unescaped.Add((byte)')'); i += 2; break;
                     case '\\': unescaped.Add((byte)'\\'); i += 2; break;
+                    case '\r':
+                    case '\n':
+                        // PDF spec 7.3.4.2: backslash followed by an EOL
+                        // marker — both shall be ignored. Treat CRLF as a
+                        // single EOL.
+                        i += 2;
+                        if (next == '\r' && i < s.Length && s[i] == '\n')
+                            i++;
+                        break;
                     default:
                         if (char.IsDigit(next))
                         {
@@ -1401,6 +1410,8 @@ internal class RenderContext
                         }
                         else
                         {
+                            // Backslash before unknown char — spec 7.3.4.2:
+                            // backslash is ignored; emit just `next`.
                             unescaped.Add((byte)next);
                             i += 2;
                         }
