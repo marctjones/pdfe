@@ -305,12 +305,20 @@ public partial class PdfViewerControl : UserControl
         }
 
         // Surface viewport changes (scrollbars appearing/disappearing,
-        // sidebars toggling, window resizes). Consumers — MainWindow —
-        // listen so the VM can recompute Fit Width/Page against the
-        // *visible* area, not the outer control bounds.
+        // sidebars toggling, window resizes). Subscribe directly to the
+        // ScrollViewer's Viewport AvaloniaProperty — it raises only on
+        // actual value changes. Initial implementation used LayoutUpdated,
+        // which fires on EVERY layout pass of the whole tree and created a
+        // feedback loop with tooltips: hovering a button popped a tooltip,
+        // tooltip layout fired LayoutUpdated, our handler pushed Viewport
+        // (sometimes oscillating sub-pixel) to the VM, ReapplyFitModeIfNeeded
+        // re-set ZoomLevel, triggering yet more layout. Result: button
+        // tooltips flickered and the button was unclickable.
         if (_scrollViewer != null)
         {
-            _scrollViewer.LayoutUpdated += OnScrollViewerLayoutUpdated;
+            _viewportSubscription = _scrollViewer
+                .GetObservable(ScrollViewer.ViewportProperty)
+                .Subscribe(OnScrollViewerViewportChanged);
         }
     }
 
@@ -333,16 +341,15 @@ public partial class PdfViewerControl : UserControl
     public event EventHandler<Size>? VisibleViewportChanged;
 
     private Size _lastReportedViewport;
+    private IDisposable? _viewportSubscription;
 
-    private void OnScrollViewerLayoutUpdated(object? sender, EventArgs e)
+    private void OnScrollViewerViewportChanged(Size newViewport)
     {
-        if (_scrollViewer == null) return;
-        var v = _scrollViewer.Viewport;
-        if (v.Width <= 0 || v.Height <= 0) return;
-        if (Math.Abs(v.Width - _lastReportedViewport.Width) < 0.5 &&
-            Math.Abs(v.Height - _lastReportedViewport.Height) < 0.5) return;
-        _lastReportedViewport = v;
-        VisibleViewportChanged?.Invoke(this, v);
+        if (newViewport.Width <= 0 || newViewport.Height <= 0) return;
+        if (Math.Abs(newViewport.Width - _lastReportedViewport.Width) < 0.5 &&
+            Math.Abs(newViewport.Height - _lastReportedViewport.Height) < 0.5) return;
+        _lastReportedViewport = newViewport;
+        VisibleViewportChanged?.Invoke(this, newViewport);
     }
 
     private void OnZoomLevelChanged()
