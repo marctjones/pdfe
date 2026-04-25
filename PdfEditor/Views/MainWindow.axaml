@@ -707,11 +707,18 @@
                                IsVisible="{Binding OperationStatus, Converter={x:Static StringConverters.IsNullOrEmpty}}"/>
                 </StackPanel>
 
-                <!-- Page Navigation -->
+                <!-- Page Navigation. No tooltips on the arrow buttons —
+                     the "Page N" label between them already explains
+                     them, and the flickering tooltip popup on hover (the
+                     adjacent OperationStatus / StatusBarText cell flips
+                     visibility while thumbnails load, re-measuring the
+                     status-bar StackPanel and yanking the tooltip's
+                     anchor out from under it on every tick) made the
+                     buttons hard to click. AutomationProperties stay
+                     for screen readers. -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Content="◀" Command="{Binding PreviousPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
-                            ToolTip.Tip="Previous Page"
                             AutomationProperties.Name="Previous Page"
                             AutomationProperties.HelpText="Navigate to the previous page"/>
                     <TextBlock Text="{Binding DisplayPageNumber, StringFormat='Page {0}'}"
@@ -724,7 +731,6 @@
                                AutomationProperties.Name="Current Page Number"/>
                     <Button Content="▶" Command="{Binding NextPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
-                            ToolTip.Tip="Next Page"
                             AutomationProperties.Name="Next Page"
                             AutomationProperties.HelpText="Navigate to the next page"/>
                 </StackPanel>
