@@ -424,24 +424,25 @@
                                    FontWeight="SemiBold" FontSize="12"
                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                     </Border>
+                    <!-- Bind SelectedItem to VM. The setter on
+                         SelectedOutlineNode jumps the viewer; this is the
+                         simplest cross-platform pattern that works inside
+                         TreeView's container chain (a per-row Button.Command
+                         binding does NOT reliably resolve $parent[Window]
+                         through the templated ItemContainer hierarchy). -->
                     <ScrollViewer Grid.Row="1">
                         <TreeView Name="OutlineTree"
                                   ItemsSource="{Binding OutlineNodes}"
+                                  SelectedItem="{Binding SelectedOutlineNode, Mode=TwoWay}"
                                   Background="Transparent"
                                   BorderThickness="0">
                             <TreeView.ItemTemplate>
                                 <TreeDataTemplate ItemsSource="{Binding Children}">
-                                    <Button Content="{Binding DisplayText}"
-                                            Background="Transparent"
-                                            BorderThickness="0"
-                                            HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Left"
-                                            Padding="2,2"
-                                            Cursor="Hand"
-                                            FontSize="11"
-                                            Foreground="{DynamicResource TextPrimaryBrush}"
-                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).JumpToOutlineCommand}"
-                                            CommandParameter="{Binding}"/>
+                                    <TextBlock Text="{Binding DisplayText}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Cursor="Hand"/>
                                 </TreeDataTemplate>
                             </TreeView.ItemTemplate>
                         </TreeView>

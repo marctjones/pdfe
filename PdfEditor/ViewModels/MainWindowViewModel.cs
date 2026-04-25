@@ -273,6 +273,22 @@ public partial class MainWindowViewModel : ViewModelBase
         get => _isOutlineSidebarVisible;
         set => this.RaiseAndSetIfChanged(ref _isOutlineSidebarVisible, value);
     }
+
+    private Models.OutlineNode? _selectedOutlineNode;
+    /// <summary>
+    /// Bound to <see cref="Avalonia.Controls.TreeView.SelectedItem"/>. Setting
+    /// this — i.e. the user clicking an outline row — navigates the viewer
+    /// to the node's destination page.
+    /// </summary>
+    public Models.OutlineNode? SelectedOutlineNode
+    {
+        get => _selectedOutlineNode;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _selectedOutlineNode, value);
+            if (value != null) JumpToOutline(value);
+        }
+    }
     public ObservableCollection<ClipboardEntry> ClipboardHistory { get; }
 
     public Bitmap? CurrentPageImage
@@ -508,9 +524,23 @@ public partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     public void JumpToOutline(Models.OutlineNode? node)
     {
-        if (node?.PageNumber == null) return;
+        if (node == null)
+        {
+            _logger.LogDebug("JumpToOutline: null node");
+            return;
+        }
+        if (node.PageNumber == null)
+        {
+            _logger.LogInformation("JumpToOutline: '{Title}' has no resolvable page", node.Title);
+            return;
+        }
         var idx = node.PageNumber.Value - 1;
-        if (idx < 0 || idx >= TotalPages) return;
+        if (idx < 0 || idx >= TotalPages)
+        {
+            _logger.LogWarning("JumpToOutline: page {Page} out of range", node.PageNumber);
+            return;
+        }
+        _logger.LogInformation("JumpToOutline: '{Title}' → page {Page}", node.Title, node.PageNumber);
         CurrentPageIndex = idx;
     }
 
