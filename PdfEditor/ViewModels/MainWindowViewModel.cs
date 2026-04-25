@@ -1565,61 +1565,65 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ZoomFitWidth()
     {
         _logger.LogInformation("Setting zoom to fit width");
-
-        if (_currentPageImage == null || ViewportWidth <= 0)
+        if (TryGetPageDimensionsInViewerDips(out var pageW, out _) &&
+            ViewportWidth > 0)
         {
-            // Fallback to default if no image loaded
-            ZoomLevel = 1.0;
-            this.RaisePropertyChanged(nameof(StatusText));
-            return;
-        }
-
-        // Calculate zoom to fit page width in viewport (with small margin)
-        var pageWidth = _currentPageImage.Size.Width;
-        var margin = 40; // Leave some margin on sides
-        var targetWidth = ViewportWidth - margin;
-
-        if (pageWidth > 0)
-        {
-            ZoomLevel = Math.Max(0.25, Math.Min(5.0, targetWidth / pageWidth));
+            const double margin = 40; // gutter on each side
+            var target = Math.Max(1.0, ViewportWidth - margin);
+            ZoomLevel = Math.Clamp(target / pageW, 0.25, 5.0);
             _logger.LogDebug("Fit width: viewport={Viewport}, page={Page}, zoom={Zoom:P0}",
-                ViewportWidth, pageWidth, ZoomLevel);
+                ViewportWidth, pageW, ZoomLevel);
         }
-
+        else
+        {
+            ZoomLevel = 1.0;
+        }
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
     private void ZoomFitPage()
     {
         _logger.LogInformation("Setting zoom to fit page");
-
-        if (_currentPageImage == null || ViewportWidth <= 0 || ViewportHeight <= 0)
+        if (TryGetPageDimensionsInViewerDips(out var pageW, out var pageH) &&
+            ViewportWidth > 0 && ViewportHeight > 0)
         {
-            // Fallback to default if no image loaded
+            const double marginH = 40;
+            const double marginV = 40;
+            var targetW = Math.Max(1.0, ViewportWidth - marginH);
+            var targetH = Math.Max(1.0, ViewportHeight - marginV);
+            // Whichever dimension is the binding constraint wins.
+            var zoom = Math.Min(targetW / pageW, targetH / pageH);
+            ZoomLevel = Math.Clamp(zoom, 0.25, 5.0);
+            _logger.LogDebug("Fit page: vp=({Vw}x{Vh}), pg=({Pw}x{Ph}), zoom={Zoom:P0}",
+                ViewportWidth, ViewportHeight, pageW, pageH, ZoomLevel);
+        }
+        else
+        {
             ZoomLevel = 1.0;
-            this.RaisePropertyChanged(nameof(StatusText));
-            return;
         }
-
-        // Calculate zoom to fit entire page in viewport (with margins)
-        var pageWidth = _currentPageImage.Size.Width;
-        var pageHeight = _currentPageImage.Size.Height;
-        var marginH = 40;
-        var marginV = 40;
-        var targetWidth = ViewportWidth - marginH;
-        var targetHeight = ViewportHeight - marginV;
-
-        if (pageWidth > 0 && pageHeight > 0)
-        {
-            // Use the smaller ratio to fit both dimensions
-            var zoomW = targetWidth / pageWidth;
-            var zoomH = targetHeight / pageHeight;
-            ZoomLevel = Math.Max(0.25, Math.Min(5.0, Math.Min(zoomW, zoomH)));
-            _logger.LogDebug("Fit page: viewport=({VW}x{VH}), page=({PW}x{PH}), zoom={Zoom:P0}",
-                ViewportWidth, ViewportHeight, pageWidth, pageHeight, ZoomLevel);
-        }
-
         this.RaisePropertyChanged(nameof(StatusText));
+    }
+
+    /// <summary>
+    /// Page dimensions in viewer DIPs at zoom 1.0. Reads page size from
+    /// the parsed PdfCoreDocument (in PDF points) so we don't depend on
+    /// the legacy <c>_currentPageImage</c> being populated, and converts
+    /// to DIPs at the viewer's render DPI (the bitmap is tagged 96 DPI
+    /// in WriteableBitmap so 1 bitmap-pixel = 1 DIP, and 1 page-point at
+    /// our render DPI = render-DPI/72 bitmap-pixels).
+    /// </summary>
+    private bool TryGetPageDimensionsInViewerDips(out double widthDip, out double heightDip)
+    {
+        widthDip = 0; heightDip = 0;
+        var doc = PdfCoreDocument;
+        if (doc == null) return false;
+        var pageNumber = CurrentPageIndex + 1;
+        if (pageNumber < 1 || pageNumber > doc.PageCount) return false;
+        var page = doc.GetPage(pageNumber);
+        const double renderDpi = 120.0; // matches PdfViewerControl.DefaultRenderDpi
+        widthDip  = page.Width  * (renderDpi / 72.0);
+        heightDip = page.Height * (renderDpi / 72.0);
+        return widthDip > 0 && heightDip > 0;
     }
 
     private async Task NextPageAsync()
@@ -1829,78 +1833,99 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation(">>> LoadPageThumbnailsAsync: Clearing existing thumbnails");
             PageThumbnails.Clear();
 
-            _logger.LogInformation(
-                ">>> LoadPageThumbnailsAsync: rendering {PageCount} thumbnails", TotalPages);
-
-            // Pre-fix this code spawned one Task.Run per page with no
-            // throttle. On a 455-page book that meant ~455 simultaneous
-            // tasks all trying to parse and rasterize the PDF, saturating
-            // the threadpool and starving the foreground page render.
-            // Cap concurrency to the host's logical CPU count and let the
-            // semaphore queue the rest.
-            var concurrency = Math.Max(2, Environment.ProcessorCount);
-            using var gate = new SemaphoreSlim(concurrency);
             var totalPages = TotalPages;
-            int completed = 0;
-            var loadTasks = new List<Task>(totalPages);
+            _logger.LogInformation(
+                ">>> LoadPageThumbnailsAsync: rendering {PageCount} thumbnails", totalPages);
 
+            // Pre-allocate thumbnail placeholders so the sidebar shows
+            // the strip immediately and individual entries fill in as
+            // their renders complete.
+            var placeholders = new PageThumbnail[totalPages];
             for (int i = 0; i < totalPages; i++)
             {
-                var thumbnail = new PageThumbnail
-                {
-                    PageNumber = i + 1,
-                    PageIndex = i
-                };
-                PageThumbnails.Add(thumbnail);
+                placeholders[i] = new PageThumbnail { PageNumber = i + 1, PageIndex = i };
+                PageThumbnails.Add(placeholders[i]);
+            }
 
-                int pageIndex = i;
-                var task = Task.Run(async () =>
+            // Pre-fix this code spawned one Task.Run per page, each of
+            // which called PdfRenderService.RenderThumbnailAsync — and
+            // *that* opened the PDF file from disk and parsed it from
+            // scratch on every single call. On a 455-page book that
+            // was 455× File.ReadAllBytes + 455× xref scan + 455× catalog
+            // walk, with all those parses contending for the threadpool
+            // alongside the foreground page render. UI was unusable.
+            //
+            // Now: open one PdfDocument per worker (capped at
+            // ProcessorCount), pull page indexes from a shared queue,
+            // render. Parses go from N pages to ~8.
+            var concurrency = Math.Max(2, Math.Min(Environment.ProcessorCount, 8));
+            var queue = new System.Collections.Concurrent.ConcurrentQueue<int>(
+                Enumerable.Range(0, totalPages));
+            int completed = 0;
+            var workers = new List<Task>(concurrency);
+
+            for (int w = 0; w < concurrency; w++)
+            {
+                workers.Add(Task.Run(async () =>
                 {
-                    await gate.WaitAsync().ConfigureAwait(false);
+                    Pdfe.Core.Document.PdfDocument? workerDoc = null;
+                    Pdfe.Rendering.SkiaRenderer? renderer = null;
                     try
                     {
-                        SKBitmap? image = null;
-                        try
-                        {
-                            image = await _renderService.RenderThumbnailAsync(filePath, pageIndex)
-                                .ConfigureAwait(false);
-                        }
-                        catch (Exception renderEx)
-                        {
-                            _logger.LogError(renderEx,
-                                "!!! ERROR rendering thumbnail for page {PageIndex}", pageIndex);
-                            return;
-                        }
-                        if (image == null) return;
+                        workerDoc = Pdfe.Core.Document.PdfDocument.Open(filePath);
+                        renderer = new Pdfe.Rendering.SkiaRenderer();
+                        var options = new Pdfe.Rendering.RenderOptions { Dpi = 36 };
 
-                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        while (queue.TryDequeue(out var pageIndex))
                         {
                             try
                             {
-                                thumbnail.ThumbnailImage = ToAvaloniaBitmap(image);
-                                int n = System.Threading.Interlocked.Increment(ref completed);
-                                // Coarse update — every page would flood the UI.
-                                if (n == totalPages || (n & 3) == 0)
-                                    OperationStatus = $"Loading thumbnails ({n}/{totalPages})…";
+                                var page = workerDoc.GetPage(pageIndex + 1);
+                                using var skBitmap = renderer.RenderPage(page, options);
+                                if (skBitmap == null) continue;
+
+                                // Hop to UI thread to publish. Yielding here
+                                // also gives the dispatcher its turn — without
+                                // a yield, a fast worker can saturate it with
+                                // back-to-back InvokeAsyncs and starve the
+                                // foreground render and pointer events.
+                                await Dispatcher.UIThread.InvokeAsync(() =>
+                                {
+                                    try
+                                    {
+                                        placeholders[pageIndex].ThumbnailImage =
+                                            ToAvaloniaBitmap(skBitmap);
+                                        int n = System.Threading.Interlocked.Increment(
+                                            ref completed);
+                                        // Coarse status update — every page floods the UI.
+                                        if (n == totalPages || (n & 7) == 0)
+                                            OperationStatus =
+                                                $"Loading thumbnails ({n}/{totalPages})…";
+                                    }
+                                    catch (Exception uiEx)
+                                    {
+                                        _logger.LogError(uiEx,
+                                            "!!! ERROR setting thumbnail {PageIndex}",
+                                            pageIndex);
+                                    }
+                                }, DispatcherPriority.Background);
                             }
-                            catch (Exception uiEx)
+                            catch (Exception renderEx)
                             {
-                                _logger.LogError(uiEx,
-                                    "!!! ERROR setting thumbnail {PageIndex}", pageIndex);
+                                _logger.LogError(renderEx,
+                                    "!!! ERROR rendering thumbnail page {PageIndex}",
+                                    pageIndex);
                             }
-                        });
-                        image.Dispose();
+                        }
                     }
                     finally
                     {
-                        gate.Release();
+                        workerDoc?.Dispose();
                     }
-                });
-
-                loadTasks.Add(task);
+                }));
             }
 
-            await Task.WhenAll(loadTasks);
+            await Task.WhenAll(workers);
             _logger.LogInformation(
                 ">>> LoadPageThumbnailsAsync: COMPLETE — {Count} thumbnails", totalPages);
         }
