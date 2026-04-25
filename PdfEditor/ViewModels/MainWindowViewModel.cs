@@ -302,6 +302,23 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private bool _revealRasterizedHidden;
+    /// <summary>
+    /// When true (and <see cref="RevealHiddenText"/> is also on), runs
+    /// differential OCR on the current page in addition to the structural
+    /// scan. Slower; requires the <c>tesseract</c> CLI. Catches text
+    /// that's only present inside images and visually obstructed.
+    /// </summary>
+    public bool RevealRasterizedHidden
+    {
+        get => _revealRasterizedHidden;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _revealRasterizedHidden, value);
+            RefreshHiddenTextHighlights();
+        }
+    }
+
     /// <summary>
     /// Highlights to paint on top of the current page — each entry is a
     /// piece of text that the PDF still contains but has visually hidden
@@ -322,27 +339,43 @@ public partial class MainWindowViewModel : ViewModelBase
             // Scan fresh from disk so we see exactly what a downstream
             // extractor would see; the in-memory doc may have pending
             // GUI edits we don't want to audit against.
-            using var doc = Pdfe.Core.Document.PdfDocument.Open(File.ReadAllBytes(_currentFilePath));
+            byte[] bytes = File.ReadAllBytes(_currentFilePath);
+            using var doc = Pdfe.Core.Document.PdfDocument.Open(bytes);
             if (CurrentPageIndex < 0 || CurrentPageIndex >= doc.PageCount) return;
 
             var page = doc.GetPage(CurrentPageIndex + 1);
-            var hits = Pdfe.Core.Text.Segmentation.HiddenTextDetector.ScanPage(page, CurrentPageIndex + 1);
-
-            // PDF points (bottom-left origin) → rendered-image pixels
-            // (top-left origin) at the render DPI. Matches the same
-            // conversion the viewer uses for the page image itself.
             double pageHeight = page.Height;
             double scale = CoordinateConverter.DefaultRenderDpi / (double)CoordinateConverter.PdfPointsPerInch;
-            foreach (var h in hits)
+
+            // Pass 1: structural — fast, exact characters, never wrong.
+            foreach (var h in Pdfe.Core.Text.Segmentation.HiddenTextDetector.ScanPage(
+                page, CurrentPageIndex + 1))
             {
-                double left = h.BoundingBox.Left * scale;
-                double top = (pageHeight - h.BoundingBox.Top) * scale;
-                double width = (h.BoundingBox.Right - h.BoundingBox.Left) * scale;
-                double height = (h.BoundingBox.Top - h.BoundingBox.Bottom) * scale;
-                HiddenTextHighlights.Add(new Models.HiddenTextHighlight(
-                    h.Text,
-                    new Rect(left, top, width, height),
-                    h.HiddenBy));
+                AddHighlight(h.Text, h.BoundingBox, h.HiddenBy, scale, pageHeight,
+                    Models.HiddenTextSource.Structural);
+            }
+
+            // Pass 2: differential OCR — slow, opt-in, recovers text
+            // hidden inside rasters. Only runs when the user explicitly
+            // asks for it AND the tesseract CLI is reachable.
+            if (_revealRasterizedHidden)
+            {
+                var ocr = new Pdfe.Ocr.PdfOcrService();
+                if (ocr.IsAvailable())
+                {
+                    var auditor = new Pdfe.Ocr.DifferentialOcrAuditor(ocr);
+                    foreach (var h in auditor.ScanPage(bytes, CurrentPageIndex + 1))
+                    {
+                        AddHighlight(h.Text, h.BoundingBox,
+                            $"raster (OCR conf {h.Confidence:F2})", scale, pageHeight,
+                            Models.HiddenTextSource.DifferentialOcr);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "RevealRasterizedHidden requested but `tesseract` CLI is not available; skipping differential-OCR pass.");
+                }
             }
 
             _logger.LogInformation(
@@ -353,6 +386,24 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _logger.LogWarning(ex, "Hidden-text scan failed for page {Page}", CurrentPageIndex + 1);
         }
+    }
+
+    private void AddHighlight(
+        string text,
+        Pdfe.Core.Document.PdfRectangle bbox,
+        string source,
+        double scale,
+        double pageHeight,
+        Models.HiddenTextSource severity)
+    {
+        // PDF points (bottom-left origin) → rendered-image pixels
+        // (top-left origin) at the render DPI.
+        double left = bbox.Left * scale;
+        double top = (pageHeight - bbox.Top) * scale;
+        double width = (bbox.Right - bbox.Left) * scale;
+        double height = (bbox.Top - bbox.Bottom) * scale;
+        HiddenTextHighlights.Add(new Models.HiddenTextHighlight(
+            text, new Rect(left, top, width, height), source, severity));
     }
 
     public int TotalPages => _documentService.PageCount;
