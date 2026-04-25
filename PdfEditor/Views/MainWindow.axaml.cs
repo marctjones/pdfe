@@ -92,6 +92,29 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Theme-independent click handler for the outline TreeView. Walks
+    /// up from the click target to find the nearest TreeViewItem and
+    /// invokes JumpToOutline on its OutlineNode DataContext. Avoids the
+    /// FluentAvalonia-specific chevron/content hit-test boundary that
+    /// makes the SelectedItem path silently swallow clicks.
+    /// </summary>
+    private void OnOutlineTreePointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        var src = e.Source as Control;
+        while (src != null)
+        {
+            if (src is Avalonia.Controls.TreeViewItem tvi &&
+                tvi.DataContext is PdfEditor.Models.OutlineNode node)
+            {
+                vm.JumpToOutline(node);
+                return;
+            }
+            src = src.Parent as Control;
+        }
+    }
+
+    /// <summary>
     /// Fires whenever a thumbnail Image's effective visible area changes
     /// (item virtualisation, scrolling the strip, sidebar toggling). When
     /// the area is non-empty we ask the VM to ensure that page's thumbnail

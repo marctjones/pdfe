@@ -430,10 +430,19 @@
                          TreeView's container chain (a per-row Button.Command
                          binding does NOT reliably resolve $parent[Window]
                          through the templated ItemContainer hierarchy). -->
+                    <!-- PointerPressed at the TreeView level + a manual
+                         walk to the clicked TreeViewItem. The SelectedItem
+                         TwoWay binding works in tests under FluentTheme but
+                         FluentAvalonia's TreeViewItem theme can swallow
+                         clicks on the chevron/content boundary, so the
+                         straightforward selection path silently no-ops in
+                         the real app. The pointer handler is theme-
+                         independent. -->
                     <ScrollViewer Grid.Row="1">
                         <TreeView Name="OutlineTree"
                                   ItemsSource="{Binding OutlineNodes}"
                                   SelectedItem="{Binding SelectedOutlineNode, Mode=TwoWay}"
+                                  PointerPressed="OnOutlineTreePointerPressed"
                                   Background="Transparent"
                                   BorderThickness="0">
                             <TreeView.ItemTemplate>
