@@ -90,6 +90,62 @@ public class PdfSearchService
     /// lets a debounced caller drop a stale search when a newer
     /// keystroke supersedes it.
     /// </summary>
+    /// <summary>
+    /// Search using a pre-built <see cref="DocumentTextIndex"/>. Skips
+    /// per-page text extraction (the dominant cost) so subsequent
+    /// queries on the same document are nearly instant.
+    /// </summary>
+    public List<SearchMatch> Search(
+        DocumentTextIndex index,
+        string searchTerm,
+        bool caseSensitive = false,
+        bool wholeWordsOnly = false,
+        bool useRegex = false,
+        CancellationToken cancellationToken = default,
+        IProgress<SearchProgress>? progress = null)
+    {
+        var matches = new List<SearchMatch>();
+        if (index == null || string.IsNullOrWhiteSpace(searchTerm))
+            return matches;
+
+        try
+        {
+            var totalPages = index.PageCount;
+            progress?.Report(new SearchProgress(0, totalPages, 0));
+
+            for (int i = 0; i < totalPages; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!index.IsPageIndexed(i))
+                {
+                    // Index built incrementally — skip pages not yet cached.
+                    // The next search after the build completes covers them.
+                    continue;
+                }
+                var pageText = index.GetPageText(i);
+                var pageWords = index.GetPageWords(i);
+                if (useRegex)
+                    matches.AddRange(SearchWithRegex(pageText, searchTerm, pageWords.ToList(), i, caseSensitive));
+                else if (wholeWordsOnly)
+                    matches.AddRange(SearchWholeWords(pageWords.ToList(), searchTerm, i, caseSensitive));
+                else
+                    matches.AddRange(SearchSubstring(pageText, pageWords.ToList(), searchTerm, i, caseSensitive));
+
+                if (progress != null && ((i & 3) == 0 || i == totalPages - 1))
+                    progress.Report(new SearchProgress(i + 1, totalPages, matches.Count));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Indexed search cancelled at page progress; returning partial results");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching index: {Message}", ex.Message);
+        }
+        return matches;
+    }
+
     public List<SearchMatch> Search(
         PdfDocument document,
         string searchTerm,
