@@ -9,6 +9,11 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Suppress platform-specific warnings for cross-platform PDF rendering -->
     <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- AllowUnsafeBlocks is used by Imaging/SkiaInterop.cs to copy pixels
+         directly from SkiaSharp output into Avalonia's WriteableBitmap, which
+         turns the per-render bottleneck (PNG encode + decode) into a
+         microsecond-class memcpy. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Application Icon -->
     <ApplicationIcon>Assets\pdfe_logo.ico</ApplicationIcon>
   </PropertyGroup>
