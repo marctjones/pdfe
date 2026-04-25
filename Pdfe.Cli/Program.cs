@@ -442,15 +442,23 @@ class Program
             "--json",
             () => false,
             "Emit machine-readable JSON instead of the human-readable report");
+        var deepOption = new Option<bool>(
+            "--deep",
+            () => false,
+            "Also run differential OCR: render the page twice (with and " +
+            "without overlays stripped), OCR both, and report words " +
+            "recoverable from the underlying image but hidden in the " +
+            "displayed render. Catches rasterized-leak cases the " +
+            "structural detector can't see. Requires `tesseract` on PATH.");
 
         var command = new Command(
             "audit",
             "Detect text hidden behind opaque overlays (black-box redaction audit)")
         {
-            fileArg, jsonOption
+            fileArg, jsonOption, deepOption,
         };
 
-        command.SetHandler((FileInfo file, bool json) =>
+        command.SetHandler((FileInfo file, bool json, bool deep) =>
         {
             if (!file.Exists)
             {
@@ -461,62 +469,122 @@ class Program
 
             try
             {
-                using var doc = PdfDocument.Open(File.ReadAllBytes(file.FullName));
-                var hits = HiddenTextDetector.Scan(doc);
+                var bytes = File.ReadAllBytes(file.FullName);
+                using var doc = PdfDocument.Open(bytes);
+                var structuralHits = HiddenTextDetector.Scan(doc);
+
+                IReadOnlyList<DifferentialOcrHit> ocrHits = Array.Empty<DifferentialOcrHit>();
+                if (deep)
+                {
+                    var ocr = new PdfOcrService();
+                    if (!ocr.IsAvailable())
+                    {
+                        Console.Error.WriteLine(
+                            "--deep requires tesseract on PATH. Install with " +
+                            "`apt install tesseract-ocr`.");
+                        Environment.ExitCode = 1;
+                        return;
+                    }
+                    var auditor = new DifferentialOcrAuditor(ocr);
+                    ocrHits = auditor.Scan(bytes);
+                }
 
                 if (json)
                 {
-                    PrintJson(hits);
-                }
-                else if (hits.Count == 0)
-                {
-                    Console.WriteLine("✓ No hidden text detected.");
+                    PrintAuditJson(structuralHits, ocrHits);
                 }
                 else
                 {
-                    Console.WriteLine($"✗ {hits.Count} hidden-text leak(s) detected:");
-                    foreach (var h in hits)
-                    {
-                        Console.WriteLine(
-                            $"  Page {h.PageNumber} at ({h.BoundingBox.Left:F1}, {h.BoundingBox.Bottom:F1}): " +
-                            $"\"{h.Text}\" covered by {h.HiddenBy}");
-                    }
+                    PrintAuditHuman(structuralHits, ocrHits, deep);
                 }
 
-                // Exit non-zero on any hits so CI pipelines can gate.
-                Environment.ExitCode = hits.Count == 0 ? 0 : 2;
+                // Exit non-zero on any hits.
+                Environment.ExitCode = (structuralHits.Count + ocrHits.Count) == 0 ? 0 : 2;
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, fileArg, jsonOption);
+        }, fileArg, jsonOption, deepOption);
 
         return command;
     }
 
-    private static void PrintJson(IReadOnlyList<HiddenTextRecord> hits)
+    private static void PrintAuditHuman(
+        IReadOnlyList<HiddenTextRecord> structural,
+        IReadOnlyList<DifferentialOcrHit> ocr,
+        bool deepRun)
     {
-        // Hand-rolled to avoid pulling in a JSON dependency. The output
-        // is small enough that correctness is easy to eyeball.
-        Console.WriteLine("[");
-        for (int i = 0; i < hits.Count; i++)
+        if (structural.Count == 0 && ocr.Count == 0)
         {
-            var h = hits[i];
-            var escaped = h.Text
-                .Replace("\\", "\\\\").Replace("\"", "\\\"")
-                .Replace("\n", "\\n").Replace("\r", "\\r");
-            var sep = i + 1 < hits.Count ? "," : "";
+            Console.WriteLine(deepRun
+                ? "✓ No hidden text detected (structural + differential OCR clean)."
+                : "✓ No hidden text detected.");
+            return;
+        }
+
+        if (structural.Count > 0)
+        {
+            Console.WriteLine($"✗ {structural.Count} structural hidden-text leak(s):");
+            foreach (var h in structural)
+            {
+                Console.WriteLine(
+                    $"  Page {h.PageNumber} at ({h.BoundingBox.Left:F1}, {h.BoundingBox.Bottom:F1}): " +
+                    $"\"{h.Text}\" covered by {h.HiddenBy}");
+            }
+        }
+        if (ocr.Count > 0)
+        {
+            Console.WriteLine($"✗ {ocr.Count} differential-OCR leak(s) " +
+                $"(text in raster, hidden by overlay):");
+            foreach (var h in ocr)
+            {
+                Console.WriteLine(
+                    $"  Page {h.PageNumber} at ({h.BoundingBox.Left:F1}, {h.BoundingBox.Bottom:F1}) " +
+                    $"[conf {h.Confidence:F2}]: \"{h.Text}\"");
+            }
+        }
+    }
+
+    private static void PrintAuditJson(
+        IReadOnlyList<HiddenTextRecord> structural,
+        IReadOnlyList<DifferentialOcrHit> ocr)
+    {
+        Console.WriteLine("{");
+        Console.WriteLine("  \"structural\": [");
+        for (int i = 0; i < structural.Count; i++)
+        {
+            var h = structural[i];
+            var sep = i + 1 < structural.Count ? "," : "";
             Console.WriteLine(
-                $"  {{ \"page\": {h.PageNumber}, " +
-                $"\"text\": \"{escaped}\", " +
+                $"    {{ \"page\": {h.PageNumber}, " +
+                $"\"text\": \"{Esc(h.Text)}\", " +
                 $"\"bbox\": [{h.BoundingBox.Left:F2}, {h.BoundingBox.Bottom:F2}, " +
                 $"{h.BoundingBox.Right:F2}, {h.BoundingBox.Top:F2}], " +
-                $"\"hidden_by\": \"{h.HiddenBy}\" }}{sep}");
+                $"\"hidden_by\": \"{Esc(h.HiddenBy)}\" }}{sep}");
         }
-        Console.WriteLine("]");
+        Console.WriteLine("  ],");
+        Console.WriteLine("  \"differential_ocr\": [");
+        for (int i = 0; i < ocr.Count; i++)
+        {
+            var h = ocr[i];
+            var sep = i + 1 < ocr.Count ? "," : "";
+            Console.WriteLine(
+                $"    {{ \"page\": {h.PageNumber}, " +
+                $"\"text\": \"{Esc(h.Text)}\", " +
+                $"\"bbox\": [{h.BoundingBox.Left:F2}, {h.BoundingBox.Bottom:F2}, " +
+                $"{h.BoundingBox.Right:F2}, {h.BoundingBox.Top:F2}], " +
+                $"\"confidence\": {h.Confidence:F3} }}{sep}");
+        }
+        Console.WriteLine("  ]");
+        Console.WriteLine("}");
     }
+
+    private static string Esc(string s)
+        => s.Replace("\\", "\\\\").Replace("\"", "\\\"")
+            .Replace("\n", "\\n").Replace("\r", "\\r");
+
 
     /// <summary>
     /// pdfe ocr &lt;file&gt; [--page N] [--dpi 300] [--lang eng]
