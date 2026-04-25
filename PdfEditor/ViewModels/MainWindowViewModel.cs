@@ -62,6 +62,17 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _hasInMemoryModifications; // Tracks if document has been modified in-memory (e.g., redactions applied)
 
     /// <summary>
+    /// Tracks whether the user is in an "auto-fit" zoom state. When set to
+    /// <see cref="ZoomFitMode.FitWidth"/> or <see cref="ZoomFitMode.FitPage"/>
+    /// the renderer re-fits on viewport size changes; once the user manually
+    /// zooms (Ctrl++/-/0) we drop into <see cref="ZoomFitMode.Manual"/> and
+    /// stop auto-recomputing.
+    /// </summary>
+    private ZoomFitMode _zoomFitMode = ZoomFitMode.FitWidth;
+    private bool _isThumbnailsSidebarVisible = true;
+    private bool _isClipboardSidebarVisible = true;
+
+    /// <summary>
     /// Parameterless constructor for testing and scripting scenarios.
     /// Creates a ViewModel with default (NullLogger) dependencies.
     /// </summary>
@@ -448,6 +459,26 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Visibility of the left thumbnail strip. Toggled from View menu.</summary>
+    public bool IsThumbnailsSidebarVisible
+    {
+        get => _isThumbnailsSidebarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isThumbnailsSidebarVisible, value);
+    }
+
+    /// <summary>Visibility of the right clipboard / pending-redactions sidebar.</summary>
+    public bool IsClipboardSidebarVisible
+    {
+        get => _isClipboardSidebarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isClipboardSidebarVisible, value);
+    }
+
+    public void ToggleThumbnailsSidebar() =>
+        IsThumbnailsSidebarVisible = !IsThumbnailsSidebarVisible;
+
+    public void ToggleClipboardSidebar() =>
+        IsClipboardSidebarVisible = !IsClipboardSidebarVisible;
+
     public string DocumentName => string.IsNullOrEmpty(_currentFilePath)
         ? "No document open"
         : System.IO.Path.GetFileName(_currentFilePath);
@@ -563,17 +594,43 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // Viewport dimensions (set by View for accurate zoom calculations)
+    // Viewport dimensions (set by View for accurate zoom calculations).
+    // Re-applies the active fit mode when they change so window resizes
+    // keep the page snapped to the viewport.
     public double ViewportWidth
     {
         get => _viewportWidth;
-        set => this.RaiseAndSetIfChanged(ref _viewportWidth, value);
+        set
+        {
+            if (Math.Abs(_viewportWidth - value) < 0.5) return;
+            this.RaiseAndSetIfChanged(ref _viewportWidth, value);
+            ReapplyFitModeIfNeeded();
+        }
     }
 
     public double ViewportHeight
     {
         get => _viewportHeight;
-        set => this.RaiseAndSetIfChanged(ref _viewportHeight, value);
+        set
+        {
+            if (Math.Abs(_viewportHeight - value) < 0.5) return;
+            this.RaiseAndSetIfChanged(ref _viewportHeight, value);
+            ReapplyFitModeIfNeeded();
+        }
+    }
+
+    private void ReapplyFitModeIfNeeded()
+    {
+        if (PdfCoreDocument == null) return;
+        switch (_zoomFitMode)
+        {
+            case ZoomFitMode.FitWidth:
+                ZoomFitWidthInternal(latch: true);
+                break;
+            case ZoomFitMode.FitPage:
+                ZoomFitPageInternal(latch: true);
+                break;
+        }
     }
 
     // Search highlight rectangles for current page (in screen coordinates)
@@ -755,6 +812,12 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation(">>> STEP 7: Rendering current page");
             await RenderCurrentPageAsync();
             _logger.LogInformation(">>> STEP 7: Current page rendered successfully");
+
+            // Auto-fit-width on document open so the page is never wider than
+            // the central pane (otherwise it scrolls behind the right sidebar
+            // on default windows). The fit-mode latch in the ZoomFit* path
+            // also keeps it fitted on subsequent window resizes.
+            ReapplyFitModeIfNeeded();
 
             // Kick off thumbnail generation on the threadpool but DON'T
             // await it — the sidebar populates progressively and the user
@@ -1545,12 +1608,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void ZoomIn()
     {
+        // User-initiated zoom drops out of any auto-fit mode so a window
+        // resize doesn't immediately undo what they just clicked.
+        _zoomFitMode = ZoomFitMode.Manual;
         ZoomLevel = Math.Min(ZoomLevel * 1.25, 5.0);
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
     private void ZoomOut()
     {
+        _zoomFitMode = ZoomFitMode.Manual;
         ZoomLevel = Math.Max(ZoomLevel / 1.25, 0.25);
         this.RaisePropertyChanged(nameof(StatusText));
     }
@@ -1558,13 +1625,23 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ZoomActualSize()
     {
         _logger.LogInformation("Setting zoom to actual size (100%)");
+        _zoomFitMode = ZoomFitMode.Manual;
         ZoomLevel = 1.0;
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
-    private void ZoomFitWidth()
+    private void ZoomFitWidth() => ZoomFitWidthInternal(latch: true);
+    private void ZoomFitPage() => ZoomFitPageInternal(latch: true);
+
+    /// <summary>
+    /// Resize zoom to fit the page width. When <paramref name="latch"/> is
+    /// true the mode is recorded so subsequent viewport-size changes
+    /// re-apply this fit until the user manually zooms.
+    /// </summary>
+    private void ZoomFitWidthInternal(bool latch)
     {
         _logger.LogInformation("Setting zoom to fit width");
+        if (latch) _zoomFitMode = ZoomFitMode.FitWidth;
         if (TryGetPageDimensionsInViewerDips(out var pageW, out _) &&
             ViewportWidth > 0)
         {
@@ -1581,9 +1658,10 @@ public partial class MainWindowViewModel : ViewModelBase
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
-    private void ZoomFitPage()
+    private void ZoomFitPageInternal(bool latch)
     {
         _logger.LogInformation("Setting zoom to fit page");
+        if (latch) _zoomFitMode = ZoomFitMode.FitPage;
         if (TryGetPageDimensionsInViewerDips(out var pageW, out var pageH) &&
             ViewportWidth > 0 && ViewportHeight > 0)
         {
@@ -2735,4 +2813,17 @@ public partial class MainWindowViewModel : ViewModelBase
             return null;
         }
     }
+}
+
+/// <summary>
+/// Zoom-mode latching for the viewer. PDF readers traditionally let users
+/// pick a fit mode (Width / Page) that survives window resizes — once the
+/// user manually changes zoom (Ctrl++/-/0 or scroll-wheel zoom) we drop
+/// to <see cref="Manual"/> and stop auto-recomputing.
+/// </summary>
+public enum ZoomFitMode
+{
+    Manual,
+    FitWidth,
+    FitPage,
 }
