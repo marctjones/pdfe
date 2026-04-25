@@ -321,13 +321,24 @@ public partial class PdfViewerControl : UserControl
             _zoomScaleTransform = _zoomHost.LayoutTransform as ScaleTransform;
         }
 
-        // Set up interaction layer event handlers
-        if (_interactionLayer != null)
-        {
-            _interactionLayer.PointerPressed += OnInteractionLayerPointerPressed;
-            _interactionLayer.PointerMoved += OnInteractionLayerPointerMoved;
-            _interactionLayer.PointerReleased += OnInteractionLayerPointerReleased;
-        }
+        // Pointer handlers — attached at the UserControl root level using
+        // AddHandler with handledEventsToo:true so they fire even when an
+        // intermediate control (e.g. an invisible-but-hit-testable
+        // overlay Grid) intercepts the bubble path. Pre-fix attachment
+        // was on _interactionLayer (zero-sized — never received events)
+        // and then on _zoomHost (skipped when ErrorOverlay sat as a
+        // sibling above it). Listening at the UserControl root catches
+        // everything; the handlers compute pointer coords relative to
+        // the ZoomHost wrapper themselves.
+        AddHandler(PointerPressedEvent, OnInteractionLayerPointerPressed,
+            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        AddHandler(PointerMovedEvent, OnInteractionLayerPointerMoved,
+            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        AddHandler(PointerReleasedEvent, OnInteractionLayerPointerReleased,
+            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble,
+            handledEventsToo: true);
 
         // Surface viewport changes (scrollbars appearing/disappearing,
         // sidebars toggling, window resizes). Subscribe directly to the
@@ -398,11 +409,20 @@ public partial class PdfViewerControl : UserControl
             _loadingOverlay.IsVisible = false;
     }
 
+    private static readonly SolidColorBrush ErrorOverlayBrush =
+        new(Color.FromArgb(0x80, 0x00, 0x00, 0x00));
+
     private void OnErrorStateChanged()
     {
         if (_errorOverlay != null)
         {
             _errorOverlay.IsVisible = HasError;
+            _errorOverlay.IsHitTestVisible = HasError;
+            // Set Background only while an error is actively shown — the
+            // dim wash captures clicks intentionally then. With no error
+            // the overlay has no Background and is fully transparent to
+            // hit-testing, so in-page link clicks reach the page area.
+            _errorOverlay.Background = HasError ? ErrorOverlayBrush : null;
         }
     }
 
@@ -604,7 +624,13 @@ public partial class PdfViewerControl : UserControl
         // a drawing tool — so the redaction/text-selection mode shouldn't
         // suppress them. We only consume the event when a link actually
         // hits, otherwise let the rest of the press handling continue.
-        var pressPoint = e.GetPosition(_interactionLayer);
+        // GetPosition relative to OverlayCanvas — that control sits INSIDE
+        // the LayoutTransformControl wrapper, so its local coordinate
+        // system is bitmap-native (pre-zoom). Asking for coords relative
+        // to the wrapper itself returns post-zoom values, which then
+        // miss every link rect when the user has zoomed at all (auto-
+        // fit-width on document load = always).
+        var pressPoint = GetPressPoint(e);
         var linkHit = HitTestLinkAt(pressPoint);
         if (linkHit != null)
         {
@@ -616,7 +642,7 @@ public partial class PdfViewerControl : UserControl
         if (InteractionMode == InteractionMode.None)
             return;
 
-        var point = e.GetPosition(_interactionLayer);
+        var point = GetPressPoint(e);
         _dragStart = point;
         _isDragging = true;
 
@@ -641,7 +667,7 @@ public partial class PdfViewerControl : UserControl
         if (!_isDragging || InteractionMode == InteractionMode.None)
             return;
 
-        var currentPoint = e.GetPosition(_interactionLayer);
+        var currentPoint = GetPressPoint(e);
 
         if (InteractionMode == InteractionMode.Redaction)
         {
@@ -673,7 +699,7 @@ public partial class PdfViewerControl : UserControl
 
         if (InteractionMode == InteractionMode.Redaction)
         {
-            var endPoint = e.GetPosition(_interactionLayer);
+            var endPoint = GetPressPoint(e);
             var rect = CreateRect(_dragStart, endPoint);
             var adjustedRect = new Rect(
                 rect.X / ZoomLevel, rect.Y / ZoomLevel,
@@ -729,6 +755,20 @@ public partial class PdfViewerControl : UserControl
             _readingOrderedLetters = new List<Letter>();
             _lettersPageNumber = CurrentPage;
         }
+    }
+
+    /// <summary>
+    /// Pointer coords in bitmap-native (pre-zoom) DIPs. We need a control
+    /// INSIDE the LayoutTransformControl wrapper to get pre-zoom values;
+    /// asking the wrapper itself returns post-zoom values that miss
+    /// every link/letter rect when zoom != 1 (which auto-fit makes the
+    /// default).
+    /// </summary>
+    private Point GetPressPoint(PointerEventArgs e)
+    {
+        if (_overlayCanvas != null) return e.GetPosition(_overlayCanvas);
+        if (_pdfImage != null) return e.GetPosition(_pdfImage);
+        return e.GetPosition(this);
     }
 
     private void EnsurePageLinksLoaded()

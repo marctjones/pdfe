@@ -67,10 +67,12 @@
               IsVisible="False"
               Background="Transparent" />
 
-        <!-- Error overlay -->
+        <!-- Error overlay. No Background by default → hit-transparent
+             outside the centred error message. Code-behind sets a dim
+             Background only when an error is actually being shown. -->
         <Grid Name="ErrorOverlay"
               IsVisible="False"
-              Background="#80000000">
+              IsHitTestVisible="False">
             <StackPanel HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                 <TextBlock Name="ErrorMessageText"
