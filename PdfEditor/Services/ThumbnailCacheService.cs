@@ -62,23 +62,43 @@ public sealed class ThumbnailCacheService : IDisposable
     /// <summary>
     /// Get the thumbnail for <paramref name="pageIndex"/> (zero-based).
     /// Returns from disk cache if present, otherwise renders and caches.
-    /// Concurrent calls for the same page coalesce on a single in-flight Task.
+    /// Concurrent calls for the same page coalesce on a single in-flight
+    /// Task to protect the renderer (and the disk cache) from duplicated
+    /// work; <strong>each caller receives its own owned copy of the
+    /// SKBitmap and is responsible for disposing it</strong>. The master
+    /// instance behind the Task is allowed to fall out of scope and be
+    /// finalised — sharing it would mean every awaiter's `using`/Dispose
+    /// would race on the same handle and crash SkiaSharp on the second
+    /// disposal (this was the cause of the "app ended unexpectedly while
+    /// scrolling thumbnails" crash).
     /// </summary>
     public Task<SKBitmap?> GetThumbnailAsync(int pageIndex,
         CancellationToken cancellationToken = default)
     {
         if (_disposed) return Task.FromResult<SKBitmap?>(null);
 
+        Task<SKBitmap?> master;
         lock (_lock)
         {
-            if (_inFlight.TryGetValue(pageIndex, out var existing))
-                return existing;
-
-            var task = Task.Run(() => LoadOrRender(pageIndex, cancellationToken),
-                cancellationToken);
-            _inFlight[pageIndex] = task;
-            return task;
+            if (!_inFlight.TryGetValue(pageIndex, out master!))
+            {
+                master = Task.Run(() => LoadOrRender(pageIndex, cancellationToken),
+                    cancellationToken);
+                _inFlight[pageIndex] = master;
+            }
         }
+
+        // Hand each caller a freshly-copied SKBitmap so disposes don't
+        // alias. The master result will be GC'd / finalised once the
+        // last reference (this Task chain) is dropped.
+        return master.ContinueWith(t =>
+        {
+            if (t.Status != TaskStatus.RanToCompletion) return null;
+            var src = t.Result;
+            return src?.Copy();
+        }, cancellationToken,
+        TaskContinuationOptions.ExecuteSynchronously,
+        TaskScheduler.Default);
     }
 
     private SKBitmap? LoadOrRender(int pageIndex, CancellationToken ct)

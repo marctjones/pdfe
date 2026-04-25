@@ -88,6 +88,57 @@ public class ThumbnailCacheTests
     }
 
     [Fact]
+    public async Task ConcurrentRequestsForSamePage_AllCallersDisposeIndependently()
+    {
+        // Regression for the "app ends unexpectedly while scrolling
+        // thumbnails" crash. Pre-fix the cache service shared a single
+        // SKBitmap across every awaiter of an in-flight Task; multiple
+        // callers each running `using var sk = await GetThumbnailAsync(...)`
+        // would race their Dispose calls on the same handle and SkiaSharp
+        // would segfault on the second disposal. The fix gives each
+        // caller a freshly-copied SKBitmap.
+        if (!File.Exists(PragmaticBook)) return;
+
+        var tempCache = Path.Combine(Path.GetTempPath(),
+            "pdfe-thumb-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempCache);
+        var prevXdg = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        Environment.SetEnvironmentVariable("XDG_CACHE_HOME", tempCache);
+        try
+        {
+            using var doc = PdfDocument.Open(PragmaticBook);
+            using var svc = new ThumbnailCacheService(PragmaticBook, doc, NullLogger.Instance);
+
+            // Eight concurrent same-page requests — pre-fix every awaiter
+            // got the same SKBitmap reference, so their Dispose calls
+            // raced. Now every awaiter gets its own copy.
+            var tasks = new Task<SkiaSharp.SKBitmap?>[8];
+            for (int i = 0; i < tasks.Length; i++)
+                tasks[i] = svc.GetThumbnailAsync(0);
+
+            var results = await Task.WhenAll(tasks);
+
+            // Every result must be a distinct, disposable instance.
+            var seen = new HashSet<SkiaSharp.SKBitmap>();
+            foreach (var r in results)
+            {
+                r.Should().NotBeNull();
+                seen.Add(r!).Should().BeTrue(
+                    "every caller must receive its own SKBitmap, not a shared reference");
+            }
+
+            // Disposing all of them in turn must not throw — pre-fix this
+            // would crash on the second Dispose.
+            foreach (var b in results) b!.Dispose();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_CACHE_HOME", prevXdg);
+            try { Directory.Delete(tempCache, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentRequestsForSamePage_CoalesceOnSingleTask()
     {
         if (!File.Exists(PragmaticBook)) return;
