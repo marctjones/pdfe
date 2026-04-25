@@ -293,7 +293,17 @@ public partial class MainWindowViewModel
             });
 
             System.Collections.Generic.List<PdfSearchService.SearchMatch> matches;
-            if (doc != null)
+            // Prefer the pre-built text index when available — searches
+            // become near-instant because per-page extraction has already
+            // happened. Fall back to live extraction while the index is
+            // still being built or for unindexed docs.
+            var idx = TextIndex;
+            if (idx != null && idx.IsReady)
+            {
+                matches = _searchService.Search(idx, query, caseSensitive, wholeWords,
+                    useRegex: false, cancellationToken: token, progress: progress);
+            }
+            else if (doc != null)
             {
                 matches = _searchService.Search(doc, query, caseSensitive, wholeWords,
                     useRegex: false, cancellationToken: token, progress: progress);

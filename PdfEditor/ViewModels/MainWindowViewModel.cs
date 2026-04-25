@@ -61,6 +61,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _operationStatus = string.Empty;
     private bool _hasInMemoryModifications; // Tracks if document has been modified in-memory (e.g., redactions applied)
     private Services.ThumbnailCacheService? _thumbnailCache;
+    internal Services.DocumentTextIndex? TextIndex;
+    private System.Threading.CancellationTokenSource? _indexBuildCts;
 
     /// <summary>
     /// Tracks whether the user is in an "auto-fit" zoom state. When set to
@@ -873,6 +875,32 @@ public partial class MainWindowViewModel : ViewModelBase
 
             _logger.LogInformation(">>> STEP 8: Creating thumbnail placeholders (lazy load)");
             await LoadPageThumbnailsAsync();
+
+            // Kick off the text index build in the background. First
+            // search after this completes is sub-second instead of the
+            // multi-second per-keystroke walk we used to do live.
+            _indexBuildCts?.Cancel();
+            _indexBuildCts = new System.Threading.CancellationTokenSource();
+            TextIndex = new Services.DocumentTextIndex(PdfCoreDocument!,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            var indexCts = _indexBuildCts;
+            var totalPagesForIndex = TotalPages;
+            var indexProgress = new Progress<(int Done, int Total)>(p =>
+            {
+                if (indexCts.IsCancellationRequested) return;
+                // Don't overwrite a "Searching…" / "Rendering…" status —
+                // index building runs alongside other ops and shouldn't
+                // hijack the bar. Only show indexing progress when nothing
+                // else is in flight.
+                if (string.IsNullOrEmpty(OperationStatus) ||
+                    OperationStatus.StartsWith("Indexing"))
+                {
+                    OperationStatus = p.Done < p.Total
+                        ? $"Indexing for search… {p.Done}/{p.Total}"
+                        : string.Empty;
+                }
+            });
+            _ = TextIndex.BuildAsync(indexProgress, indexCts.Token);
 
             _logger.LogInformation(">>> STEP 9: RaisePropertyChanged(TotalPages)");
             this.RaisePropertyChanged(nameof(TotalPages));
