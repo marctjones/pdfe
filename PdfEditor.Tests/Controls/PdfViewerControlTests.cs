@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using FluentAssertions;
 using PdfEditor.Controls;
 using PdfEditor.Tests.Utilities;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 using PdfCoreDocument = Pdfe.Core.Document.PdfDocument;
@@ -270,22 +271,21 @@ public class PdfViewerControlTests
         // Arrange
         var pdfPath = TestPdfGenerator.CreateMultiPagePdf("PdfViewerControlTests_PageEvent", pageCount: 3);
         var control = new PdfViewerControl();
-        var eventFired = false;
-        int? newPageNumber = null;
+        int? observedPageNumber = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             var doc = PdfCoreDocument.Open(pdfPath);
             control.Document = doc;
+            // Subscribe inside the same UI-thread queue to guarantee the
+            // handler is wired before any later property change can route
+            // through it. We filter on PageNumber == 2 so the page-1 render
+            // that the Document setter kicks off doesn't trip us.
+            control.PageChanged += (s, e) =>
+            {
+                if (e.PageNumber == 2) observedPageNumber = e.PageNumber;
+            };
         });
-
-        await Task.Delay(500);
-
-        control.PageChanged += (s, e) =>
-        {
-            eventFired = true;
-            newPageNumber = e.PageNumber;
-        };
 
         // Act
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -293,11 +293,24 @@ public class PdfViewerControlTests
             control.CurrentPage = 2;
         });
 
-        await Task.Delay(300); // Wait for event to fire
+        // Poll for the event with a long deadline. The PageChanged chain is:
+        //   property hook → async void OnCurrentPageChanged
+        //                 → await RenderCurrentPageAsync (Task.Run + dispatcher hop)
+        //                 → PageChanged?.Invoke(...)
+        // Under shared-dispatcher load (other AvaloniaFact tests sharing the
+        // process) the threadpool render and the dispatcher round-trip can
+        // run several seconds. Polling lets us yield back to the dispatcher
+        // repeatedly so its work queue actually drains.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (DateTime.UtcNow < deadline && observedPageNumber == null)
+        {
+            await Task.Delay(50);
+        }
 
         // Assert
-        eventFired.Should().BeTrue();
-        newPageNumber.Should().Be(2);
+        observedPageNumber.Should().Be(2,
+            "PageChanged should fire after CurrentPage advances; if this times out, " +
+            "the OnCurrentPageChanged → RenderCurrentPageAsync → event chain stalled.");
 
         // Cleanup
         control.Document?.Dispose();
