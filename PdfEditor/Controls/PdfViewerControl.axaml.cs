@@ -216,26 +216,33 @@ public partial class PdfViewerControl : UserControl
 
         foreach (var h in highlights)
         {
-            // Semi-transparent yellow background behind the text makes
-            // it pop even when the overlay rect is still there. Then a
-            // bright red outline + red text labels the leak clearly.
+            // Color code by source: yellow for structural (we have the
+            // exact characters), orange for differential-OCR (recovered
+            // from raster — confidence is OCR-typical, less certain).
+            var (fill, stroke, ink) = h.Source == PdfEditor.Models.HiddenTextSource.DifferentialOcr
+                ? (Color.FromArgb(220, 255, 165, 0),  // orange
+                   Color.FromArgb(255, 200, 80, 0),
+                   Color.FromArgb(255, 120, 40, 0))
+                : (Color.FromArgb(230, 255, 255, 0),  // yellow
+                   Color.FromArgb(255, 220, 20, 20),
+                   Color.FromArgb(255, 180, 0, 0));
+
             var bg = new Rectangle
             {
                 Width = Math.Max(h.ScreenBounds.Width, 8),
                 Height = Math.Max(h.ScreenBounds.Height, 8),
-                Fill = new SolidColorBrush(Color.FromArgb(230, 255, 255, 0)), // yellow
-                Stroke = new SolidColorBrush(Color.FromArgb(255, 220, 20, 20)), // red
+                Fill = new SolidColorBrush(fill),
+                Stroke = new SolidColorBrush(stroke),
                 StrokeThickness = 2,
             };
             Canvas.SetLeft(bg, h.ScreenBounds.X);
             Canvas.SetTop(bg, h.ScreenBounds.Y);
             layer.Children.Add(bg);
 
-            // Render the revealed text itself on top of the yellow box.
             var label = new TextBlock
             {
                 Text = h.Text,
-                Foreground = new SolidColorBrush(Color.FromArgb(255, 180, 0, 0)), // dark red
+                Foreground = new SolidColorBrush(ink),
                 FontWeight = FontWeight.Bold,
                 FontSize = Math.Max(10, h.ScreenBounds.Height * 0.75),
                 TextWrapping = TextWrapping.NoWrap,

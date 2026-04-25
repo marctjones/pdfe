@@ -113,6 +113,11 @@
                           IsEnabled="{Binding IsDocumentLoaded}"
                           ToggleType="CheckBox"
                           IsChecked="{Binding RevealHiddenText, Mode=TwoWay}" />
+                <MenuItem Header="Reveal _Rasterized Hidden Text (deep / OCR)"
+                          ToolTip.Tip="Also run differential OCR: render the page with overlays stripped, OCR both versions, and surface words present only in the underlying raster. Slower; requires 'tesseract' on PATH."
+                          IsEnabled="{Binding IsDocumentLoaded}"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding RevealRasterizedHidden, Mode=TwoWay}" />
                 <Separator/>
                 <MenuItem Header="_Preferences..." Command="{Binding ShowPreferencesCommand}" InputGesture="Ctrl+,">
                     <MenuItem.Icon><TextBlock Text="⚙"/></MenuItem.Icon>
