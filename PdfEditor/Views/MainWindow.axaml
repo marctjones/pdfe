@@ -133,16 +133,12 @@
                 <MenuItem Header="Fit _Width" Command="{Binding ZoomFitWidthCommand}" InputGesture="Ctrl+1"/>
                 <MenuItem Header="Fit _Page" Command="{Binding ZoomFitPageCommand}" InputGesture="Ctrl+2"/>
                 <Separator/>
-                <MenuItem Header="Show _Thumbnails">
-                    <MenuItem.Icon>
-                        <TextBlock Text="✓"/>
-                    </MenuItem.Icon>
-                </MenuItem>
-                <MenuItem Header="Show _Clipboard History">
-                    <MenuItem.Icon>
-                        <TextBlock Text="✓"/>
-                    </MenuItem.Icon>
-                </MenuItem>
+                <MenuItem Header="Show _Thumbnails"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsThumbnailsSidebarVisible, Mode=TwoWay}"/>
+                <MenuItem Header="Show _Clipboard History"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsClipboardSidebarVisible, Mode=TwoWay}"/>
             </MenuItem>
 
             <!-- HELP MENU -->
@@ -357,11 +353,17 @@
             </Grid>
         </Border>
 
-        <!-- Main Content Area -->
-        <Grid Grid.Row="4" ColumnDefinitions="200,*,250">
+        <!-- Main Content Area. Auto/Auto on the sidebar columns lets them
+             collapse to 0 width when their Border's IsVisible flips false,
+             so toggling Show Thumbnails / Show Clipboard History gives the
+             central pane the freed space rather than just blanking the
+             column. -->
+        <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto">
 
             <!-- Thumbnail Sidebar -->
             <Border Grid.Column="0"
+                    Width="200"
+                    IsVisible="{Binding IsThumbnailsSidebarVisible}"
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
@@ -456,6 +458,8 @@
 
             <!-- Clipboard History Sidebar -->
             <Border Grid.Column="2"
+                    Width="250"
+                    IsVisible="{Binding IsClipboardSidebarVisible}"
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1,0,0,0">
