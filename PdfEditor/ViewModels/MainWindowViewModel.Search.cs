@@ -30,7 +30,10 @@ public partial class MainWindowViewModel
     // ~30 s, so by the time the user finished typing they had a queue of
     // overlapping searches and the foreground felt unresponsive.
     private CancellationTokenSource? _searchCts;
-    private const int SearchDebounceMs = 300;
+    // Pause-after-typing window before kicking a search. 300 ms felt
+    // sluggish; 150 ms is short enough to feel "live" but still cancels
+    // intermediate keystrokes when typing a multi-letter word at speed.
+    private const int SearchDebounceMs = 150;
 
     // Search Properties
     public string SearchText
@@ -141,6 +144,7 @@ public partial class MainWindowViewModel
     public ReactiveCommand<Unit, Unit>? FindNextCommand { get; private set; }
     public ReactiveCommand<Unit, Unit>? FindPreviousCommand { get; private set; }
     public ReactiveCommand<Unit, Unit>? CloseSearchCommand { get; private set; }
+    public ReactiveCommand<Unit, Unit>? FindCommand { get; private set; }
 
     /// <summary>
     /// Initialize search commands (call from main constructor)
@@ -151,6 +155,32 @@ public partial class MainWindowViewModel
         FindNextCommand = ReactiveCommand.Create(FindNext);
         FindPreviousCommand = ReactiveCommand.Create(FindPrevious);
         CloseSearchCommand = ReactiveCommand.Create(CloseSearch);
+        // Manual "Find" trigger — same code path as type-and-pause but
+        // bypasses the debounce. Bound to the Find button and to the
+        // Enter key in the search box (handled in MainWindow.axaml.cs).
+        FindCommand = ReactiveCommand.Create(FindNow);
+    }
+
+    /// <summary>
+    /// Run a search immediately (no debounce). Cancels any pending
+    /// debounced search first so we don't double-search.
+    /// </summary>
+    public void FindNow()
+    {
+        _searchCts?.Cancel();
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            ClearSearch();
+            return;
+        }
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        var token = cts.Token;
+        OperationStatus = "Searching…";
+        var query = _searchText;
+        var caseSensitive = _searchCaseSensitive;
+        var wholeWords = _searchWholeWords;
+        Task.Run(() => PerformSearch(query, caseSensitive, wholeWords, token));
     }
 
     /// <summary>

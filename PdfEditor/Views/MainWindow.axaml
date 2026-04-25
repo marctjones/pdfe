@@ -283,7 +283,7 @@
                 BorderThickness="0,0,0,1"
                 Padding="8,6"
                 IsVisible="{Binding IsSearchVisible}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <!-- Search Label -->
                 <TextBlock Grid.Column="0" Text="Find:"
                            VerticalAlignment="Center"
@@ -291,52 +291,64 @@
                            FontSize="12"
                            Foreground="{DynamicResource TextSecondaryBrush}"/>
 
-                <!-- Search TextBox -->
+                <!-- Search TextBox. KeyDown is wired in code-behind so
+                     Enter triggers search immediately (in addition to
+                     the type-and-pause debounce). -->
                 <TextBox x:Name="SearchTextBox"
                          Grid.Column="1"
-                         Text="{Binding SearchText}"
-                         Watermark="Search text..."
+                         Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Watermark="Search text… (auto-searches as you type, or press Enter)"
                          MinWidth="300"
                          Margin="0,0,8,0"
+                         KeyDown="OnSearchTextBoxKeyDown"
                          AutomationProperties.Name="Search Text"
                          AutomationProperties.HelpText="Enter text to search for in the document"/>
 
+                <!-- Find button — manual fallback if auto-search isn't
+                     obvious to the user. -->
+                <Button Grid.Column="2"
+                        Content="Find"
+                        Command="{Binding FindCommand}"
+                        Classes="modern-button compact"
+                        Padding="12,4"
+                        Margin="0,0,8,0"
+                        AutomationProperties.Name="Find"
+                        AutomationProperties.HelpText="Search the document for the entered text"/>
+
                 <!-- Case Sensitive Checkbox -->
-                <CheckBox Grid.Column="2"
+                <CheckBox Grid.Column="3"
                           IsChecked="{Binding SearchCaseSensitive}"
                           Content="Case sensitive"
                           Margin="0,0,8,0"/>
 
                 <!-- Whole Words Checkbox -->
-                <CheckBox Grid.Column="3"
+                <CheckBox Grid.Column="4"
                           IsChecked="{Binding SearchWholeWords}"
                           Content="Whole words"
                           Margin="0,0,8,0"/>
 
                 <!-- Previous Button -->
-                <Button Grid.Column="4"
+                <Button Grid.Column="5"
                         Content="◀"
                         Command="{Binding FindPreviousCommand}"
                         Classes="modern-button compact"
                         Padding="8,4"
                         Margin="0,0,4,0"
-                        ToolTip.Tip="Previous (Shift+F3)"
                         AutomationProperties.Name="Find Previous"
                         AutomationProperties.HelpText="Navigate to previous search result"/>
 
                 <!-- Next Button -->
-                <Button Grid.Column="5"
+                <Button Grid.Column="6"
                         Content="▶"
                         Command="{Binding FindNextCommand}"
                         Classes="modern-button compact"
                         Padding="8,4"
                         Margin="0,0,8,0"
-                        ToolTip.Tip="Next (F3)"
                         AutomationProperties.Name="Find Next"
                         AutomationProperties.HelpText="Navigate to next search result"/>
 
                 <!-- Result Counter -->
-                <TextBlock Grid.Column="6"
+                <TextBlock Grid.Column="7"
                            Text="{Binding SearchResultText}"
                            VerticalAlignment="Center"
                            FontSize="12"
@@ -345,12 +357,13 @@
                            MinWidth="80"/>
 
                 <!-- Close Button -->
-                <Button Grid.Column="7"
+                <Button Grid.Column="8"
                         Content="✕"
                         Command="{Binding CloseSearchCommand}"
                         Classes="modern-button compact"
                         Padding="8,4"
-                        ToolTip.Tip="Close (Esc)"/>
+                        AutomationProperties.Name="Close Search"
+                        AutomationProperties.HelpText="Close the find bar"/>
             </Grid>
         </Border>
 

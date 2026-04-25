@@ -90,6 +90,26 @@ public partial class MainWindow : Window
         UpdateSearchHighlightsCanvas();
     }
 
+    /// <summary>
+    /// Enter inside the search box triggers an immediate search (skips
+    /// the debounce). Escape closes the search bar.
+    /// </summary>
+    private void OnSearchTextBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        if (e.Key == Key.Enter)
+        {
+            vm.FindCommand?.Execute().Subscribe();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            vm.CloseSearchCommand?.Execute().Subscribe();
+            e.Handled = true;
+        }
+    }
+
     private void UpdateSearchHighlightsCanvas()
     {
         if (_pdfViewerControl == null)
