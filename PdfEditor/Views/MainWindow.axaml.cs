@@ -62,6 +62,22 @@ public partial class MainWindow : Window
                     UpdateRedactionOverlays();
                 }
             };
+
+            // Push the viewer's actual size into the VM so Fit Width / Fit
+            // Page have a real viewport to fit against. Pre-fix these always
+            // saw ViewportWidth = 0 (nothing wired the property) and silently
+            // fell back to ZoomLevel = 1.0, which is "Actual Size" — not the
+            // fit the user asked for.
+            if (_pdfViewerControl != null)
+            {
+                viewModel.ViewportWidth = _pdfViewerControl.Bounds.Width;
+                viewModel.ViewportHeight = _pdfViewerControl.Bounds.Height;
+                _pdfViewerControl.SizeChanged += (s, args) =>
+                {
+                    viewModel.ViewportWidth = args.NewSize.Width;
+                    viewModel.ViewportHeight = args.NewSize.Height;
+                };
+            }
         }
     }
 
