@@ -875,8 +875,39 @@ internal class RenderContext
         catch { typeface = null; }
 
         if (typeface == null) return null;
+
+        // Sanity-probe the wrapped font — for some CFF subsets (most commonly
+        // dingbat fonts produced by the XEP toolchain) Skia loads our wrapper
+        // and resolves the cmap, but its CFF interpreter finds no charstring
+        // outlines and silently draws nothing. Detect that and fall back to
+        // the system-font path so the user at least sees *some* glyph for the
+        // codepoint instead of empty whitespace.
+        if (isCff && !ProducesGlyphOutlines(typeface))
+        {
+            typeface.Dispose();
+            return null;
+        }
+
         _embeddedTypefaces[fontName] = typeface;
         return typeface;
+    }
+
+    private static bool ProducesGlyphOutlines(SKTypeface typeface)
+    {
+        // Sample up to 16 evenly-distributed glyph indices; if none have an
+        // outline, the CFF program is unreadable for our purposes.
+        int n = typeface.GlyphCount;
+        if (n <= 1) return false;
+        int probes = Math.Min(16, n - 1);
+        int step = Math.Max(1, (n - 1) / probes);
+        using var font = new SKFont(typeface, 100f);
+        for (int i = 1; i <= probes; i++)
+        {
+            ushort gid = (ushort)Math.Min(n - 1, i * step);
+            using var p = font.GetGlyphPath(gid);
+            if (p != null && p.PointCount > 0) return true;
+        }
+        return false;
     }
 
     private byte[]? TryWrapCffAsOpenType(
@@ -1046,30 +1077,45 @@ internal class RenderContext
 
     private SKTypeface GetTypeface(string baseFont)
     {
-        // Map standard PDF fonts to system fonts
-        var family = baseFont switch
-        {
-            "Helvetica" or "Helvetica-Bold" or "Helvetica-Oblique" or "Helvetica-BoldOblique"
-                => "Helvetica",
-            "Times-Roman" or "Times-Bold" or "Times-Italic" or "Times-BoldItalic"
-                => "Times New Roman",
-            "Courier" or "Courier-Bold" or "Courier-Oblique" or "Courier-BoldOblique"
-                => "Courier New",
-            "Symbol" => "Symbol",
-            "ZapfDingbats" => "Wingdings",
-            _ => "Sans-Serif" // Default fallback
-        };
+        // PDF subset fonts wear a 6-letter+'+' prefix (e.g. GFEDCB+MyriadPro-Semibold).
+        // Strip it before matching — otherwise even "ZapfDingbats" subsets fall
+        // through to Sans-Serif and the glyphs come out as missing-glyph boxes.
+        var bareName = baseFont;
+        if (bareName.Length >= 8 && bareName[6] == '+')
+            bareName = bareName.Substring(7);
+
+        // Match standard PDF base fonts. Allow both exact and prefix matches so
+        // family-named subsets ("ZapfDingbatsStd", "MyriadPro-Semibold", etc.)
+        // route to the right system substitute.
+        string family;
+        if (Starts(bareName, "Helvetica") || Starts(bareName, "Arial"))
+            family = "Helvetica";
+        else if (Starts(bareName, "Times") || Starts(bareName, "Bookman"))
+            family = "Times New Roman";
+        else if (Starts(bareName, "Courier"))
+            family = "Courier New";
+        else if (Starts(bareName, "Symbol"))
+            family = "Symbol";
+        else if (bareName.Contains("Dingbat") || bareName.Contains("Wingding"))
+            // Linux ships NotoSansSymbols2 / OpenSymbol that cover U+27A4 etc.;
+            // Skia's family-name lookup falls through to whichever is installed.
+            family = "Noto Sans Symbols2";
+        else
+            family = "Sans-Serif";
 
         var style = SKFontStyle.Normal;
-        if (baseFont.Contains("Bold") && baseFont.Contains("Italic"))
+        if (bareName.Contains("Bold") && (bareName.Contains("Italic") || bareName.Contains("Oblique")))
             style = SKFontStyle.BoldItalic;
-        else if (baseFont.Contains("Bold"))
+        else if (bareName.Contains("Bold") || bareName.Contains("Semibold") || bareName.Contains("Medium"))
             style = SKFontStyle.Bold;
-        else if (baseFont.Contains("Italic") || baseFont.Contains("Oblique"))
+        else if (bareName.Contains("Italic") || bareName.Contains("Oblique"))
             style = SKFontStyle.Italic;
 
         return SKTypeface.FromFamilyName(family, style) ?? SKTypeface.Default;
     }
+
+    private static bool Starts(string s, string prefix) =>
+        s.StartsWith(prefix, StringComparison.Ordinal);
 
     private void TextMove(double tx, double ty)
     {

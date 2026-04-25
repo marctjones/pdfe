@@ -52,6 +52,39 @@ public class MultiEmbeddedFontLayoutTests
             $"Largest gap actually observed: {maxGap}px.");
     }
 
+    [Fact]
+    public void Page3_BulletColumn_HasInk()
+    {
+        // The bullet (➤) sits at PDF x=108pt next to the first reviewer
+        // ("Johanna Rothman"). For the rendered ZapfDingbats glyph, accept
+        // either an embedded CFF outline (when wrapping succeeds) or a
+        // system-symbol-font fallback drawn via the GetTypeface path —
+        // both produce ink in roughly the same place.
+        if (!File.Exists(BookPath)) return;
+
+        using var doc = PdfDocument.Open(File.ReadAllBytes(BookPath));
+        var page = doc.GetPage(3);
+        using var bmp = new SkiaRenderer().RenderPage(page, new RenderOptions { Dpi = 150 });
+
+        // Bullet baseline ≈ y=412pt → screenY = (648 - 412) * 150/72 ≈ 491px.
+        int xCenter = (int)(108 * 150 / 72.0) + 8;
+        int yCenter = (int)((648 - 412) * 150 / 72.0);
+        int inkCount = 0;
+        for (int y = yCenter - 15; y < yCenter + 15; y++)
+        {
+            if (y < 0 || y >= bmp.Height) continue;
+            for (int x = xCenter - 15; x < xCenter + 15; x++)
+            {
+                if (x < 0 || x >= bmp.Width) continue;
+                var c = bmp.GetPixel(x, y);
+                if (c.Red < 100 && c.Green < 100 && c.Blue < 100) inkCount++;
+            }
+        }
+        inkCount.Should().BeGreaterThan(20,
+            $"the dingbats bullet must produce visible ink near ({xCenter},{yCenter}); " +
+            $"got {inkCount} ink pixels — see commit-message context for the wrap-fallback path.");
+    }
+
     /// <summary>
     /// Largest run of all-white pixel columns lying *between* two ink columns
     /// in the given y band. Ignores leading/trailing whitespace.
