@@ -248,9 +248,14 @@ public class PdfPage
     /// </summary>
     public PdfDictionary? GetFont(string fontName)
     {
-        var fonts = Resources?.GetDictionaryOrNull("Font");
-        if (fonts == null)
-            return null;
+        // /Font is often an indirect reference (most browsers/Word/WeasyPrint
+        // emit `/Font N 0 R`), and Resources is sometimes one too. Resolve
+        // both, otherwise the font lookup silently misses and the renderer
+        // falls back to a default fallback typeface.
+        var fontsObj = Resources?.GetOptional("Font");
+        if (fontsObj == null) return null;
+        var fonts = _document.Resolve(fontsObj) as PdfDictionary;
+        if (fonts == null) return null;
 
         var fontObj = fonts.GetOptional(fontName);
         if (fontObj == null)
