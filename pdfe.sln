@@ -21,6 +21,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PdfEditor.Tests", "PdfEdito
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pdfe.Cli.Tests", "Pdfe.Cli.Tests\Pdfe.Cli.Tests.csproj", "{0E0EAC56-8258-4758-B1E0-4CAE804D1413}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pdfe.Ocr", "Pdfe.Ocr\Pdfe.Ocr.csproj", "{D6639C1C-D996-43E5-B4DA-D949322E26CA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pdfe.Ocr.Tests", "Pdfe.Ocr.Tests\Pdfe.Ocr.Tests.csproj", "{8E4FCBBF-3440-4153-963B-BE9F99C3565A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -66,5 +70,13 @@ Global
 		{0E0EAC56-8258-4758-B1E0-4CAE804D1413}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0E0EAC56-8258-4758-B1E0-4CAE804D1413}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0E0EAC56-8258-4758-B1E0-4CAE804D1413}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D6639C1C-D996-43E5-B4DA-D949322E26CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D6639C1C-D996-43E5-B4DA-D949322E26CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D6639C1C-D996-43E5-B4DA-D949322E26CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D6639C1C-D996-43E5-B4DA-D949322E26CA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8E4FCBBF-3440-4153-963B-BE9F99C3565A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8E4FCBBF-3440-4153-963B-BE9F99C3565A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8E4FCBBF-3440-4153-963B-BE9F99C3565A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8E4FCBBF-3440-4153-963B-BE9F99C3565A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
