@@ -63,19 +63,22 @@ public partial class MainWindow : Window
                 }
             };
 
-            // Push the viewer's actual size into the VM so Fit Width / Fit
-            // Page have a real viewport to fit against. Pre-fix these always
-            // saw ViewportWidth = 0 (nothing wired the property) and silently
-            // fell back to ZoomLevel = 1.0, which is "Actual Size" — not the
-            // fit the user asked for.
+            // Push the viewer's *visible* viewport (inside-the-scrollbars)
+            // into the VM so Fit Width / Fit Page fit against what the user
+            // actually sees, not the outer control bounds. Using outer
+            // bounds gave a result ~16-20 DIPs too big — exactly the strip
+            // a vertical scrollbar reserves — which made Fit Width pop a
+            // horizontal scrollbar that then stole more space and broke
+            // the fit recursively.
             if (_pdfViewerControl != null)
             {
-                viewModel.ViewportWidth = _pdfViewerControl.Bounds.Width;
-                viewModel.ViewportHeight = _pdfViewerControl.Bounds.Height;
-                _pdfViewerControl.SizeChanged += (s, args) =>
+                var initial = _pdfViewerControl.GetVisibleViewportSize();
+                viewModel.ViewportWidth = initial.Width;
+                viewModel.ViewportHeight = initial.Height;
+                _pdfViewerControl.VisibleViewportChanged += (s, size) =>
                 {
-                    viewModel.ViewportWidth = args.NewSize.Width;
-                    viewModel.ViewportHeight = args.NewSize.Height;
+                    viewModel.ViewportWidth = size.Width;
+                    viewModel.ViewportHeight = size.Height;
                 };
             }
         }
