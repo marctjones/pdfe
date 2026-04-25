@@ -52,12 +52,15 @@ public class TestAppBuilder
 }
 
 /// <summary>
-/// Minimal Avalonia application for testing
+/// Minimal Avalonia application for testing.
+/// Loads FluentTheme so controls (TreeView, TextBox, Button) actually
+/// build their visual templates — without it they're invisible nodes
+/// with no descendants, breaking any click-simulation test.
 /// </summary>
 public class TestApp : Application
 {
     public override void Initialize()
     {
-        // Minimal initialization for headless testing
+        Styles.Add(new Avalonia.Themes.Fluent.FluentTheme());
     }
 }
