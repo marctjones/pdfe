@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Collections;
@@ -11,6 +13,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Pdfe.Core.Document;
 using Pdfe.Rendering;
+using PdfEditor.Imaging;
 using SkiaSharp;
 
 namespace PdfEditor.Controls;
@@ -150,10 +153,26 @@ public partial class PdfViewerControl : UserControl
     private ScaleTransform? _imageScaleTransform;
     private ScaleTransform? _overlayScaleTransform;
     private Grid? _loadingOverlay;
+    private ProgressBar? _loadingProgressBar;
     private Grid? _errorOverlay;
     private TextBlock? _errorMessageText;
     private Point _dragStart;
     private bool _isDragging;
+
+    // Default render DPI for the on-screen viewer. 200 DPI was overkill —
+    // a US-Letter page at 200 DPI is 1700×2200 (3.7M px); at 120 DPI it's
+    // 1020×1320 (1.3M px), 3× less rasterisation work, and the difference
+    // is invisible at typical zoom levels.
+    private const int DefaultRenderDpi = 120;
+
+    // LRU bitmap cache so flipping back to a recently-viewed page is
+    // instant. Capped small — bitmaps for a 200-page book can be ~6 MB
+    // each in BGRA, so we trade a few tens of MB for snappy navigation.
+    private const int PageCacheCapacity = 6;
+    private readonly LinkedList<(int Page, int Dpi, WriteableBitmap Bmp)> _pageCache = new();
+
+    // Tracks the in-flight render so rapid paging cancels stale work.
+    private CancellationTokenSource? _renderCts;
 
     #endregion
 
@@ -262,6 +281,7 @@ public partial class PdfViewerControl : UserControl
         _overlayCanvas = this.FindControl<Canvas>("OverlayCanvas");
         _interactionLayer = this.FindControl<Canvas>("InteractionLayer");
         _loadingOverlay = this.FindControl<Grid>("LoadingOverlay");
+        _loadingProgressBar = this.FindControl<ProgressBar>("LoadingProgressBar");
         _errorOverlay = this.FindControl<Grid>("ErrorOverlay");
         _errorMessageText = this.FindControl<TextBlock>("ErrorMessageText");
 
@@ -302,10 +322,14 @@ public partial class PdfViewerControl : UserControl
 
     private void OnLoadingStateChanged()
     {
+        // Show the thin top-of-viewer progress bar while a render is in
+        // flight. (The full-screen overlay is kept hidden — it was always
+        // visually overpowering for sub-second renders and is replaced by
+        // the indeterminate ProgressBar.)
+        if (_loadingProgressBar != null)
+            _loadingProgressBar.IsVisible = IsLoading;
         if (_loadingOverlay != null)
-        {
-            _loadingOverlay.IsVisible = IsLoading;
-        }
+            _loadingOverlay.IsVisible = false;
     }
 
     private void OnErrorStateChanged()
@@ -328,6 +352,12 @@ public partial class PdfViewerControl : UserControl
 
     private async void OnDocumentChanged()
     {
+        // Drop cached bitmaps from the prior document (would render at wrong
+        // pages otherwise) and cancel any render that was still finishing
+        // for that document.
+        InvalidatePageCache();
+        _renderCts?.Cancel();
+
         if (Document != null)
         {
             await RenderCurrentPageAsync();
@@ -352,27 +382,63 @@ public partial class PdfViewerControl : UserControl
         if (Document == null || CurrentPage < 1 || CurrentPage > Document.PageCount)
             return;
 
+        // Cache hit short-circuits the renderer entirely — this is the
+        // common case for backwards-paging, undoing redactions, and
+        // toggling overlays. Set Image.Source immediately so the user
+        // doesn't even see a loading flicker.
+        if (TryGetCached(CurrentPage, DefaultRenderDpi, out var cached))
+        {
+            if (_pdfImage != null) _pdfImage.Source = cached;
+            HasError = false;
+            ErrorMessage = null;
+            return;
+        }
+
+        // Cancel any prior in-flight render. If the user is paging through
+        // quickly we'd rather skip the now-stale page than make them wait.
+        _renderCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _renderCts = cts;
+        var token = cts.Token;
+
+        var pageNumber = CurrentPage;
+        var doc = Document;
         try
         {
             IsLoading = true;
             HasError = false;
             ErrorMessage = null;
 
-            // Render page on background thread
-            var page = Document.GetPage(CurrentPage);
-            var options = new Pdfe.Rendering.RenderOptions { Dpi = 200 }; // Higher DPI for better readability
-            var skBitmap = await Task.Run(() => _renderer.RenderPage(page, options));
-
-            // Convert to Avalonia bitmap on UI thread
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            var skBitmap = await Task.Run(() =>
             {
-                var avaloniaBitmap = ConvertToAvaloniaBitmap(skBitmap);
-                if (_pdfImage != null)
+                token.ThrowIfCancellationRequested();
+                var page = doc.GetPage(pageNumber);
+                var options = new Pdfe.Rendering.RenderOptions { Dpi = DefaultRenderDpi };
+                return _renderer.RenderPage(page, options);
+            }, token);
+
+            try
+            {
+                // The user may have paged again while we were rendering —
+                // honour the cancellation rather than overwriting the
+                // freshly-rendered new page with the stale one.
+                if (token.IsCancellationRequested) return;
+
+                var bitmap = SkiaInterop.ToAvaloniaBitmap(skBitmap);
+                if (bitmap != null)
                 {
-                    _pdfImage.Source = avaloniaBitmap;
+                    AddToCache(pageNumber, DefaultRenderDpi, bitmap);
+                    if (_pdfImage != null) _pdfImage.Source = bitmap;
                 }
-                skBitmap.Dispose();
-            });
+            }
+            finally
+            {
+                skBitmap?.Dispose();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when paging quickly — drop the stale render silently.
         }
         catch (Exception ex)
         {
@@ -381,16 +447,56 @@ public partial class PdfViewerControl : UserControl
         }
         finally
         {
-            IsLoading = false;
+            // Only the most-recent render should clear IsLoading; older
+            // races would otherwise flicker the overlay back on.
+            if (_renderCts == cts)
+                IsLoading = false;
         }
     }
 
-    private static Bitmap ConvertToAvaloniaBitmap(SKBitmap skBitmap)
+    private bool TryGetCached(int page, int dpi, out WriteableBitmap? bmp)
     {
-        using var image = SKImage.FromBitmap(skBitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-        using var stream = data.AsStream();
-        return new Bitmap(stream);
+        for (var node = _pageCache.First; node != null; node = node.Next)
+        {
+            if (node.Value.Page == page && node.Value.Dpi == dpi)
+            {
+                // Move to front (LRU touch).
+                _pageCache.Remove(node);
+                _pageCache.AddFirst(node);
+                bmp = node.Value.Bmp;
+                return true;
+            }
+        }
+        bmp = null;
+        return false;
+    }
+
+    private void AddToCache(int page, int dpi, WriteableBitmap bmp)
+    {
+        // Replace existing entry for same key (e.g. re-render after edit).
+        for (var node = _pageCache.First; node != null; node = node.Next)
+        {
+            if (node.Value.Page == page && node.Value.Dpi == dpi)
+            {
+                node.Value.Bmp.Dispose();
+                _pageCache.Remove(node);
+                break;
+            }
+        }
+        _pageCache.AddFirst((page, dpi, bmp));
+        while (_pageCache.Count > PageCacheCapacity)
+        {
+            var last = _pageCache.Last!;
+            _pageCache.RemoveLast();
+            last.Value.Bmp.Dispose();
+        }
+    }
+
+    /// <summary>Drop the cached bitmaps — call when document changes or content edits invalidate prior renders.</summary>
+    public void InvalidatePageCache()
+    {
+        foreach (var entry in _pageCache) entry.Bmp.Dispose();
+        _pageCache.Clear();
     }
 
     private void ClearDisplay()
