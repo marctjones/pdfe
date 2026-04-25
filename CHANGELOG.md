@@ -4,7 +4,7 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
-## [2.0.0] — Unreleased
+## [2.0.0] — 2026-04-25
 
 The headline of v2.0 is **a complete rewrite of the PDF stack**. v1.0 sat on
 top of PdfPig + PDFsharp + PDFtoImage (PDFium) + Tesseract.NET; v2.0 ships a
