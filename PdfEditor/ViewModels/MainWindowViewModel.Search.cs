@@ -271,11 +271,18 @@ public partial class MainWindowViewModel
             // Get page height for coordinate conversion (PDF uses bottom-left origin)
             var pageHeight = _documentService.GetPageHeight(CurrentPageIndex);
 
-            // Convert each match to screen coordinates
-            // The SearchMatch has PDF coordinates (bottom-left origin)
-            // We need to convert to Avalonia coordinates (top-left origin)
-            // Then scale by render DPI (150 DPI rendered / 72 DPI PDF = 2.083x)
-            var dpiScale = 150.0 / 72.0;
+            // Convert each match to screen coordinates.
+            // SearchMatch is in PDF points (bottom-left origin). Flip Y to
+            // Avalonia (top-left), then scale to bitmap DIPs.
+            //
+            // The DPI here MUST match what PdfViewerControl actually renders
+            // at — otherwise highlights drift relative to the page text.
+            // Pre-fix this was hardcoded to 150 (the old PdfRenderService
+            // default) but the viewer now uses 120, which made highlights
+            // appear ~25% too far right and 25% too big — often clipped
+            // off the page entirely, so search "looked broken".
+            const double viewerRenderDpi = 120.0;
+            var dpiScale = viewerRenderDpi / 72.0;
 
             foreach (var match in pageMatches)
             {
