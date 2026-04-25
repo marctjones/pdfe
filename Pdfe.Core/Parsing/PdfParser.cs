@@ -41,6 +41,14 @@ public class PdfParser : IDisposable
     public PdfLexer Lexer => _lexer;
 
     /// <summary>
+    /// Callback used to resolve indirect object references encountered
+    /// while parsing. Set by <see cref="Document.PdfDocument"/> after
+    /// construction. Required for PDFs that use an indirect /Length on
+    /// stream dictionaries (common in PDFs written by LibreOffice, etc.).
+    /// </summary>
+    public Func<int, PdfObject?>? IndirectObjectResolver { get; set; }
+
+    /// <summary>
     /// Current position in the stream.
     /// </summary>
     public long Position => _lexer.Position;
@@ -215,11 +223,24 @@ public class PdfParser : IDisposable
         {
             length = (int)li.Value;
         }
-        else if (lengthObj is PdfReference)
+        else if (lengthObj is PdfReference lenRef)
         {
-            // Length is an indirect reference - this is tricky
-            // For now, we'll need to scan for 'endstream'
-            throw new PdfParseException("Stream length as indirect reference not yet supported. Use PdfDocumentReader instead.");
+            // Indirect /Length. Resolver is wired up by PdfDocument; save
+            // the lexer position, resolve out-of-band, restore, then carry
+            // on reading stream bytes at the original position.
+            if (IndirectObjectResolver == null)
+                throw new PdfParseException(
+                    "Stream /Length is an indirect reference but no resolver is configured.");
+
+            long savedPos = _lexer.Position;
+            var resolved = IndirectObjectResolver(lenRef.ObjectNum);
+            _lexer.Seek(savedPos);
+
+            if (resolved is PdfInteger ri)
+                length = (int)ri.Value;
+            else
+                throw new PdfParseException(
+                    $"Stream /Length reference {lenRef.ObjectNum} did not resolve to an integer.");
         }
         else
         {
