@@ -95,6 +95,12 @@ internal class RenderContext
     // simple-font /Widths). When _currentFontIsType0 is true, content-stream
     // bytes must be parsed 2 at a time and rendered via glyph ID, not Unicode.
     private bool _currentFontIsType0;
+    // True when /FontFile, /FontFile2, or /FontFile3 produced a usable
+    // SKTypeface — i.e. Skia is rendering with the actual PDF font and
+    // its MeasureText reports correct advances. False means we
+    // substituted a system typeface; in that case PDF /Widths (if present)
+    // are the source of truth for cursor advance, not Skia metrics.
+    private bool _currentFontHasEmbeddedProgram;
     private Dictionary<int, float>? _currentCidWidths;
     private float _currentCidDefaultWidth = 1000f;
 
@@ -689,7 +695,9 @@ internal class RenderContext
         // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). When no embedded
         // data is present or the format isn't SkiaSharp-loadable (e.g. /FontFile
         // is raw Type1 PostScript), fall through to the system-font mapping.
-        _currentTypeface = TryLoadEmbeddedTypeface(fontName, fontDict) ?? GetTypeface(baseFont);
+        var embedded = TryLoadEmbeddedTypeface(fontName, fontDict);
+        _currentFontHasEmbeddedProgram = embedded != null;
+        _currentTypeface = embedded ?? GetTypeface(baseFont);
 
         // Type0 (composite CID) fonts need a completely different content-stream
         // parse (2 bytes per character, widths indexed via /W not /Widths).
@@ -1110,7 +1118,7 @@ internal class RenderContext
         if (_currentFontIsType0)
             RenderCidBytes(bytes);
         else
-            RenderText(DecodeTextBytes(bytes));
+            RenderText(DecodeTextBytes(bytes), bytes);
     }
 
     private void ShowTextArray(List<string> operands)
@@ -1128,7 +1136,7 @@ internal class RenderContext
                 if (_currentFontIsType0)
                     RenderCidBytes(bytes);
                 else
-                    RenderText(DecodeTextBytes(bytes));
+                    RenderText(DecodeTextBytes(bytes), bytes);
             }
             else if (double.TryParse(operand, NumberStyles.Float, CultureInfo.InvariantCulture, out var adjustment))
             {
@@ -1145,7 +1153,7 @@ internal class RenderContext
         }
     }
 
-    private void RenderText(string text)
+    private void RenderText(string text, byte[]? sourceBytes = null)
     {
         if (!_inTextBlock || _currentTypeface == null)
             return;
@@ -1164,28 +1172,95 @@ internal class RenderContext
         var x = _textState.TextMatrixE;
         var y = _textState.TextMatrixF + _textState.TextRise;
 
-        // The canvas has been transformed with Scale(scale, -scale) to flip Y for paths.
-        // For text, we need to un-flip it so text appears right-side up.
-        // When the text matrix has non-uniform scaling (xyRatio != 1), squeeze
-        // glyphs horizontally so their on-screen width matches the text-matrix's
-        // X-scale rather than the Y-scale we used for font height.
+        // The canvas has been transformed with Scale(scale, -scale) to flip
+        // Y for paths. Un-flip for text. When the text matrix has non-uniform
+        // X/Y scaling, squeeze glyphs horizontally to match the X-scale.
         _canvas.Save();
         _canvas.Translate(x, y);
         _canvas.Scale(xyRatio, -1);
-        _canvas.DrawText(text, 0, 0, paint);
+
+        bool drawWithPdfWidths =
+            !_currentFontHasEmbeddedProgram &&
+            _currentFontWidths != null &&
+            sourceBytes != null &&
+            text.Length == sourceBytes.Length;
+
+        if (drawWithPdfWidths)
+        {
+            // Walk the bytes in lock-step with the decoded characters,
+            // drawing each glyph at the cumulative PDF-/Widths position
+            // *plus* the character/word spacing the PDF asked for.
+            // Visible layout matches what the PDF author authored
+            // against Times/Helvetica, regardless of the system font we
+            // substituted for the actual glyphs.
+            //
+            // Per-glyph cursor advance after drawing byte b:
+            //     /Widths[b]/1000 * fontSize    (intended glyph width)
+            //   + Tc                             (character spacing)
+            //   + (b == 0x20 ? Tw : 0)           (word spacing on space)
+            //
+            // Multiplied by the horizontal-scaling factor Tz (Th) per
+            // PDF spec 9.4.4.
+            //
+            // We're inside a canvas that's already been scaled by xyRatio
+            // for the X axis, so cursor is in the pre-xyRatio frame.
+            // Tc / Tw are unscaled; we don't apply Tm's xScale here
+            // because the canvas transform handles it.
+            // Per-glyph advance per PDF spec 9.4.4:
+            //   tx = (w0/1000 + Tc + (b == 0x20 ? Tw : 0)) * Tm_scale * Th
+            // With Tf=1 and Tm scale = effectiveSize, Tm_scale = effectiveSize.
+            // Multiplying everything together puts cursor in the canvas frame
+            // we just set up with Scale(xyRatio, -1).
+            float cursor = 0f;
+            float tc = _textState.CharSpacing;
+            float tw = _textState.WordSpacing;
+            float th = _textState.HorizontalScale / 100.0f;
+            for (int i = 0; i < sourceBytes!.Length; i++)
+            {
+                _canvas.DrawText(text[i].ToString(), cursor, 0, paint);
+                int idx = sourceBytes[i] - _currentFontFirstChar;
+                float w = idx >= 0 && idx < _currentFontWidths!.Length
+                    ? _currentFontWidths[idx]
+                    : _currentFontMissingWidth;
+                float spacing = tc + (sourceBytes[i] == 0x20 ? tw : 0f);
+                cursor += (w / 1000f + spacing) * effectiveSize * th;
+            }
+        }
+        else
+        {
+            _canvas.DrawText(text, 0, 0, paint);
+        }
         _canvas.Restore();
 
-        // Advance must match what Skia actually drew above, otherwise the
-        // cursor ends up past (or before) the visible glyph extent and the
-        // next Tj renders with a gap (or overlap). Always use paint.MeasureText
-        // — when the embedded font is loaded it reports the real widths; when
-        // we've substituted a system typeface, the system font's widths are
-        // what Skia drew with, and mixing in PDF /Widths here would diverge
-        // from the visible render. Multiply by xyRatio so the advance lives
-        // in the same scaled coordinate system as the drawn glyphs.
-        var width = paint.MeasureText(text) * xyRatio;
-        var charCount = text.Length;
-        var spaceCount = text.Count(c => c == ' ');
+        // Advance the cursor by what the PDF *intended*, which is not
+        // always what Skia just drew.
+        //   - Embedded font program → Skia loaded the real font, its
+        //     MeasureText is correct.
+        //   - No embedded program but PDF supplies /Widths → trust the
+        //     PDF's explicit widths; the substituted system typeface's
+        //     metrics differ and would compound per-glyph drift into
+        //     visible mid-word gaps (the birth-cert form is the canary).
+        //   - Otherwise fall back to Skia's MeasureText.
+        float widthInFontUnits;
+        bool advanceFromPdfWidths =
+            !_currentFontHasEmbeddedProgram &&
+            _currentFontWidths != null &&
+            sourceBytes != null;
+
+        if (advanceFromPdfWidths)
+        {
+            widthInFontUnits = SumPdfWidths(sourceBytes!) * effectiveSize;
+        }
+        else
+        {
+            widthInFontUnits = paint.MeasureText(text);
+        }
+
+        var width = widthInFontUnits * xyRatio;
+        var charCount = sourceBytes?.Length ?? text.Length;
+        var spaceCount = sourceBytes != null
+            ? sourceBytes.Count(b => b == 0x20)
+            : text.Count(c => c == ' ');
 
         // PDF spec 9.4.4: Tc and Tw are in UNSCALED text space units. Scale by
         // the text matrix's X-scale before adding to device-space advance,
@@ -1199,6 +1274,31 @@ internal class RenderContext
         width *= _textState.HorizontalScale / 100.0f;
 
         _textState.TextMatrixE += width;
+    }
+
+    /// <summary>
+    /// Total advance for <paramref name="bytes"/> in the current simple
+    /// font, expressed as a fraction of the font's em (multiply by font
+    /// size to get points). Indexes <c>_currentFontWidths</c> by
+    /// (byte − FirstChar); falls back to /MissingWidth or 0 for codes
+    /// outside the table.
+    /// </summary>
+    private float SumPdfWidths(byte[] bytes)
+    {
+        if (_currentFontWidths == null || _currentFontWidths.Length == 0) return 0f;
+        float total = 0f;
+        var widths = _currentFontWidths;
+        int firstChar = _currentFontFirstChar;
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            int idx = bytes[i] - firstChar;
+            float w = idx >= 0 && idx < widths.Length
+                ? widths[idx]
+                : _currentFontMissingWidth;
+            // PDF /Widths are in 1/1000 of em.
+            total += w / 1000f;
+        }
+        return total;
     }
 
     // Type0 rendering path. Content-stream bytes come in 2-at-a-time as
