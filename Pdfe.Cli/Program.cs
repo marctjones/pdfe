@@ -2,6 +2,7 @@ using System.CommandLine;
 using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
 using Pdfe.Core.Text.Segmentation;
+using Pdfe.Ocr;
 using Pdfe.Rendering;
 using SkiaSharp;
 
@@ -29,6 +30,7 @@ class Program
             CreateDrawCommand(),
             CreateRedactCommand(),
             CreateAuditCommand(),
+            CreateOcrCommand(),
             CreateDemoCommand()
         };
 
@@ -514,6 +516,74 @@ class Program
                 $"\"hidden_by\": \"{h.HiddenBy}\" }}{sep}");
         }
         Console.WriteLine("]");
+    }
+
+    /// <summary>
+    /// pdfe ocr &lt;file&gt; [--page N] [--dpi 300] [--lang eng]
+    /// OCR a PDF page (or all pages) using the system tesseract CLI.
+    /// </summary>
+    static Command CreateOcrCommand()
+    {
+        var fileArg = new Argument<FileInfo>("file", "PDF file to OCR");
+        var pageOption = new Option<int?>("--page", "Page to OCR (1-based). Omit for all pages.");
+        pageOption.AddAlias("-p");
+        var dpiOption = new Option<int>("--dpi", () => 300, "Render DPI for OCR (higher = slower, more accurate)");
+        var langOption = new Option<string>("--lang", () => "eng", "Tesseract language code (e.g. eng, deu, eng+spa)");
+        var tessdataOption = new Option<string?>("--tessdata", "Path to a directory containing <lang>.traineddata. Defaults to TESSDATA_PREFIX.");
+
+        var command = new Command("ocr", "Render and OCR a PDF page via tesseract")
+        {
+            fileArg, pageOption, dpiOption, langOption, tessdataOption,
+        };
+
+        command.SetHandler((FileInfo file, int? page, int dpi, string lang, string? tessdata) =>
+        {
+            if (!file.Exists)
+            {
+                Console.Error.WriteLine($"File not found: {file.FullName}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var ocr = new PdfOcrService(language: lang, dpi: dpi, tessdataPrefix: tessdata);
+            if (!ocr.IsAvailable())
+            {
+                Console.Error.WriteLine(
+                    "tesseract CLI not found on PATH. Install with `apt install tesseract-ocr` " +
+                    "(or your platform's equivalent).");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            try
+            {
+                using var doc = PdfDocument.Open(File.ReadAllBytes(file.FullName));
+                int from = page.GetValueOrDefault(1);
+                int to   = page.HasValue ? page.Value : doc.PageCount;
+
+                if (from < 1 || from > doc.PageCount || to < from || to > doc.PageCount)
+                {
+                    Console.Error.WriteLine($"Page out of range (document has {doc.PageCount} pages).");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                for (int p = from; p <= to; p++)
+                {
+                    if (doc.PageCount > 1)
+                        Console.WriteLine($"=== Page {p} ===");
+                    var result = ocr.RecognizePage(doc.GetPage(p));
+                    Console.WriteLine(result.Text);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, fileArg, pageOption, dpiOption, langOption, tessdataOption);
+
+        return command;
     }
 
     /// <summary>
