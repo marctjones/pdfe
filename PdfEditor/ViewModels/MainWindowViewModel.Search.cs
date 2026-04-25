@@ -6,6 +6,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Reactive;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace PdfEditor.ViewModels;
@@ -23,6 +24,14 @@ public partial class MainWindowViewModel
     private ObservableCollection<PdfSearchService.SearchMatch> _searchMatches = new();
     private bool _isSearchVisible = false;
 
+    // Debounce + cancellation for incremental ("search-as-you-type")
+    // queries. Pre-fix every keystroke kicked off a fresh search that
+    // re-opened and re-parsed the PDF; on a 455-page book each one took
+    // ~30 s, so by the time the user finished typing they had a queue of
+    // overlapping searches and the foreground felt unresponsive.
+    private CancellationTokenSource? _searchCts;
+    private const int SearchDebounceMs = 300;
+
     // Search Properties
     public string SearchText
     {
@@ -30,15 +39,7 @@ public partial class MainWindowViewModel
         set
         {
             this.RaiseAndSetIfChanged(ref _searchText, value);
-            // Auto-search as user types (with debounce in production)
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                Task.Run(() => PerformSearch());
-            }
-            else
-            {
-                ClearSearch();
-            }
+            ScheduleSearchDebounced();
         }
     }
 
@@ -48,10 +49,7 @@ public partial class MainWindowViewModel
         set
         {
             this.RaiseAndSetIfChanged(ref _searchCaseSensitive, value);
-            if (!string.IsNullOrWhiteSpace(_searchText))
-            {
-                Task.Run(() => PerformSearch());
-            }
+            ScheduleSearchDebounced();
         }
     }
 
@@ -61,11 +59,45 @@ public partial class MainWindowViewModel
         set
         {
             this.RaiseAndSetIfChanged(ref _searchWholeWords, value);
-            if (!string.IsNullOrWhiteSpace(_searchText))
-            {
-                Task.Run(() => PerformSearch());
-            }
+            ScheduleSearchDebounced();
         }
+    }
+
+    /// <summary>
+    /// Cancel any pending/in-flight search, then schedule a new one
+    /// after a short debounce delay. If the user keeps typing, the
+    /// delay timer resets so we only actually run once they pause.
+    /// </summary>
+    private void ScheduleSearchDebounced()
+    {
+        _searchCts?.Cancel();
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            ClearSearch();
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        var token = cts.Token;
+        OperationStatus = "Searching…";
+
+        // Capture the search inputs at scheduling time so a later
+        // keystroke doesn't change them out from under us.
+        var query = _searchText;
+        var caseSensitive = _searchCaseSensitive;
+        var wholeWords = _searchWholeWords;
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(SearchDebounceMs, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested) return;
+                PerformSearch(query, caseSensitive, wholeWords, token);
+            }
+            catch (OperationCanceledException) { /* superseded */ }
+        });
     }
 
     public ObservableCollection<PdfSearchService.SearchMatch> SearchMatches
@@ -149,32 +181,47 @@ public partial class MainWindowViewModel
     }
 
     /// <summary>
-    /// Perform search with current settings
+    /// Perform a search and publish matches to the UI. Reuses the
+    /// already-open <see cref="PdfCoreDocument"/> so we don't pay the
+    /// ~30 s parse cost per keystroke. The token lets a debounce-
+    /// superseding query abort us mid-walk.
     /// </summary>
-    private void PerformSearch()
+    private void PerformSearch(string query, bool caseSensitive, bool wholeWords,
+        CancellationToken token)
     {
-        if (_searchService == null || string.IsNullOrEmpty(_currentFilePath))
-            return;
+        if (_searchService == null) return;
 
+        var doc = PdfCoreDocument;
+        // Fall back to file-path-based search only when the in-memory
+        // document isn't available (e.g. legacy code paths in tests).
         try
         {
-            _logger.LogInformation("Searching for '{SearchText}' (CaseSensitive={CaseSensitive}, WholeWords={WholeWords})",
-                SearchText, SearchCaseSensitive, SearchWholeWords);
+            _logger.LogInformation(
+                "Searching for '{Query}' (CaseSensitive={CaseSensitive}, WholeWords={WholeWords})",
+                query, caseSensitive, wholeWords);
 
-            var matches = _searchService.Search(
-                _currentFilePath,
-                SearchText,
-                SearchCaseSensitive,
-                SearchWholeWords,
-                useRegex: false);
+            System.Collections.Generic.List<PdfSearchService.SearchMatch> matches;
+            if (doc != null)
+            {
+                matches = _searchService.Search(doc, query, caseSensitive, wholeWords,
+                    useRegex: false, cancellationToken: token);
+            }
+            else if (!string.IsNullOrEmpty(_currentFilePath))
+            {
+                matches = _searchService.Search(_currentFilePath, query,
+                    caseSensitive, wholeWords, useRegex: false);
+            }
+            else return;
+
+            if (token.IsCancellationRequested) return;
 
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
+                if (token.IsCancellationRequested) return;
+
                 SearchMatches.Clear();
                 foreach (var match in matches)
-                {
                     SearchMatches.Add(match);
-                }
 
                 if (SearchMatches.Count > 0)
                 {
@@ -187,6 +234,7 @@ public partial class MainWindowViewModel
                 }
 
                 this.RaisePropertyChanged(nameof(SearchResultText));
+                OperationStatus = string.Empty;
             });
 
             _logger.LogInformation("Found {MatchCount} matches", matches.Count);
@@ -194,6 +242,8 @@ public partial class MainWindowViewModel
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error performing search: {Message}", ex.Message);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                OperationStatus = string.Empty);
         }
     }
 

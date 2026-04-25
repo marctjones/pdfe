@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace PdfEditor.Services;
 
@@ -61,19 +62,54 @@ public class PdfSearchService
         try
         {
             using var document = PdfDocument.Open(pdfPath);
+            return Search(document, searchTerm, caseSensitive, wholeWordsOnly, useRegex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching PDF: {Message}", ex.Message);
+            return matches;
+        }
+    }
 
+    /// <summary>
+    /// Search for text in an already-open PDF document. Use this overload
+    /// when the caller already holds a parsed <see cref="PdfDocument"/> —
+    /// re-parsing on every keystroke makes typed search unusable on
+    /// large files. The optional <paramref name="cancellationToken"/>
+    /// lets a debounced caller drop a stale search when a newer
+    /// keystroke supersedes it.
+    /// </summary>
+    public List<SearchMatch> Search(
+        PdfDocument document,
+        string searchTerm,
+        bool caseSensitive = false,
+        bool wholeWordsOnly = false,
+        bool useRegex = false,
+        CancellationToken cancellationToken = default)
+    {
+        var matches = new List<SearchMatch>();
+        if (document == null || string.IsNullOrWhiteSpace(searchTerm))
+            return matches;
+
+        try
+        {
             _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages",
                 searchTerm, document.PageCount);
 
             for (int i = 0; i < document.PageCount; i++)
             {
-                var page = document.GetPage(i + 1); // Pdfe.Core uses 1-based indexing
+                cancellationToken.ThrowIfCancellationRequested();
+                var page = document.GetPage(i + 1);
                 var pageMatches = SearchInPage(page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, i);
                 matches.AddRange(pageMatches);
             }
 
             _logger.LogInformation("Found {MatchCount} matches for '{SearchTerm}'",
                 matches.Count, searchTerm);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Search cancelled at page progress; returning partial results");
         }
         catch (Exception ex)
         {
