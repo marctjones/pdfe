@@ -60,6 +60,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private int _renderCacheMax = 20;
     private string _operationStatus = string.Empty;
     private bool _hasInMemoryModifications; // Tracks if document has been modified in-memory (e.g., redactions applied)
+    private Services.ThumbnailCacheService? _thumbnailCache;
 
     /// <summary>
     /// Tracks whether the user is in an "auto-fit" zoom state. When set to
@@ -822,20 +823,17 @@ public partial class MainWindowViewModel : ViewModelBase
             // also keeps it fitted on subsequent window resizes.
             ReapplyFitModeIfNeeded();
 
-            // Kick off thumbnail generation on the threadpool but DON'T
-            // await it — the sidebar populates progressively and the user
-            // can already use the document. Track the task so we don't
-            // tear down state mid-flight.
-            OperationStatus = $"Loading thumbnails (1/{TotalPages})…";
-            _logger.LogInformation(">>> STEP 8: Starting thumbnail generation (background)");
-            _ = LoadPageThumbnailsAsync().ContinueWith(_ =>
-            {
-                if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
-                    OperationStatus = string.Empty;
-                else
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        OperationStatus = string.Empty);
-            }, TaskScheduler.Default);
+            // Build the on-disk thumbnail cache for this document; the
+            // strip's items will pull from it on demand as they scroll
+            // into view (no eager batch render any more — that fired
+            // hundreds of renders for pages the user might never look at).
+            _thumbnailCache?.Dispose();
+            _thumbnailCache = new Services.ThumbnailCacheService(
+                filePath, PdfCoreDocument!,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+            _logger.LogInformation(">>> STEP 8: Creating thumbnail placeholders (lazy load)");
+            await LoadPageThumbnailsAsync();
 
             _logger.LogInformation(">>> STEP 9: RaisePropertyChanged(TotalPages)");
             this.RaisePropertyChanged(nameof(TotalPages));
@@ -1900,126 +1898,64 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task LoadPageThumbnailsAsync()
+    /// <summary>
+    /// Lazy thumbnail strategy: create one PageThumbnail placeholder per
+    /// page (so the sidebar shows the right number of slots immediately)
+    /// and let the View trigger renders as items scroll into view via
+    /// <c>EnsureThumbnailLoadedAsync</c>. Combined with the on-disk
+    /// thumbnail cache (ThumbnailCacheService), reopening a book renders
+    /// only the pages the user looks at, and re-opens hit a sub-ms WebP
+    /// decode rather than re-rasterising.
+    /// </summary>
+    private Task LoadPageThumbnailsAsync()
     {
-        _logger.LogInformation(">>> LoadPageThumbnailsAsync: START");
-
-        if (string.IsNullOrEmpty(_currentFilePath))
-        {
-            _logger.LogWarning(">>> LoadPageThumbnailsAsync: SKIP (no file)");
-            return;
-        }
-
+        _logger.LogInformation(">>> LoadPageThumbnailsAsync (lazy): START");
         try
         {
-            // Capture the current file path to avoid race conditions
-            var filePath = _currentFilePath;
-
-            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Clearing existing thumbnails");
             PageThumbnails.Clear();
-
-            var totalPages = TotalPages;
+            var total = TotalPages;
+            for (int i = 0; i < total; i++)
+                PageThumbnails.Add(new PageThumbnail { PageNumber = i + 1, PageIndex = i });
             _logger.LogInformation(
-                ">>> LoadPageThumbnailsAsync: rendering {PageCount} thumbnails", totalPages);
-
-            // Pre-allocate thumbnail placeholders so the sidebar shows
-            // the strip immediately and individual entries fill in as
-            // their renders complete.
-            var placeholders = new PageThumbnail[totalPages];
-            for (int i = 0; i < totalPages; i++)
-            {
-                placeholders[i] = new PageThumbnail { PageNumber = i + 1, PageIndex = i };
-                PageThumbnails.Add(placeholders[i]);
-            }
-
-            // Pre-fix this code spawned one Task.Run per page, each of
-            // which called PdfRenderService.RenderThumbnailAsync — and
-            // *that* opened the PDF file from disk and parsed it from
-            // scratch on every single call. On a 455-page book that
-            // was 455× File.ReadAllBytes + 455× xref scan + 455× catalog
-            // walk, with all those parses contending for the threadpool
-            // alongside the foreground page render. UI was unusable.
-            //
-            // Now: open one PdfDocument per worker (capped at
-            // ProcessorCount), pull page indexes from a shared queue,
-            // render. Parses go from N pages to ~8.
-            var concurrency = Math.Max(2, Math.Min(Environment.ProcessorCount, 8));
-            var queue = new System.Collections.Concurrent.ConcurrentQueue<int>(
-                Enumerable.Range(0, totalPages));
-            int completed = 0;
-            var workers = new List<Task>(concurrency);
-
-            for (int w = 0; w < concurrency; w++)
-            {
-                workers.Add(Task.Run(async () =>
-                {
-                    Pdfe.Core.Document.PdfDocument? workerDoc = null;
-                    Pdfe.Rendering.SkiaRenderer? renderer = null;
-                    try
-                    {
-                        workerDoc = Pdfe.Core.Document.PdfDocument.Open(filePath);
-                        renderer = new Pdfe.Rendering.SkiaRenderer();
-                        var options = new Pdfe.Rendering.RenderOptions { Dpi = 36 };
-
-                        while (queue.TryDequeue(out var pageIndex))
-                        {
-                            try
-                            {
-                                var page = workerDoc.GetPage(pageIndex + 1);
-                                using var skBitmap = renderer.RenderPage(page, options);
-                                if (skBitmap == null) continue;
-
-                                // Hop to UI thread to publish. Yielding here
-                                // also gives the dispatcher its turn — without
-                                // a yield, a fast worker can saturate it with
-                                // back-to-back InvokeAsyncs and starve the
-                                // foreground render and pointer events.
-                                await Dispatcher.UIThread.InvokeAsync(() =>
-                                {
-                                    try
-                                    {
-                                        placeholders[pageIndex].ThumbnailImage =
-                                            ToAvaloniaBitmap(skBitmap);
-                                        int n = System.Threading.Interlocked.Increment(
-                                            ref completed);
-                                        // Coarse status update — every page floods the UI.
-                                        if (n == totalPages || (n & 7) == 0)
-                                            OperationStatus =
-                                                $"Loading thumbnails ({n}/{totalPages})…";
-                                    }
-                                    catch (Exception uiEx)
-                                    {
-                                        _logger.LogError(uiEx,
-                                            "!!! ERROR setting thumbnail {PageIndex}",
-                                            pageIndex);
-                                    }
-                                }, DispatcherPriority.Background);
-                            }
-                            catch (Exception renderEx)
-                            {
-                                _logger.LogError(renderEx,
-                                    "!!! ERROR rendering thumbnail page {PageIndex}",
-                                    pageIndex);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        workerDoc?.Dispose();
-                    }
-                }));
-            }
-
-            await Task.WhenAll(workers);
-            _logger.LogInformation(
-                ">>> LoadPageThumbnailsAsync: COMPLETE — {Count} thumbnails", totalPages);
+                ">>> LoadPageThumbnailsAsync: created {Count} placeholders; loads happen on demand",
+                total);
         }
         catch (Exception ex)
         {
-            // Don't rethrow — thumbnail load runs as a fire-and-forget
-            // continuation in LoadDocumentAsync; an unhandled exception
-            // here would crash the process via the unobserved-task hook.
-            _logger.LogError(ex, "!!! ERROR in LoadPageThumbnailsAsync");
+            _logger.LogError(ex, "!!! ERROR creating thumbnail placeholders");
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Render or load the thumbnail for one page. Called by the View when
+    /// the corresponding item scrolls into the visible viewport. Idempotent:
+    /// repeated calls for an already-loaded page no-op; concurrent calls for
+    /// the same page coalesce on a single in-flight Task in the cache service.
+    /// </summary>
+    public async Task EnsureThumbnailLoadedAsync(int pageIndex,
+        System.Threading.CancellationToken cancellationToken = default)
+    {
+        if (pageIndex < 0 || pageIndex >= PageThumbnails.Count) return;
+        var thumb = PageThumbnails[pageIndex];
+        if (thumb.ThumbnailImage != null) return; // already loaded
+        if (_thumbnailCache == null) return; // no doc loaded yet
+
+        try
+        {
+            using var sk = await _thumbnailCache.GetThumbnailAsync(pageIndex, cancellationToken);
+            if (sk == null) return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                thumb.ThumbnailImage = ToAvaloniaBitmap(sk);
+            }, DispatcherPriority.Background);
+        }
+        catch (OperationCanceledException) { /* expected when scrolled away */ }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "EnsureThumbnailLoadedAsync failed for page {Page}", pageIndex);
         }
     }
 

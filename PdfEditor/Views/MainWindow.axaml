@@ -426,9 +426,17 @@
                                                        FontSize="11"
                                                        FontWeight="Medium"
                                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <!-- EffectiveViewportChanged fires whenever this Image's
+                                                 visible area changes. We use it to lazy-load the
+                                                 thumbnail bitmap only for pages the user actually
+                                                 scrolls to — combined with the on-disk cache
+                                                 (ThumbnailCacheService) reopens are sub-millisecond
+                                                 and first opens skip rendering pages they never look at. -->
                                             <Image Source="{Binding ThumbnailImage}"
                                                    Width="150" Height="200"
-                                                   Stretch="Uniform"/>
+                                                   Stretch="Uniform"
+                                                   EffectiveViewportChanged="OnThumbnailViewportChanged"
+                                                   Tag="{Binding PageIndex}"/>
                                         </StackPanel>
                                     </Border>
                                     <Button.Styles>
