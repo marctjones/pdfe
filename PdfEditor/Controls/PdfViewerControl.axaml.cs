@@ -144,6 +144,12 @@ public partial class PdfViewerControl : UserControl
     /// </summary>
     public event EventHandler<PageChangedEventArgs>? PageChanged;
 
+    /// <summary>
+    /// Fired when the user clicks an internal-document link. The handler
+    /// typically sets <see cref="CurrentPage"/> to <see cref="LinkClickedEventArgs.PageNumber"/>.
+    /// </summary>
+    public event EventHandler<LinkClickedEventArgs>? LinkClicked;
+
     #endregion
 
     #region Fields
@@ -186,6 +192,13 @@ public partial class PdfViewerControl : UserControl
     private List<Letter>? _readingOrderedLetters; // for range slicing
     private Letter? _selectionAnchor;
     private Letter? _selectionFocus;
+
+    // Internal-link annotations on the current page. Lazy-loaded the
+    // first time we hit-test on a given page; cleared when the page or
+    // document changes. The same DPI and Y-flip rules used for letters
+    // apply here.
+    private int _linksPageNumber = -1;
+    private IReadOnlyList<PdfLink>? _currentPageLinks;
 
     #endregion
 
@@ -415,6 +428,8 @@ public partial class PdfViewerControl : UserControl
         _currentPageLetters = null;
         _readingOrderedLetters = null;
         _lettersPageNumber = -1;
+        _currentPageLinks = null;
+        _linksPageNumber = -1;
         ClearSelectionHighlight();
 
         if (Document != null)
@@ -439,6 +454,8 @@ public partial class PdfViewerControl : UserControl
             _lettersPageNumber = -1;
             _selectionAnchor = null;
             _selectionFocus = null;
+            _currentPageLinks = null;
+            _linksPageNumber = -1;
             ClearSelectionHighlight();
 
             await RenderCurrentPageAsync();
@@ -582,6 +599,20 @@ public partial class PdfViewerControl : UserControl
 
     private void OnInteractionLayerPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        // First chance: internal-link click in any mode (including None).
+        // Links are treated as ambient affordances — like a browser, not
+        // a drawing tool — so the redaction/text-selection mode shouldn't
+        // suppress them. We only consume the event when a link actually
+        // hits, otherwise let the rest of the press handling continue.
+        var pressPoint = e.GetPosition(_interactionLayer);
+        var linkHit = HitTestLinkAt(pressPoint);
+        if (linkHit != null)
+        {
+            LinkClicked?.Invoke(this, new LinkClickedEventArgs(linkHit.DestinationPage));
+            e.Handled = true;
+            return;
+        }
+
         if (InteractionMode == InteractionMode.None)
             return;
 
@@ -698,6 +729,41 @@ public partial class PdfViewerControl : UserControl
             _readingOrderedLetters = new List<Letter>();
             _lettersPageNumber = CurrentPage;
         }
+    }
+
+    private void EnsurePageLinksLoaded()
+    {
+        if (Document == null) return;
+        if (_linksPageNumber == CurrentPage && _currentPageLinks != null) return;
+        try
+        {
+            var page = Document.GetPage(CurrentPage);
+            _currentPageLinks = page.GetLinks();
+            _linksPageNumber = CurrentPage;
+        }
+        catch
+        {
+            _currentPageLinks = System.Array.Empty<PdfLink>();
+            _linksPageNumber = CurrentPage;
+        }
+    }
+
+    private PdfLink? HitTestLinkAt(Point dipPoint)
+    {
+        EnsurePageLinksLoaded();
+        if (_currentPageLinks == null || _currentPageLinks.Count == 0) return null;
+        if (Document == null) return null;
+        var page = Document.GetPage(CurrentPage);
+        var pdfX = dipPoint.X * 72.0 / TextSelectionRenderDpi;
+        var pdfY = page.Height - (dipPoint.Y * 72.0 / TextSelectionRenderDpi);
+        foreach (var link in _currentPageLinks)
+        {
+            var r = link.Rect;
+            if (pdfX >= r.Left && pdfX <= r.Right &&
+                pdfY >= r.Bottom && pdfY <= r.Top)
+                return link;
+        }
+        return null;
     }
 
     private Letter? HitTestLetterAt(Point dipPoint)
@@ -1038,6 +1104,16 @@ public class TextSelectedEventArgs : EventArgs
 
     /// <summary>Backwards-compat ctor — area only, empty text/bounds.</summary>
     public TextSelectedEventArgs(Rect area) : this(area, string.Empty, System.Array.Empty<Rect>()) { }
+}
+
+/// <summary>
+/// Event arguments for an internal-document link click. Carries the
+/// 1-based page number of the destination.
+/// </summary>
+public class LinkClickedEventArgs : EventArgs
+{
+    public int PageNumber { get; }
+    public LinkClickedEventArgs(int pageNumber) { PageNumber = pageNumber; }
 }
 
 /// <summary>

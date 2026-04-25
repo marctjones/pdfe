@@ -398,6 +398,18 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Internal link clicked in the page area. The destination page is
+    /// 1-based; the VM tracks 0-based CurrentPageIndex.
+    /// </summary>
+    private void OnLinkClicked(object? sender, LinkClickedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        var idx = e.PageNumber - 1;
+        if (idx < 0 || idx >= viewModel.TotalPages) return;
+        viewModel.CurrentPageIndex = idx;
+    }
+
     private void OnTextSelected(object? sender, TextSelectedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)

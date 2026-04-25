@@ -75,6 +75,22 @@ public class PdfPage
     }
 
     /// <summary>
+    /// Internal-document link annotations on this page (PDF spec §12.5.6.5).
+    /// External / URI links are filtered out; what's returned is only the
+    /// kind of link a clickable table-of-contents or back-of-book index
+    /// produces — pointers to other pages in this document.
+    /// </summary>
+    public IReadOnlyList<PdfLink> GetLinks()
+    {
+        // Build the page-ref map and named-dest map fresh per call.
+        // Callers that want them across many pages should use the static
+        // PdfLinkParser.Parse with shared maps to avoid the redundant work.
+        var pageMap = PdfOutlineParser.BuildPageRefMap(_document);
+        var namedDests = PdfOutlineParser.BuildNamedDestinations(_document);
+        return PdfLinkParser.Parse(_document, _pageDict, pageMap, namedDests);
+    }
+
+    /// <summary>
     /// Page width in points.
     /// </summary>
     public double Width => MediaBox.Width;
