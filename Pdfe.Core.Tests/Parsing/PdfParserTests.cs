@@ -227,4 +227,40 @@ public class PdfParserTests
         var stream = (PdfStream)indObj.Value;
         stream.EncodedData.Should().BeEquivalentTo(Encoding.ASCII.GetBytes(streamContent));
     }
+
+    [Fact]
+    public void ParseStream_LengthAsIndirectReference_ResolvesViaCallback()
+    {
+        // PDFs from XEP/LibreOffice and other professional toolchains routinely
+        // store stream /Length as an indirect reference (the writer doesn't
+        // know the compressed length until it's done). PdfDocument wires up
+        // a resolver that looks up the int via the xref/object cache.
+        var streamContent = "Hello World";
+        var pdfData =
+            $"1 0 obj\n<< /Length 2 0 R >>\nstream\n{streamContent}\nendstream\nendobj\n" +
+            $"2 0 obj\n{streamContent.Length}\nendobj";
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(pdfData));
+
+        parser.IndirectObjectResolver = num =>
+            num == 2 ? new PdfInteger(streamContent.Length) : null;
+
+        var indObj = parser.ParseIndirectObject();
+
+        indObj.Value.Should().BeOfType<PdfStream>();
+        ((PdfStream)indObj.Value).EncodedData
+            .Should().BeEquivalentTo(Encoding.ASCII.GetBytes(streamContent));
+    }
+
+    [Fact]
+    public void ParseStream_LengthAsIndirectReference_ThrowsWhenNoResolver()
+    {
+        var pdfData = "1 0 obj\n<< /Length 2 0 R >>\nstream\nHello\nendstream\nendobj";
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(pdfData));
+
+        // Default — no resolver wired up — surfaces a clear error rather
+        // than silently producing a corrupt PdfStream.
+        Action act = () => parser.ParseIndirectObject();
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*indirect reference but no resolver*");
+    }
 }

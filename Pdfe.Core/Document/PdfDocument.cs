@@ -100,6 +100,11 @@ public class PdfDocument : IDisposable
         _parser = new PdfParser(new PdfLexer(stream, ownsStream: false));
         _decompressor = new StreamDecompressor();
 
+        // Let the parser resolve indirect /Length refs on stream dicts by
+        // calling back into our object cache — needed for PDFs (notably
+        // LibreOffice output) that write the length as an indirect ref.
+        _parser.IndirectObjectResolver = ResolveLengthReference;
+
         Trailer = trailer;
         Version = version;
 
@@ -435,6 +440,17 @@ public class PdfDocument : IDisposable
         int offset = first + offsets[index].Offset;
         parser.Seek(offset);
         return parser.ParseObject();
+    }
+
+    /// <summary>
+    /// Parser callback for resolving indirect /Length refs on stream
+    /// dicts. The parser saves and restores the lexer position around
+    /// this call so we can safely re-enter <see cref="GetObject(int)"/>.
+    /// </summary>
+    private PdfObject? ResolveLengthReference(int objectNumber)
+    {
+        try { return GetObject(objectNumber); }
+        catch { return null; }
     }
 
     /// <summary>
