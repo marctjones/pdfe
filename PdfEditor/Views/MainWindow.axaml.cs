@@ -3,6 +3,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using PdfEditor.Controls;
@@ -88,6 +89,24 @@ public partial class MainWindow : Window
     private void OnSearchHighlightsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         UpdateSearchHighlightsCanvas();
+    }
+
+    /// <summary>
+    /// Fires whenever a thumbnail Image's effective visible area changes
+    /// (item virtualisation, scrolling the strip, sidebar toggling). When
+    /// the area is non-empty we ask the VM to ensure that page's thumbnail
+    /// is loaded — VM dedupes already-loaded pages and coalesces concurrent
+    /// requests, so we can call this freely.
+    /// </summary>
+    private void OnThumbnailViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
+    {
+        if (sender is not Image img) return;
+        if (DataContext is not MainWindowViewModel vm) return;
+        if (img.Tag is not int pageIndex) return;
+        if (e.EffectiveViewport.Width <= 0 || e.EffectiveViewport.Height <= 0) return;
+
+        // Fire-and-forget — VM handles its own dispatching to the UI thread.
+        _ = vm.EnsureThumbnailLoadedAsync(pageIndex);
     }
 
     /// <summary>
