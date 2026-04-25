@@ -27,11 +27,23 @@ internal static class AdobeGlyphList
         });
 
     /// <summary>Reverse lookup: Unicode → glyph name.</summary>
+    /// <remarks>
+    /// Falls back to the Adobe "uniXXXX" convention (AGL §D.1) for any BMP
+    /// codepoint not in the named-glyph table. Subsetted CFF programs emitted
+    /// by tools like XEP follow that convention internally, so the synthetic
+    /// name is what we need to look up the glyph in the CFF charset.
+    /// </remarks>
     public static bool TryGetName(char unicode, out string glyphName)
     {
         if (_reverse.Value.TryGetValue(unicode, out var name))
         {
             glyphName = name;
+            return true;
+        }
+        if (unicode >= 0x20)
+        {
+            glyphName = "uni" + ((int)unicode).ToString("X4",
+                System.Globalization.CultureInfo.InvariantCulture);
             return true;
         }
         glyphName = string.Empty;
