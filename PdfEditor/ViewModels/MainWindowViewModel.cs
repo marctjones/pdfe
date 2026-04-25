@@ -530,6 +530,45 @@ public partial class MainWindowViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _selectedText, value);
     }
 
+    /// <summary>
+    /// Called by the View when the user finishes a text-line selection
+    /// drag. The text is already known at the View layer (computed via
+    /// letter hit-testing in PdfViewerControl), so we don't need to
+    /// re-extract from the rect — just publish to SelectedText, copy to
+    /// the clipboard, and add to history.
+    /// </summary>
+    public async Task SetSelectedTextAndCopyAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        SelectedText = text;
+        try
+        {
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow
+                : null;
+            if (topLevel?.Clipboard != null)
+            {
+                await topLevel.Clipboard.SetTextAsync(text);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    ClipboardHistory.Insert(0, new ClipboardEntry
+                    {
+                        Text = text,
+                        Timestamp = DateTime.Now,
+                        PageNumber = CurrentPageIndex + 1,
+                    });
+                    while (ClipboardHistory.Count > 20)
+                        ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to copy selected text to clipboard");
+        }
+    }
+
     public bool DebugVerifyRedaction
     {
         get => _debugVerifyRedaction;

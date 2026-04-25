@@ -403,13 +403,15 @@ public partial class MainWindow : Window
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        // The PdfViewerControl provides the area in image pixel coordinates
+        // Pre-fix this set CurrentTextSelectionArea (a 2D rect) and asked
+        // the VM to re-extract text within the rect. The new text-line
+        // selection path computes the actual text in the control via
+        // letter hit-testing, so the event already carries the joined
+        // string — feed it directly.
         viewModel.CurrentTextSelectionArea = e.Area;
-
-        // Automatically copy text when selection is completed
-        if (e.Area.Width > 5 && e.Area.Height > 5)
+        if (!string.IsNullOrEmpty(e.Text))
         {
-            viewModel.CopyTextCommand.Execute().Subscribe();
+            _ = viewModel.SetSelectedTextAndCopyAsync(e.Text);
         }
     }
 
