@@ -150,8 +150,9 @@ public partial class PdfViewerControl : UserControl
     private Image? _pdfImage;
     private Canvas? _overlayCanvas;
     private Canvas? _interactionLayer;
-    private ScaleTransform? _imageScaleTransform;
-    private ScaleTransform? _overlayScaleTransform;
+    private LayoutTransformControl? _zoomHost;
+    private ScaleTransform? _zoomScaleTransform;
+    private ScrollViewer? _scrollViewer;
     private Grid? _loadingOverlay;
     private ProgressBar? _loadingProgressBar;
     private Grid? _errorOverlay;
@@ -280,20 +281,19 @@ public partial class PdfViewerControl : UserControl
         _pdfImage = this.FindControl<Image>("PdfImage");
         _overlayCanvas = this.FindControl<Canvas>("OverlayCanvas");
         _interactionLayer = this.FindControl<Canvas>("InteractionLayer");
+        _zoomHost = this.FindControl<LayoutTransformControl>("ZoomHost");
+        _scrollViewer = this.FindControl<ScrollViewer>("PdfScrollViewer");
         _loadingOverlay = this.FindControl<Grid>("LoadingOverlay");
         _loadingProgressBar = this.FindControl<ProgressBar>("LoadingProgressBar");
         _errorOverlay = this.FindControl<Grid>("ErrorOverlay");
         _errorMessageText = this.FindControl<TextBlock>("ErrorMessageText");
 
-        // Get scale transforms from render transforms
-        if (_pdfImage != null)
+        // Single scale transform on the LayoutTransformControl wrapper. Both
+        // the Image and the OverlayCanvas live inside it, so they scale and
+        // align together — no need for two parallel RenderTransforms.
+        if (_zoomHost != null)
         {
-            _imageScaleTransform = _pdfImage.RenderTransform as ScaleTransform;
-        }
-
-        if (_overlayCanvas != null)
-        {
-            _overlayScaleTransform = _overlayCanvas.RenderTransform as ScaleTransform;
+            _zoomScaleTransform = _zoomHost.LayoutTransform as ScaleTransform;
         }
 
         // Set up interaction layer event handlers
@@ -303,20 +303,54 @@ public partial class PdfViewerControl : UserControl
             _interactionLayer.PointerMoved += OnInteractionLayerPointerMoved;
             _interactionLayer.PointerReleased += OnInteractionLayerPointerReleased;
         }
+
+        // Surface viewport changes (scrollbars appearing/disappearing,
+        // sidebars toggling, window resizes). Consumers — MainWindow —
+        // listen so the VM can recompute Fit Width/Page against the
+        // *visible* area, not the outer control bounds.
+        if (_scrollViewer != null)
+        {
+            _scrollViewer.LayoutUpdated += OnScrollViewerLayoutUpdated;
+        }
+    }
+
+    /// <summary>
+    /// The actual visible page area, in DIPs, *inside* the scroll bars.
+    /// Use this — not the outer control's Bounds — for fit-zoom math, so
+    /// the answer doesn't include the strip a vertical scrollbar steals.
+    /// </summary>
+    public Size GetVisibleViewportSize()
+    {
+        if (_scrollViewer != null)
+        {
+            var v = _scrollViewer.Viewport;
+            if (v.Width > 0 && v.Height > 0) return v;
+        }
+        return Bounds.Size;
+    }
+
+    /// <summary>Raised when the inside-the-scrollbars viewport size changes.</summary>
+    public event EventHandler<Size>? VisibleViewportChanged;
+
+    private Size _lastReportedViewport;
+
+    private void OnScrollViewerLayoutUpdated(object? sender, EventArgs e)
+    {
+        if (_scrollViewer == null) return;
+        var v = _scrollViewer.Viewport;
+        if (v.Width <= 0 || v.Height <= 0) return;
+        if (Math.Abs(v.Width - _lastReportedViewport.Width) < 0.5 &&
+            Math.Abs(v.Height - _lastReportedViewport.Height) < 0.5) return;
+        _lastReportedViewport = v;
+        VisibleViewportChanged?.Invoke(this, v);
     }
 
     private void OnZoomLevelChanged()
     {
-        if (_imageScaleTransform != null)
+        if (_zoomScaleTransform != null)
         {
-            _imageScaleTransform.ScaleX = ZoomLevel;
-            _imageScaleTransform.ScaleY = ZoomLevel;
-        }
-
-        if (_overlayScaleTransform != null)
-        {
-            _overlayScaleTransform.ScaleX = ZoomLevel;
-            _overlayScaleTransform.ScaleY = ZoomLevel;
+            _zoomScaleTransform.ScaleX = ZoomLevel;
+            _zoomScaleTransform.ScaleY = ZoomLevel;
         }
     }
 

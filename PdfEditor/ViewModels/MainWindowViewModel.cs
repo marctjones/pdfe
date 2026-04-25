@@ -1645,7 +1645,11 @@ public partial class MainWindowViewModel : ViewModelBase
         if (TryGetPageDimensionsInViewerDips(out var pageW, out _) &&
             ViewportWidth > 0)
         {
-            const double margin = 40; // gutter on each side
+            // Tiny gutter so the page edge doesn't kiss the scrollbar /
+            // central-pane border. Now that the viewport measurement is
+            // the *inside-the-scrollbars* width and zoom uses LayoutTransform,
+            // the math doesn't need a 40-DIP fudge any more.
+            const double margin = 8;
             var target = Math.Max(1.0, ViewportWidth - margin);
             ZoomLevel = Math.Clamp(target / pageW, 0.25, 5.0);
             _logger.LogDebug("Fit width: viewport={Viewport}, page={Page}, zoom={Zoom:P0}",
@@ -1665,8 +1669,8 @@ public partial class MainWindowViewModel : ViewModelBase
         if (TryGetPageDimensionsInViewerDips(out var pageW, out var pageH) &&
             ViewportWidth > 0 && ViewportHeight > 0)
         {
-            const double marginH = 40;
-            const double marginV = 40;
+            const double marginH = 8;
+            const double marginV = 8;
             var targetW = Math.Max(1.0, ViewportWidth - marginH);
             var targetH = Math.Max(1.0, ViewportHeight - marginV);
             // Whichever dimension is the binding constraint wins.
