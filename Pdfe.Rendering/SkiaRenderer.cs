@@ -1223,9 +1223,18 @@ internal class RenderContext
         // The canvas has been transformed with Scale(scale, -scale) to flip
         // Y for paths. Un-flip for text. When the text matrix has non-uniform
         // X/Y scaling, squeeze glyphs horizontally to match the X-scale.
+        //
+        // For Y direction, follow the *sign* of Tm.d:
+        //   d > 0 (typical PDF, Y-up text-space) → -1 cancels outer Y-flip
+        //   d < 0 (browser-style Tm `1 0 0 -1`, e.g. WeasyPrint, Word, Word-derived
+        //         and most CJK-producing toolchains) → +1 keeps Skia's natural
+        //         Y-down glyph drawing, which the outer flip turns into Y-up
+        //         on screen exactly as the PDF intends.
+        // Without this, browser-flipped text (and most CJK) renders upside-down.
+        float ySign = _textState.TextMatrixD >= 0 ? -1f : 1f;
         _canvas.Save();
         _canvas.Translate(x, y);
-        _canvas.Scale(xyRatio, -1);
+        _canvas.Scale(xyRatio, ySign);
 
         bool drawWithPdfWidths =
             !_currentFontHasEmbeddedProgram &&
@@ -1374,9 +1383,13 @@ internal class RenderContext
             TextEncoding = SKTextEncoding.GlyphId,
         };
 
+        // Match RenderText's Tm.d-aware Y-flip — without this, all CJK text
+        // and any other content authored with a browser-style flipped Tm
+        // (`1 0 0 -1`) renders upside-down.
+        float ySign = _textState.TextMatrixD >= 0 ? -1f : 1f;
         _canvas.Save();
         _canvas.Translate(_textState.TextMatrixE, _textState.TextMatrixF + _textState.TextRise);
-        _canvas.Scale(xyRatio, -1);
+        _canvas.Scale(xyRatio, ySign);
 
         // SKTextEncoding.GlyphId reads the byte buffer as native-endian ushort
         // glyph IDs. BlockCopy gives us exactly that on little-endian machines.
