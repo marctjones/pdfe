@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:PdfEditor.ViewModels"
         xmlns:models="using:PdfEditor.Models"
+        xmlns:controls="using:PdfEditor.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:ui="using:FluentAvalonia.UI.Controls"
@@ -96,10 +97,6 @@
                     <MenuItem.Icon><TextBlock Text="⬛" Foreground="Red"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="_Verify Redaction" Command="{Binding RunVerifyNowCommand}"
-                          IsEnabled="{Binding IsDocumentLoaded}">
-                    <MenuItem.Icon><TextBlock Text="✓"/></MenuItem.Icon>
-                </MenuItem>
                 <MenuItem Header="_View Clipboard History">
                     <MenuItem.Icon><TextBlock Text="📋"/></MenuItem.Icon>
                 </MenuItem>
@@ -107,17 +104,20 @@
 
             <!-- TOOLS MENU -->
             <MenuItem Header="_Tools">
-                <MenuItem Header="_Run OCR on Current Page..." Command="{Binding RunOcrCommand}"
-                          IsEnabled="{Binding IsDocumentLoaded}">
-                    <MenuItem.Icon><TextBlock Text="📝"/></MenuItem.Icon>
-                </MenuItem>
-                <MenuItem Header="Run OCR on _All Pages..." Command="{Binding RunOcrAllPagesCommand}"
-                          IsEnabled="{Binding IsDocumentLoaded}"/>
-                <Separator/>
                 <MenuItem Header="_Verify Digital Signatures..." Command="{Binding VerifySignaturesCommand}"
                           IsEnabled="{Binding IsDocumentLoaded}">
                     <MenuItem.Icon><TextBlock Text="🔐"/></MenuItem.Icon>
                 </MenuItem>
+                <MenuItem Header="Reveal _Hidden Text (audit overlay)"
+                          ToolTip.Tip="Surface text that is present in the PDF but visually covered by an opaque overlay — the classic 'black-box redaction' failure mode."
+                          IsEnabled="{Binding IsDocumentLoaded}"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding RevealHiddenText, Mode=TwoWay}" />
+                <MenuItem Header="Reveal _Rasterized Hidden Text (deep / OCR)"
+                          ToolTip.Tip="Also run differential OCR: render the page with overlays stripped, OCR both versions, and surface words present only in the underlying raster. Slower; requires 'tesseract' on PATH."
+                          IsEnabled="{Binding IsDocumentLoaded}"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding RevealRasterizedHidden, Mode=TwoWay}" />
                 <Separator/>
                 <MenuItem Header="_Preferences..." Command="{Binding ShowPreferencesCommand}" InputGesture="Ctrl+,">
                     <MenuItem.Icon><TextBlock Text="⚙"/></MenuItem.Icon>
@@ -235,12 +235,7 @@
                             AutomationProperties.Name="Find Text"
                             AutomationProperties.HelpText="Opens the search bar to find text in the document"/>
 
-                    <Button Content="📝 OCR" Command="{Binding RunOcrCommand}"
-                            Classes="modern-button" Padding="12,6"
-                            IsEnabled="{Binding IsDocumentLoaded}"
-                            ToolTip.Tip="Run OCR on Current Page"
-                            AutomationProperties.Name="Run OCR"
-                            AutomationProperties.HelpText="Extract text from scanned images using OCR"/>
+
 
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
@@ -446,113 +441,16 @@
                     </Grid>
 
                     <!-- Document Viewer (shown when document is loaded) -->
-                <ScrollViewer x:Name="PdfScrollViewer"
-                              IsVisible="{Binding IsDocumentLoaded}"
-                              HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Auto"
-                              SizeChanged="PdfScrollViewer_SizeChanged">
-                    <!-- Container that sizes to the image content, preventing centering offset issues -->
-                    <Grid HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20">
-                        <!-- Document Border with Shadow Effect -->
-                        <Border Background="White"
-                                BorderBrush="#AAAAAA"
-                                BorderThickness="1"
-                                CornerRadius="2"
-                                BoxShadow="0 4 12 0 #40000000"
-                                Padding="0"
-                                Classes.redactionModeHighlight="{Binding IsRedactionMode}">
-                            <Border.Styles>
-                                <Style Selector="Border.redactionModeHighlight">
-                                    <Setter Property="BorderBrush" Value="#E53935"/>
-                                    <Setter Property="BorderThickness" Value="2"/>
-                                </Style>
-                            </Border.Styles>
-                            <Grid>
-                                <!-- PDF Page Image -->
-                                <Image x:Name="PdfImage"
-                                       Source="{Binding CurrentPageImage}"
-                                       Stretch="None"
-                                       RenderOptions.BitmapInterpolationMode="HighQuality">
-                                    <Image.RenderTransform>
-                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                                    </Image.RenderTransform>
-                                </Image>
-
-                                <!-- Search Highlights Overlay -->
-                                <Canvas x:Name="SearchHighlightsCanvas"
-                                        IsHitTestVisible="False">
-                                    <Canvas.RenderTransform>
-                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                                    </Canvas.RenderTransform>
-                                </Canvas>
-
-                                <!-- Applied Redactions Overlay - Shows redactions that have been saved to PDF -->
-                                <Canvas x:Name="AppliedRedactionsCanvas"
-                                        IsHitTestVisible="False">
-                                    <Canvas.RenderTransform>
-                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                                    </Canvas.RenderTransform>
-                                </Canvas>
-
-                                <!-- Pending Redactions Overlay - Shows all marked redactions -->
-                                <Canvas x:Name="PendingRedactionsCanvas"
-                                        IsHitTestVisible="False">
-                                    <Canvas.RenderTransform>
-                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                                    </Canvas.RenderTransform>
-                                </Canvas>
-
-                                <!-- Redaction Selection Overlay (shown when in redaction mode)
-                                     COORDINATE SYSTEM: Canvas coordinates are in rendered image pixels (150 DPI).
-                                     The ScaleTransform ensures the selection rectangle visually aligns with the
-                                     zoomed image. Mouse events via GetPosition() return coordinates that are
-                                     automatically inverse-transformed, giving us image-space coordinates. -->
-                                <Canvas IsVisible="{Binding IsRedactionMode}"
-                                        Background="Transparent"
-                                        Cursor="Cross"
-                                        PointerPressed="Canvas_PointerPressed"
-                                        PointerMoved="Canvas_PointerMoved"
-                                        PointerReleased="Canvas_PointerReleased">
-                                    <Canvas.RenderTransform>
-                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                                    </Canvas.RenderTransform>
-                                    <!-- Selection Rectangle - semi-transparent black with red dashed border -->
-                                    <Rectangle x:Name="SelectionRectangle"
-                                               Fill="#40000000"
-                                               Stroke="Red"
-                                               StrokeThickness="2"
-                                               StrokeDashArray="5,5"
-                                               Canvas.Left="{Binding CurrentRedactionArea.X}"
-                                               Canvas.Top="{Binding CurrentRedactionArea.Y}"
-                                               Width="{Binding CurrentRedactionArea.Width}"
-                                               Height="{Binding CurrentRedactionArea.Height}"/>
-                                </Canvas>
-
-                                <!-- Text Selection Overlay (shown when in text selection mode)
-                                     COORDINATE SYSTEM: Same as Redaction Canvas - image pixels with zoom transform. -->
-                                <Canvas IsVisible="{Binding IsTextSelectionMode}"
-                                        Background="Transparent"
-                                        PointerPressed="TextCanvas_PointerPressed"
-                                        PointerMoved="TextCanvas_PointerMoved"
-                                        PointerReleased="TextCanvas_PointerReleased">
-                                    <Canvas.RenderTransform>
-                                        <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
-                                    </Canvas.RenderTransform>
-                                    <!-- Selection Rectangle - semi-transparent green with green dashed border -->
-                                    <Rectangle x:Name="TextSelectionRectangle"
-                                               Fill="#404CAF50"
-                                               Stroke="#4CAF50"
-                                               StrokeThickness="2"
-                                               StrokeDashArray="5,5"
-                                               Canvas.Left="{Binding CurrentTextSelectionArea.X}"
-                                               Canvas.Top="{Binding CurrentTextSelectionArea.Y}"
-                                               Width="{Binding CurrentTextSelectionArea.Width}"
-                                               Height="{Binding CurrentTextSelectionArea.Height}"/>
-                                </Canvas>
-                            </Grid>
-                        </Border>
-                    </Grid>
-                </ScrollViewer>
+                    <controls:PdfViewerControl x:Name="PdfViewerControl"
+                                               IsVisible="{Binding IsDocumentLoaded}"
+                                               Document="{Binding PdfCoreDocument}"
+                                               CurrentPage="{Binding CurrentPage}"
+                                               ZoomLevel="{Binding ZoomLevel}"
+                                               InteractionMode="{Binding InteractionMode}"
+                                               HiddenTextHighlights="{Binding HiddenTextHighlights}"
+                                               RedactionDrawn="OnRedactionDrawn"
+                                               TextSelected="OnTextSelected"
+                                               PageChanged="OnPageChanged" />
                 </Grid>
             </Border>
 

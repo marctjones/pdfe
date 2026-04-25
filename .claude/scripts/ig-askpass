@@ -1,0 +1,79 @@
+#!/bin/bash
+# IdlerGear askpass helper - tries multiple GUI password prompts
+# Used with SUDO_ASKPASS for non-TTY sudo operations
+#
+# Usage:
+#   export SUDO_ASKPASS=/path/to/ig-askpass
+#   sudo -A <command>
+#
+# Or check availability:
+#   ig-askpass --check
+
+set -e
+
+# Check mode - just verify a GUI prompt is available
+if [[ "$1" == "--check" ]]; then
+    if command -v zenity &>/dev/null; then
+        echo "zenity"
+        exit 0
+    elif command -v kdialog &>/dev/null; then
+        echo "kdialog"
+        exit 0
+    elif [[ -n "$DISPLAY" ]] && command -v ssh-askpass &>/dev/null; then
+        echo "ssh-askpass"
+        exit 0
+    elif [[ "$OSTYPE" == darwin* ]]; then
+        echo "osascript"
+        exit 0
+    elif command -v systemd-ask-password &>/dev/null; then
+        echo "systemd-ask-password"
+        exit 0
+    else
+        exit 1
+    fi
+fi
+
+# Get the prompt text (sudo passes this as an argument)
+PROMPT="${1:-Password:}"
+
+# Try GUI password prompts in order of preference
+
+# Linux: zenity (GTK, most common on GNOME/Ubuntu)
+if command -v zenity &>/dev/null; then
+    zenity --password --title="IdlerGear: sudo password required" 2>/dev/null
+    exit $?
+fi
+
+# Linux: kdialog (KDE)
+if command -v kdialog &>/dev/null; then
+    kdialog --password "IdlerGear: sudo password required" 2>/dev/null
+    exit $?
+fi
+
+# Linux: ssh-askpass (X11, widely available)
+if [[ -n "$DISPLAY" ]] && command -v ssh-askpass &>/dev/null; then
+    SSH_ASKPASS_REQUIRE=force ssh-askpass "IdlerGear: $PROMPT" 2>/dev/null
+    exit $?
+fi
+
+# macOS: osascript (AppleScript dialog)
+if [[ "$OSTYPE" == darwin* ]]; then
+    # Use osascript to show a secure password dialog
+    osascript -e 'text returned of (display dialog "IdlerGear: sudo password required" default answer "" with hidden answer buttons {"Cancel", "OK"} default button "OK")' 2>/dev/null
+    exit $?
+fi
+
+# Linux: systemd-ask-password (fallback on systemd systems, may work in some terminals)
+if command -v systemd-ask-password &>/dev/null; then
+    systemd-ask-password "IdlerGear: $PROMPT"
+    exit $?
+fi
+
+# No GUI available - provide helpful error
+echo "ERROR: No password prompt available." >&2
+echo "" >&2
+echo "Options:" >&2
+echo "  1. Run 'sudo -v' in another terminal to pre-authenticate" >&2
+echo "  2. Install zenity (apt install zenity) for GUI prompts" >&2
+echo "  3. Run the command directly in your terminal" >&2
+exit 1

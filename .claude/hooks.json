@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": "idlergear check --file \"$TOOL_INPUT_PATH\" --quiet"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "command": "idlergear check --context-reminder"
+      }
+    ]
+  }
+}

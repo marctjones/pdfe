@@ -135,23 +135,13 @@ public class PreferencesViewModel : ViewModelBase
 
     public void LoadFromMainViewModel(MainWindowViewModel mainViewModel)
     {
-        OcrLanguages = mainViewModel.OcrLanguages;
-        OcrBaseDpi = mainViewModel.OcrBaseDpi;
-        OcrHighDpi = mainViewModel.OcrHighDpi;
-        OcrLowConfidence = mainViewModel.OcrLowConfidence;
         RenderCacheMax = mainViewModel.RenderCacheMax;
-        RunVerifyAfterSave = mainViewModel.RunVerifyAfterSave;
         DebugVerifyRedaction = mainViewModel.DebugVerifyRedaction;
     }
 
     public void SaveToMainViewModel(MainWindowViewModel mainViewModel)
     {
-        mainViewModel.OcrLanguages = OcrLanguages;
-        mainViewModel.OcrBaseDpi = OcrBaseDpi;
-        mainViewModel.OcrHighDpi = OcrHighDpi;
-        mainViewModel.OcrLowConfidence = OcrLowConfidence;
         mainViewModel.RenderCacheMax = RenderCacheMax;
-        mainViewModel.RunVerifyAfterSave = RunVerifyAfterSave;
         mainViewModel.DebugVerifyRedaction = DebugVerifyRedaction;
     }
 }

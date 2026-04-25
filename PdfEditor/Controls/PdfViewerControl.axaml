@@ -1,0 +1,80 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+             x:Class="PdfEditor.Controls.PdfViewerControl">
+
+    <Grid>
+        <!-- Main PDF display area -->
+        <ScrollViewer Name="PdfScrollViewer"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto">
+
+            <Grid Name="ContentGrid">
+                <!-- PDF Page Image -->
+                <Image Name="PdfImage"
+                       Stretch="None"
+                       RenderTransformOrigin="0,0">
+                    <Image.RenderTransform>
+                        <ScaleTransform ScaleX="1" ScaleY="1" />
+                    </Image.RenderTransform>
+                </Image>
+
+                <!-- Overlay canvases for annotations -->
+                <Canvas Name="OverlayCanvas"
+                        Background="Transparent"
+                        IsHitTestVisible="True">
+                    <Canvas.RenderTransform>
+                        <ScaleTransform ScaleX="1" ScaleY="1" />
+                    </Canvas.RenderTransform>
+
+                    <!-- Search highlights layer -->
+                    <Canvas Name="SearchHighlightsLayer" />
+
+                    <!-- Applied redactions layer -->
+                    <Canvas Name="AppliedRedactionsLayer" />
+
+                    <!-- Pending redactions layer -->
+                    <Canvas Name="PendingRedactionsLayer" />
+
+                    <!-- Text selection layer -->
+                    <Canvas Name="TextSelectionLayer" />
+
+                    <!-- Hidden-text reveal layer (audit/"reveal" mode) -->
+                    <Canvas Name="HiddenTextRevealLayer" />
+
+                    <!-- Interaction layer (for drawing) -->
+                    <Canvas Name="InteractionLayer"
+                            Background="Transparent" />
+                </Canvas>
+            </Grid>
+        </ScrollViewer>
+
+        <!-- Loading overlay -->
+        <Grid Name="LoadingOverlay"
+              IsVisible="False"
+              Background="#80000000">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                <TextBlock Text="Loading page..."
+                           Foreground="White"
+                           FontSize="16" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Error overlay -->
+        <Grid Name="ErrorOverlay"
+              IsVisible="False"
+              Background="#80000000">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                <TextBlock Name="ErrorMessageText"
+                           Foreground="Red"
+                           FontSize="16"
+                           TextWrapping="Wrap"
+                           MaxWidth="400" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>
