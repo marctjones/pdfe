@@ -96,6 +96,65 @@ public class SearchViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task PragmaticBook_JumpToSearchMatch_NavigatesToMatchPage()
+    {
+        if (!File.Exists(PragmaticBook)) return;
+
+        var vm = new MainWindowViewModel();
+        await vm.LoadDocumentAsync(PragmaticBook);
+
+        vm.SearchText = "Brasseur";
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+        while (DateTime.UtcNow < deadline && vm.SearchMatches.Count < 2)
+            await Task.Delay(200);
+
+        vm.SearchMatches.Should().HaveCountGreaterThan(1,
+            "the book uses 'Brasseur' on multiple pages — we need at least " +
+            "two matches to verify jumping moves between distinct locations");
+
+        // First match is normally on page 3 (back-cover praise).
+        vm.CurrentPageIndex.Should().Be(vm.SearchMatches[0].PageIndex,
+            "VM auto-navigates to first match");
+        vm.CurrentSearchMatchIndex.Should().Be(0);
+
+        // Jump to a later match on a different page.
+        var laterMatch = vm.SearchMatches.First(m => m.PageIndex != vm.SearchMatches[0].PageIndex);
+        vm.JumpToSearchMatch(laterMatch);
+        await Task.Delay(200);
+
+        vm.CurrentPageIndex.Should().Be(laterMatch.PageIndex,
+            "JumpToSearchMatch must navigate to that match's page");
+        vm.CurrentSearchMatchIndex.Should().Be(vm.SearchMatches.IndexOf(laterMatch),
+            "selected-match index updates so prev/next resume from here");
+    }
+
+    [AvaloniaFact]
+    public void RightSidebarPanelSelectors_AreMutuallyExclusive()
+    {
+        var vm = new MainWindowViewModel();
+
+        // Default: no document, no redaction mode, no search → clipboard.
+        vm.ShowSearchResultsPanel.Should().BeFalse();
+        vm.ShowPendingRedactionsPanel.Should().BeFalse();
+        vm.ShowClipboardHistoryPanel.Should().BeTrue();
+
+        vm.IsRedactionMode = true;
+        vm.ShowPendingRedactionsPanel.Should().BeTrue("redaction mode → pending");
+        vm.ShowClipboardHistoryPanel.Should().BeFalse();
+        vm.ShowSearchResultsPanel.Should().BeFalse();
+
+        vm.IsSearchVisible = true;
+        vm.ShowSearchResultsPanel.Should().BeTrue(
+            "search bar trumps redaction-mode for the right sidebar");
+        vm.ShowPendingRedactionsPanel.Should().BeFalse();
+        vm.ShowClipboardHistoryPanel.Should().BeFalse();
+
+        vm.IsSearchVisible = false;
+        vm.ShowPendingRedactionsPanel.Should().BeTrue(
+            "closing search returns to redaction view");
+    }
+
+    [AvaloniaFact]
     public async Task PragmaticBook_VmSearch_HighlightCoordsAreInBitmapDips()
     {
         // Highlights must be in the same DIP space the bitmap renders into

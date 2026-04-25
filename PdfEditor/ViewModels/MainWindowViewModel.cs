@@ -491,6 +491,9 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaiseAndSetIfChanged(ref _isRedactionMode, value);
             this.RaisePropertyChanged(nameof(CurrentModeText));
             this.RaisePropertyChanged(nameof(InteractionMode));
+            // The right sidebar's panel selector depends on this flag.
+            this.RaisePropertyChanged(nameof(ShowPendingRedactionsPanel));
+            this.RaisePropertyChanged(nameof(ShowClipboardHistoryPanel));
         }
     }
 

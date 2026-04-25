@@ -478,37 +478,92 @@
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1,0,0,0">
                 <Grid RowDefinitions="Auto,*,Auto">
-                    <!-- Header - Shows "Pending Redactions" in redaction mode, "Clipboard History" otherwise -->
+                    <!-- Header — title swaps with the right-sidebar mode. -->
                     <Border Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="12,10">
                         <Grid ColumnDefinitions="*,Auto">
-                            <!-- Title changes based on mode -->
+                            <TextBlock Grid.Column="0"
+                                       Text="Search Results"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                       IsVisible="{Binding ShowSearchResultsPanel}"/>
                             <TextBlock Grid.Column="0"
                                        Text="Pending Redactions"
                                        FontWeight="SemiBold"
                                        FontSize="13"
                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                       IsVisible="{Binding IsRedactionMode}"/>
+                                       IsVisible="{Binding ShowPendingRedactionsPanel}"/>
                             <TextBlock Grid.Column="0"
                                        Text="Clipboard History"
                                        FontWeight="SemiBold"
                                        FontSize="13"
                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                       IsVisible="{Binding !IsRedactionMode}"/>
-                            <!-- Count badge (only in redaction mode) -->
+                                       IsVisible="{Binding ShowClipboardHistoryPanel}"/>
+                            <!-- Count badge for active mode. -->
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SearchMatches.Count, StringFormat='({0})'}"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource BrandPrimaryBrush}"
+                                       IsVisible="{Binding ShowSearchResultsPanel}"/>
                             <TextBlock Grid.Column="1"
                                        Text="{Binding RedactionWorkflow.PendingCount, StringFormat='({0})'}"
                                        FontWeight="SemiBold"
                                        FontSize="13"
                                        Foreground="{DynamicResource BrandPrimaryBrush}"
-                                       IsVisible="{Binding IsRedactionMode}"/>
+                                       IsVisible="{Binding ShowPendingRedactionsPanel}"/>
                         </Grid>
                     </Border>
 
-                    <!-- Pending Redactions List (visible in redaction mode) -->
-                    <ScrollViewer Grid.Row="1" IsVisible="{Binding IsRedactionMode}">
+                    <!-- Search results list — visible whenever the find bar
+                         is open. Each row jumps to its match on click. -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowSearchResultsPanel}">
+                        <ItemsControl ItemsSource="{Binding SearchMatches}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            Margin="6,4"
+                                            Padding="10"
+                                            Background="{DynamicResource CardBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Cursor="Hand"
+                                            Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).JumpToSearchMatchCommand}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel Spacing="4">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding MatchedText}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="12"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding PageIndex, StringFormat='p.{0}'}"
+                                                           FontSize="11"
+                                                           Margin="6,0,0,0"
+                                                           Foreground="{DynamicResource BrandPrimaryBrush}"/>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Context}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       MaxLines="2"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- Pending Redactions List (visible in redaction mode, search bar closed). -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowPendingRedactionsPanel}">
                         <ItemsControl ItemsSource="{Binding RedactionWorkflow.PendingRedactions}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -553,9 +608,9 @@
                         </ItemsControl>
                     </ScrollViewer>
 
-                    <!-- Action Buttons (visible in redaction mode) -->
+                    <!-- Redaction action buttons (visible in redaction mode, search bar closed). -->
                     <Border Grid.Row="2"
-                            IsVisible="{Binding IsRedactionMode}"
+                            IsVisible="{Binding ShowPendingRedactionsPanel}"
                             Padding="12"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,1,0,0">
@@ -598,8 +653,8 @@
                         </Grid>
                     </Border>
 
-                    <!-- Clipboard History List (visible when NOT in redaction mode) -->
-                    <ScrollViewer Grid.Row="1" IsVisible="{Binding !IsRedactionMode}">
+                    <!-- Clipboard History List (visible when neither redaction nor search active). -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowClipboardHistoryPanel}">
                         <ItemsControl ItemsSource="{Binding ClipboardHistory}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="models:ClipboardEntry">
