@@ -691,6 +691,30 @@ internal class RenderContext
             BuildEncodingMaps(encodingDict, encodingName);
         }
 
+        // Parse the font's glyph width table FIRST. The CFF→OpenType wrapper
+        // (called inside TryLoadEmbeddedTypeface below) reads these to build
+        // hmtx — without populating them first, every embedded font would be
+        // wrapped with stale widths from the previously-active font, producing
+        // visibly wrong layout (mid-word gaps and overlaps).
+        _currentFontWidths = null;
+        _currentFontFirstChar = 0;
+        _currentFontMissingWidth = 0f;
+        if (fontDict != null)
+        {
+            var widthsArray = ResolveArray(fontDict, "Widths");
+            if (widthsArray != null && widthsArray.Count > 0)
+            {
+                _currentFontFirstChar = fontDict.GetInt("FirstChar", 0);
+                var widths = new float[widthsArray.Count];
+                for (int i = 0; i < widthsArray.Count; i++)
+                    widths[i] = (float)widthsArray.GetNumber(i);
+                _currentFontWidths = widths;
+            }
+            var descriptor = ResolveDict(fontDict, "FontDescriptor");
+            if (descriptor != null)
+                _currentFontMissingWidth = (float)descriptor.GetNumber("MissingWidth", 0);
+        }
+
         // Prefer a typeface loaded from the PDF's own embedded font stream
         // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). When no embedded
         // data is present or the format isn't SkiaSharp-loadable (e.g. /FontFile
@@ -715,28 +739,6 @@ internal class RenderContext
                 if (w != null)
                     _currentCidWidths = ParseWArray(w);
             }
-        }
-
-        // Parse the font's glyph width table. When present, we'll use PDF widths
-        // for cursor advance instead of Skia's MeasureText (which uses the
-        // fallback system typeface's metrics — wrong for embedded subset fonts).
-        _currentFontWidths = null;
-        _currentFontFirstChar = 0;
-        _currentFontMissingWidth = 0f;
-        if (fontDict != null)
-        {
-            var widthsArray = ResolveArray(fontDict, "Widths");
-            if (widthsArray != null && widthsArray.Count > 0)
-            {
-                _currentFontFirstChar = fontDict.GetInt("FirstChar", 0);
-                var widths = new float[widthsArray.Count];
-                for (int i = 0; i < widthsArray.Count; i++)
-                    widths[i] = (float)widthsArray.GetNumber(i);
-                _currentFontWidths = widths;
-            }
-            var descriptor = ResolveDict(fontDict, "FontDescriptor");
-            if (descriptor != null)
-                _currentFontMissingWidth = (float)descriptor.GetNumber("MissingWidth", 0);
         }
     }
 
