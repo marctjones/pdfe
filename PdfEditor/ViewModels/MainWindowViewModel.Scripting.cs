@@ -87,7 +87,7 @@ public partial class MainWindowViewModel
 
     /// <summary>
     /// Load a document (for Roslyn scripts).
-    /// Usage: await LoadDocumentCommand.Execute("/path/to/file.pdf")
+    /// Usage: <c>await LoadDocumentCommand("/path/to/file.pdf")</c>
     /// Issue #93: Includes configurable timeout to prevent hangs on malformed PDFs.
     /// </summary>
     private async Task LoadDocumentViaScriptAsync(string filePath)
@@ -156,7 +156,7 @@ public partial class MainWindowViewModel
 
     /// <summary>
     /// Redact all occurrences of the specified text on all pages (for Roslyn scripts).
-    /// Usage: await RedactTextCommand.Execute("SECRET")
+    /// Usage: <c>await RedactTextCommand("SECRET")</c>
     ///
     /// Issue #190 FIX: This now uses the file-based TextRedactor API (like CLI) instead
     /// of the coordinate-based workflow. The coordinate conversion was causing failures
@@ -199,7 +199,7 @@ public partial class MainWindowViewModel
     /// <summary>
     /// Apply all pending redactions to the in-memory document (for Roslyn scripts).
     /// This modifies the document but does not save it. Use SaveDocumentCommand to save.
-    /// Usage: await ApplyRedactionsCommand.Execute()
+    /// Usage: <c>await ApplyRedactionsCommand()</c>
     ///
     /// Issue #190 FIX: Text redactions now use file-based TextRedactor API.
     /// </summary>
@@ -239,7 +239,7 @@ public partial class MainWindowViewModel
     /// <summary>
     /// Save the document to the specified path (for Roslyn scripts).
     /// If redactions are pending, apply them first, then save.
-    /// Usage: await SaveDocumentCommand.Execute("/path/to/output.pdf")
+    /// Usage: <c>await SaveDocumentCommand("/path/to/output.pdf")</c>
     ///
     /// Issue #190 FIX: Text redactions now use file-based TextRedactor API.
     /// </summary>
@@ -332,12 +332,6 @@ public partial class MainWindowViewModel
             this.RaisePropertyChanged(nameof(StatusBarText));
 
             _logger.LogInformation("[SCRIPT] SaveDocumentCommand completed successfully, current path updated to: {Path}", filePath);
-
-            // Run verification if enabled
-            if (RunVerifyAfterSave)
-            {
-                await RunVerifyAsync(filePath);
-            }
         }
         catch (Exception ex)
         {
@@ -378,9 +372,9 @@ public partial class MainWindowViewModel
 /// </summary>
 public class CurrentDocumentInfo
 {
-    private readonly PdfSharp.Pdf.PdfDocument? _document;
+    private readonly Pdfe.Core.Document.PdfDocument? _document;
 
-    public CurrentDocumentInfo(PdfSharp.Pdf.PdfDocument? document, string filePath, int pageCount)
+    public CurrentDocumentInfo(Pdfe.Core.Document.PdfDocument? document, string filePath, int pageCount)
     {
         _document = document;
         FilePath = filePath;
@@ -400,5 +394,5 @@ public class CurrentDocumentInfo
     /// <summary>
     /// The underlying PdfDocument (for advanced scenarios).
     /// </summary>
-    public PdfSharp.Pdf.PdfDocument? Document => _document;
+    public Pdfe.Core.Document.PdfDocument? Document => _document;
 }

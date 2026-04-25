@@ -28,7 +28,7 @@ namespace PdfEditor.Services;
 ///    - Origin: Bottom-left corner
 ///    - Units: Points (72 per inch)
 ///    - Y-axis: Increases upward
-///    - Used by: PDF content streams, PdfPig text extraction, PDF spec coordinates
+///    - Used by: PDF content streams, content-stream text extraction, PDF spec coordinates
 ///
 /// 4. SCREEN PIXELS (Display)
 ///    - Origin: Top-left corner
@@ -168,7 +168,7 @@ public static class CoordinateConverter
     /// <summary>
     /// Convert Y coordinate from Avalonia convention (top-left, Y down) to PDF convention (bottom-left, Y up).
     ///
-    /// Use when: Converting screen selection Y for PdfPig queries or PDF writing.
+    /// Use when: Converting screen selection Y for content-stream queries or PDF writing.
     ///
     /// Example: On 792pt page, Avalonia Y=72 (near top) → PDF Y=720 (near top)
     /// </summary>
@@ -205,7 +205,7 @@ public static class CoordinateConverter
     /// <summary>
     /// Convert rectangle from Avalonia coordinates (top-left origin) to PDF coordinates (bottom-left origin).
     ///
-    /// Use when: Converting selection rectangle for PdfPig text queries.
+    /// Use when: Converting selection rectangle for content-stream text queries.
     ///
     /// The rectangle position changes because:
     /// - Avalonia Y is distance from TOP
@@ -234,7 +234,7 @@ public static class CoordinateConverter
     /// <summary>
     /// Convert rectangle from PDF coordinates (bottom-left origin) to Avalonia coordinates (top-left origin).
     ///
-    /// Use when: Converting PdfPig text bounds for display or intersection testing.
+    /// Use when: Converting extracted text bounds for display or intersection testing.
     /// </summary>
     /// <param name="pdfLeft">Left edge in PDF coords</param>
     /// <param name="pdfBottom">Bottom edge in PDF coords (Y from page bottom)</param>
@@ -277,7 +277,7 @@ public static class CoordinateConverter
     /// <summary>
     /// Convert selection from image pixels (top-left) to PDF coordinates (bottom-left).
     ///
-    /// Use when: Converting mouse selection for PdfPig text extraction queries.
+    /// Use when: Converting mouse selection for content-stream text extraction queries.
     ///
     /// Pipeline: Image Pixels → PDF Points (top-left) → PDF Coords (bottom-left)
     /// </summary>

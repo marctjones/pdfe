@@ -1,7 +1,8 @@
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Microsoft.Extensions.Logging;
-using PDFtoImage;
+using Pdfe.Core.Document;
+using Pdfe.Rendering;
 using SkiaSharp;
 using System;
 using System.Collections.Concurrent;
@@ -13,7 +14,7 @@ namespace PdfEditor.Services;
 
 /// <summary>
 /// Service for rendering PDF pages to images
-/// Uses PDFtoImage (MIT License) which wraps PDFium (BSD-3-Clause)
+/// Uses Pdfe.Rendering (SkiaSharp-based renderer)
 /// </summary>
 public class PdfRenderService
 {
@@ -166,11 +167,18 @@ public class PdfRenderService
         try
         {
             _logger.LogDebug("Creating RenderOptions with DPI: {Dpi}", dpi);
-            var options = new RenderOptions(Dpi: dpi);
+            var options = new RenderOptions { Dpi = dpi };
 
-            _logger.LogDebug("Converting PDF page to SKBitmap from stream");
+            _logger.LogDebug("Opening PDF document from stream");
+            using var pdfDoc = PdfDocument.Open(pdfStream, ownsStream: false);
+
+            // pageIndex is 0-based, but GetPage expects 1-based
+            var page = pdfDoc.GetPage(pageIndex + 1);
+
+            _logger.LogDebug("Rendering page with Pdfe.Rendering.SkiaRenderer");
+            var renderer = new SkiaRenderer();
             // NOTE: Do NOT use 'using' here - the caller is responsible for disposing the returned bitmap
-            var skBitmap = Conversion.ToImage(pdfStream, page: pageIndex, options: options);
+            var skBitmap = renderer.RenderPage(page, options);
 
             if (skBitmap == null)
             {
@@ -179,7 +187,7 @@ public class PdfRenderService
             }
 
             _logger.LogDebug("SKBitmap created: {Width}x{Height}", skBitmap.Width, skBitmap.Height);
-            
+
             sw.Stop();
             _logger.LogInformation("Page {PageIndex} rendered successfully in {ElapsedMs}ms",
                 pageIndex, sw.ElapsedMilliseconds);
@@ -216,16 +224,12 @@ public class PdfRenderService
 
         try
         {
-            using var fileStream = File.OpenRead(pdfPath);
-            using var memoryStream = new MemoryStream();
-            fileStream.CopyTo(memoryStream);
-            memoryStream.Position = 0;
+            using var pdfDoc = PdfDocument.Open(pdfPath);
+            // pageIndex is 0-based, GetPage expects 1-based
+            var page = pdfDoc.GetPage(pageIndex + 1);
 
-            var options = new RenderOptions(Dpi: 72);
-            using var bitmap = Conversion.ToImage(memoryStream, page: pageIndex, options: options);
-
-            _logger.LogDebug("Page dimensions: {Width}x{Height}", bitmap.Width, bitmap.Height);
-            return (bitmap.Width, bitmap.Height);
+            _logger.LogDebug("Page dimensions: {Width}x{Height}", page.Width, page.Height);
+            return (page.Width, page.Height);
         }
         catch (Exception ex)
         {

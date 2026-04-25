@@ -4,7 +4,8 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using PdfEditor.Services;
 using PdfEditor.Tests.Utilities;
-using UglyToad.PdfPig;
+using Pdfe.Core.Document;
+using Pdfe.Core.Text;
 using Xunit;
 
 namespace PdfEditor.Tests.Unit;
@@ -40,7 +41,7 @@ public class CharacterLevelSelectionTests : IDisposable
     }
 
     /// <summary>
-    /// Helper to get character positions from a PDF using PdfPig.
+    /// Helper to get character positions from a PDF using Pdfe.Core.
     /// Returns positions in PDF coordinates (bottom-left origin).
     /// </summary>
     private List<(char character, double left, double bottom, double right, double top)>
@@ -48,7 +49,8 @@ public class CharacterLevelSelectionTests : IDisposable
     {
         var result = new List<(char, double, double, double, double)>();
 
-        using var document = PdfDocument.Open(pdfPath);
+        using var stream = File.OpenRead(pdfPath);
+        using var document = PdfDocument.Open(stream);
         var page = document.GetPage(pageIndex + 1);
 
         foreach (var word in page.GetWords())
@@ -109,7 +111,8 @@ public class CharacterLevelSelectionTests : IDisposable
             chars.Any(c2 => c2.character == 'r' && Math.Abs(c.left - c2.right) < 10));
 
         // If we can't find exact positions, use approximate bounds
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream1 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream1);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 
@@ -149,7 +152,8 @@ public class CharacterLevelSelectionTests : IDisposable
         var pdfPath = Path.Combine(_tempDir, "single_word_test.pdf");
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "Hello World Today");
 
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream2 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream2);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 
@@ -178,7 +182,8 @@ public class CharacterLevelSelectionTests : IDisposable
         var pdfPath = Path.Combine(_tempDir, "partial_word_test.pdf");
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "CONFIDENTIAL");
 
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream2 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream2);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 
@@ -217,7 +222,8 @@ public class CharacterLevelSelectionTests : IDisposable
         var pdfPath = Path.Combine(_tempDir, "adjacent_word_test.pdf");
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "Hello World");
 
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream2 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream2);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 
@@ -255,7 +261,8 @@ public class CharacterLevelSelectionTests : IDisposable
         var pdfPath = Path.Combine(_tempDir, "multiline_test.pdf");
         TestPdfGenerator.CreateTextOnlyPdf(pdfPath, new[] { "First line here", "Second line here" });
 
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream2 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream2);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 
@@ -304,7 +311,8 @@ public class CharacterLevelSelectionTests : IDisposable
         var pdfPath = Path.Combine(_tempDir, "complete_word_test.pdf");
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "Testing complete selection");
 
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream2 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream2);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 
@@ -350,7 +358,8 @@ public class CharacterLevelSelectionTests : IDisposable
         var pdfPath = Path.Combine(_tempDir, "small_selection_test.pdf");
         TestPdfGenerator.CreateSimpleTextPdf(pdfPath, "ABCDEFGHIJ");
 
-        using var doc = PdfDocument.Open(pdfPath);
+        using var stream2 = File.OpenRead(pdfPath);
+        using var doc = PdfDocument.Open(stream2);
         var page = doc.GetPage(1);
         var words = page.GetWords().ToList();
 

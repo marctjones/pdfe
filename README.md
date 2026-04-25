@@ -2,398 +2,267 @@
   <img src="PdfEditor/Assets/pdfe_logo.svg" alt="PDFE Logo" width="128" height="128">
 </p>
 
-# PdfEditor (PDFE)
+# pdfe
 
-A cross-platform desktop PDF editor built with **C# + .NET 8 + Avalonia UI** featuring TRUE content-level redaction.
+A cross-platform PDF editor and pure-.NET PDF framework, built with **C# + .NET 8 + Avalonia UI** and shipped with **true content-level redaction**.
 
 [![Release](https://img.shields.io/github/v/release/marctjones/pdfe)](https://github.com/marctjones/pdfe/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1600%2B%20passing-brightgreen)](PdfEditor.Tests)
-[![Build](https://img.shields.io/badge/build-0%20warnings-brightgreen)](PdfEditor)
+[![Tests](https://img.shields.io/badge/tests-845%20passing-brightgreen)](Pdfe.Core.Tests)
+[![Build](https://img.shields.io/badge/build-0%20warnings-brightgreen)](Pdfe.Core)
+
+> **v2.0 is an architectural rewrite.** The PDF stack underneath the editor is now pdfe-owned end-to-end — `Pdfe.Core` (parser/writer), `Pdfe.Rendering` (Skia), and `Pdfe.Ocr` (system tesseract shell) — with no third-party PDF dependencies. See [CHANGELOG.md](CHANGELOG.md) for the full v2.0 release notes.
+
+## What's in the box
+
+```
+Pdfe.Core/        Pure-.NET PDF parser, writer, content-stream library
+Pdfe.Rendering/   SkiaSharp-based renderer (text, images, paths, transparency)
+Pdfe.Ocr/         OCR via the system `tesseract` CLI + differential-OCR auditor
+Pdfe.Cli/         `pdfe` command-line tool (render, redact, audit, ocr)
+PdfEditor/        Cross-platform Avalonia desktop app
+```
+
+The libraries are usable independently — embed `Pdfe.Core` if you only need parsing and redaction, or `Pdfe.Rendering` if you need page rasterization.
 
 ## Features
 
-### Core Features
-- **Open and view PDF documents** with smooth rendering
-- **Page manipulation** - Add, remove, and rotate pages (supports 90°/180°/270° rotation)
-- **Text selection** - Select and copy text from PDFs
-- **Search** - Find text with highlighting and navigation
-- **Zoom and pan** - Multiple zoom modes (fit width, fit page, actual size)
-- **Page thumbnails** - Sidebar with clickable thumbnails
-- **Keyboard shortcuts** - Full keyboard navigation support
-- **Cross-platform** - Windows, Linux, and macOS
+### Desktop app
+- Open, view, navigate PDFs with smooth Skia rendering
+- Page manipulation (add, remove, rotate; 90°/180°/270°)
+- Text selection and copy with letter-level positions
+- Find with highlights and navigation
+- Zoom modes: fit width, fit page, actual size, free zoom
+- Page thumbnails sidebar
+- Reveal Hidden Text — yellow highlights for structural detections (text covered by rectangles), orange for differential-OCR recoveries (text inside rasterized images)
+- Digital signature verification
+- Bates numbering
+- Roslyn-based GUI scripting for automation
 
-### Advanced Features
-- **CLI Redaction Tool (`pdfer`)** - Command-line tool for batch redaction, search, and verification
-- **GUI Automation** - C# scripting support (Roslyn) for automated testing and workflows
-- **OCR Support** - Extract text from scanned/image-based PDFs using Tesseract
-- **Digital Signature Verification** - Validate PDF signatures and detect tampering
-- **Redaction Verification** - Automated post-redaction validation to ensure no data leakage
-- **Performance Optimization** - Configurable render cache for faster page navigation
+### Glyph-level redaction
+**Text is removed from the PDF structure, not just visually covered.**
 
-### TRUE Content-Level Redaction
-Unlike most PDF redaction tools that just draw black boxes over content, PdfEditor implements **true content removal**:
+- Glyph-level removal — individual glyphs are excised from content streams
+- Image XObject redaction — image overlays that intersect a redaction area are removed, not just blacked out
+- External tools (`pdftotext`, mutool, Acrobat copy-paste) cannot recover redacted content
+- Mark-then-apply workflow with red dashed previews and a Clipboard History sidebar showing what was removed
+- Original protection — defaults the save dialog to `filename_REDACTED.pdf`
+- Verified against real-world fixtures (CT birth certificate, government forms) at the pixel and content-stream level
 
-- **Text is REMOVED** from the PDF structure, not just hidden
-- **Glyph-level removal** - Individual text glyphs are removed from content streams
-- **Verified with external tools** (pdftotext, PdfPig, pdfer) - redacted text cannot be extracted
-- **Clipboard history** shows exactly what text was removed
-- **Page rotation aware** - accurate redaction on rotated pages
-- **1600+ automated tests** verify redaction integrity
-- **Real-world validated** - Successfully redacts government forms (birth certificates, etc.)
+### CLI (`pdfe`)
+```bash
+pdfe render  <file>  -o out.png  [--page N] [--dpi N]
+pdfe redact  <file>  -o out.pdf  --text "PHRASE"
+pdfe audit   <file>  [--deep] [--json]
+pdfe ocr     <file>
+```
+
+`audit --deep` runs differential OCR — renders the page twice (once with overlays stripped) and diffs the OCR text — to catch words hidden inside rasterized images by an opaque overlay (the rasterized analogue of a black-box redaction).
+
+### Renderer coverage
+The Skia renderer has been smoke-tested against a real-world corpus and renders essentially identically to mutool/Acrobat at the structural level:
+
+| PDF type | Notes |
+|---|---|
+| State-issued government forms (CT birth-cert, DS-82) | TJ kerning, Tw column alignment, raster backgrounds |
+| SCOTUS opinions | Non-uniform Tm, Type1 PostScript subsets |
+| IRS Form 1040 + Instructions | Type0/Identity-H, Acrobat-distilled, 180° footers |
+| CDC VIS | Embedded TrueType, Wingdings dingbats |
+| Pragmatic Bookshelf books (XEP) | 455-page multi-font CFF subsets, ZapfDingbats |
+| Multilingual CJK | zh-Hans, zh-Hant, ja, ko via Noto Serif CJK |
+
+See [`Pdfe.Rendering.Tests/Visual/`](Pdfe.Rendering.Tests/Visual) and [`PdfEditor.Tests/UI/baselines/`](PdfEditor.Tests/UI/baselines) for the regression baselines.
 
 ## Installation
 
-### From Releases (Recommended)
+### From releases
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/marctjones/pdfe/releases).
+Download the latest from [GitHub Releases](https://github.com/marctjones/pdfe/releases) and run the executable for your platform.
 
-**Linux:**
-```bash
-curl -sSL https://raw.githubusercontent.com/marctjones/pdfe/main/install-from-release.sh | bash
-```
-
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/marctjones/pdfe/main/install-from-release.ps1 -OutFile install.ps1; .\install.ps1
-```
-
-**macOS:**
-```bash
-# Download and extract from releases, then:
-chmod +x PdfEditor-macos-*/PdfEditor
-./PdfEditor-macos-*/PdfEditor
-```
-
-### From Source
+### From source
 
 ```bash
-# Clone the repository
 git clone https://github.com/marctjones/pdfe.git
 cd pdfe
-
-# Build and run
-cd PdfEditor
 dotnet restore
-dotnet run
+dotnet run --project PdfEditor
 ```
+
+`dotnet 8.0` SDK required. No additional native dependencies — the renderer is pure SkiaSharp, the OCR auditor shells out to the system `tesseract` binary if installed (skipped gracefully if not).
 
 ## Usage
 
-### Basic Operations
-1. **Open a PDF**: File > Open or Ctrl+O
-2. **Navigate pages**: Page Up/Down, arrow keys, or click thumbnails
-3. **Zoom**: Ctrl+Plus/Minus, or use View menu
-4. **Search**: Ctrl+F to find text
+### Desktop redaction (mark-then-apply)
 
-### Redaction (Mark-Then-Apply Workflow)
+1. **Enable redaction mode** — toolbar button or press `R`
+2. **Mark areas** — click and drag (red dashed outline = pending)
+3. **Review pending marks** — sidebar shows preview text
+4. **Apply** — toolbar button or `Enter` (permanent removal)
+5. **Verify** — Clipboard History panel shows exactly what came out
+6. **Save** — defaults to `filename_REDACTED.pdf`
 
-PdfEditor uses a **mark-then-apply** workflow for precise, batch redaction:
+Multiple areas across multiple pages can be marked and applied as a single batch.
 
-1. **Enable redaction mode**: Click "Redact Mode" button or press R
-2. **Mark areas**: Click and drag to select areas to redact (red dashed outline shows pending)
-3. **Review**: Pending redactions are shown in the sidebar with preview text
-4. **Apply all**: Click "Apply Redaction" to permanently remove all marked content
-5. **Verify**: Check clipboard history sidebar to see what was removed
-6. **Save**: Click "Save" - automatically suggests `filename_REDACTED.pdf` to protect originals
+### Reveal Hidden Text
 
-**Key Features:**
-- **Batch redaction**: Mark multiple areas across pages, then apply all at once
-- **Visual feedback**: Pending (red dashed) vs. applied (black solid) distinction
-- **Preview**: See exactly what text will be removed before applying
-- **Original protection**: Cannot accidentally overwrite the original file
-- **TRUE removal**: Text is removed from PDF structure, not just visually hidden
+`Tools → Reveal Hidden Text` finds text that's been visually hidden by overlays:
 
-### Keyboard Shortcuts
+- **Yellow boxes** — structural detections from `Pdfe.Core.Text.Segmentation.HiddenTextDetector` (text covered by later filled rectangles, the classic bad-redaction pattern)
+- **Orange boxes** — differential-OCR recoveries (`Pdfe.Ocr.DifferentialOcrAuditor`) for text hidden inside rasterized images by an opaque overlay
 
-Press **F1** to view all shortcuts in the application.
+Useful for auditing third-party redactions before relying on them.
+
+### Keyboard shortcuts
+
+Press **F1** to view all in-app.
 
 | Category | Action | Shortcut |
-|----------|--------|----------|
-| **File** | Open | Ctrl+O |
-| | Save | Ctrl+S |
-| | Save As | Ctrl+Shift+S |
-| | Close Document | Ctrl+W |
-| | Print | Ctrl+P |
-| | Exit | Alt+F4 |
-| **Edit** | Find | Ctrl+F |
-| | Find Next | F3 |
-| | Find Previous | Shift+F3 |
-| | Copy Text | Ctrl+C |
-| | Preferences | Ctrl+, |
-| **View** | Zoom In | Ctrl+Plus |
-| | Zoom Out | Ctrl+Minus |
-| | Actual Size | Ctrl+0 |
-| | Fit Width | Ctrl+1 |
-| | Fit Page | Ctrl+2 |
-| **Navigation** | Next Page | Page Down |
-| | Previous Page | Page Up |
-| | First Page | Home |
-| | Last Page | End |
-| **Modes** | Toggle Redaction Mode | R |
-| | Toggle Text Selection | T |
-| | Apply Redaction | Enter |
-| **Pages** | Rotate Left | Ctrl+L |
-| | Rotate Right | Ctrl+R |
-| **Help** | Keyboard Shortcuts | F1 |
+|---|---|---|
+| File | Open / Save / Save As / Close | `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+W` |
+| Edit | Find / Find Next / Find Previous | `Ctrl+F` / `F3` / `Shift+F3` |
+| View | Zoom In / Out / Actual / Fit Width / Fit Page | `Ctrl+Plus/Minus/0/1/2` |
+| Navigation | Next/Previous/First/Last Page | `Page Down/Up`, `Home`, `End` |
+| Modes | Redaction / Text Selection / Apply | `R` / `T` / `Enter` |
+| Pages | Rotate Left / Right | `Ctrl+L` / `Ctrl+R` |
 
-### OCR (Optical Character Recognition)
+### CLI examples
 
-PdfEditor includes built-in OCR support using Tesseract for extracting text from scanned or image-based PDFs.
-
-**Zero Setup Required:**
-- **Auto-download**: Language data files are automatically downloaded on first use
-- **Bundled**: English language data included in releases (no internet required)
-- **Just works**: Click OCR button and it handles everything automatically
-
-**Usage:**
-1. Open a PDF with scanned/image content
-2. Click the **📝 OCR** button in the toolbar (or Tools → Run OCR)
-3. Wait for processing (status shown in status bar)
-4. Extracted text appears in Clipboard History panel
-
-**Configuration:**
-Customize OCR settings through **Tools** → **Preferences** (Ctrl+,):
-- **Languages**: English (eng) by default, supports 100+ languages (eng+deu for English+German, etc.)
-- **DPI Settings**: Base DPI (350) and high DPI (450) for quality/speed balance
-- **Preprocessing**: Grayscale conversion, denoising, binarization options
-
-**Advanced Features:**
-- **Auto-download**: Missing language files download automatically from GitHub
-- **Smart retry**: Low-confidence pages re-processed at higher DPI
-- **Multi-language**: Process documents with mixed languages (e.g., "eng+fra+deu")
-- **Progress feedback**: Status messages and completion dialogs
-- **Manual download**: If auto-download fails, clear instructions provided
-
-**Supported Languages:**
-Download additional languages automatically by setting in Preferences:
-- `eng` - English (bundled)
-- `deu` - German
-- `fra` - French
-- `spa` - Spanish
-- `ita` - Italian
-- `por` - Portuguese
-- `rus` - Russian
-- `chi_sim` - Simplified Chinese
-- `jpn` - Japanese
-- ...and 90+ more languages
-
-For multiple languages, use `+` separator (e.g., `eng+deu+fra`)
-
-### Digital Signature Verification
-
-PdfEditor can verify digital signatures in PDF documents to detect tampering and validate certificate authenticity.
-
-**Features:**
-- Signature presence detection
-- Certificate validation
-- Tampering detection
-- Signing time verification
-
-### CLI Redaction Tool (`pdfer`)
-
-**NEW in v1.3.0**: Professional command-line tool for PDF redaction, search, and verification.
-
-**Commands:**
-- `pdfer redact <input.pdf> <output.pdf> <text>` - Redact text from PDF
-- `pdfer search <file.pdf> <text>` - Search for text and show locations
-- `pdfer verify <file.pdf> <text>` - Verify text has been removed
-- `pdfer info <file.pdf>` - Display PDF information (pages, text count, etc.)
-
-**Features:**
-- **Batch redaction** - Redact multiple terms at once
-- **Regex support** - Use regular expressions for pattern matching
-- **Case-insensitive** - Optional case-insensitive matching
-- **JSON output** - Machine-readable output for automation
-- **Dry-run mode** - Preview redactions without modifying files
-- **Quiet mode** - Suppress output for scripting
-- **Terms from file/stdin** - Read redaction terms from file or pipe
-
-**Examples:**
 ```bash
-# Redact a specific term
-pdfer redact input.pdf output.pdf "SECRET"
+# Render page 1 of a PDF at 200 DPI
+pdfe render report.pdf -o report-p1.png --page 1 --dpi 200
 
-# Redact multiple terms
-pdfer redact input.pdf output.pdf "SECRET" "CONFIDENTIAL" "PRIVATE"
+# Glyph-level redact a phrase
+pdfe redact report.pdf -o report-redacted.pdf --text "ACCOUNT 9876"
 
-# Use regex to redact SSNs
-pdfer redact input.pdf output.pdf --regex "\d{3}-\d{2}-\d{4}"
+# Audit a "redacted" PDF for hidden text leftovers — both structural and rasterized
+pdfe audit purportedly-redacted.pdf --deep --json
 
-# Search for text
-pdfer search document.pdf "John Doe"
-
-# Verify redaction worked
-pdfer verify redacted.pdf "SECRET"  # Exit code 0 if not found
-
-# Batch processing with shell script
-for pdf in *.pdf; do
-    pdfer redact "$pdf" "redacted_$pdf" "CONFIDENTIAL"
-done
+# Extract text from a scanned PDF (requires system tesseract)
+pdfe ocr scan.pdf
 ```
 
-**Installation:**
-```bash
-# From source
-cd PdfEditor.Redaction.Cli
-dotnet build -c Release
-
-# Run
-./bin/Release/net8.0/pdfer --help
-```
-
-## Technology Stack
+## Technology stack
 
 ### Framework & UI
-- **.NET 8.0** - Cross-platform runtime
-- **Avalonia UI 11.1.3** (MIT) - Cross-platform XAML UI framework
-- **ReactiveUI** (MIT) - MVVM framework
+- **.NET 8.0** — Cross-platform runtime
+- **Avalonia UI 11.x** (MIT) — Cross-platform XAML UI
+- **ReactiveUI** (MIT) — MVVM framework
 
-### PDF Libraries (All Permissive Licenses)
-- **PDFsharp 6.2.2** (MIT) - PDF manipulation
-- **PDFtoImage 4.0.2** (MIT) - PDF rendering via PDFium
-- **PdfPig 0.1.11** (Apache 2.0) - PDF parsing and text extraction
-- **SkiaSharp 2.88.8** (MIT) - 2D graphics
-- **Tesseract 5.2.0** (Apache 2.0) - OCR engine
-- **Portable.BouncyCastle 1.9.0** (MIT) - Cryptography for signature verification
-- **Microsoft.CodeAnalysis.CSharp.Scripting 5.0.0** (MIT) - Roslyn scripting for automation
+### Pdfe libraries (this repo)
+- **Pdfe.Core** — Pure-.NET PDF parser, writer, content streams, glyph-level redaction, text extraction with letter positions, hidden-text detection, document authoring
+- **Pdfe.Rendering** — SkiaSharp renderer with embedded TrueType + raw-CFF/Type1C support, Type0/CID composite fonts, /Differences-aware encoding, image XObjects, transparency, clipping paths
+- **Pdfe.Ocr** — Wrapper around the system `tesseract` CLI + a differential-OCR auditor
 
-## Project Structure
+### Permissive third-party deps
+- **SkiaSharp 2.88.x** (MIT) — 2D graphics
+- **Clipper2** (BSL 1.0) — Polygon clipping for redaction geometry
+- **Portable.BouncyCastle** (MIT) — Cryptography for signature verification
+- **Microsoft.CodeAnalysis.CSharp.Scripting** (MIT) — Roslyn scripting for GUI automation
+
+No copyleft obligations. No PDFium / PDFsharp / PdfPig / Tesseract.NET — all dropped in v2.0.
+
+## Project structure
 
 ```
 pdfe/
-├── PdfEditor/                      # Main GUI application (Avalonia UI)
-│   ├── Models/                    # Data models
-│   ├── Services/                  # Business logic
-│   │   ├── ScriptingService.cs   # Roslyn C# scripting
-│   │   ├── PdfDocumentService.cs
-│   │   ├── PdfRenderService.cs
-│   │   └── ...
-│   ├── ViewModels/                # MVVM view models
-│   └── Views/                     # UI views (XAML)
+├── Pdfe.Core/                      # PDF parser, writer, content streams, redaction
+│   ├── Parsing/                    # Lexer, parser, xref
+│   ├── Document/                   # PdfDocument, PdfPage, PageCollection
+│   ├── Content/                    # ContentStreamReader/Writer
+│   ├── Text/                       # TextExtraction, letter positions
+│   │   └── Segmentation/           # GlyphRemover, ImageRedactor, HiddenTextDetector
+│   ├── Graphics/                   # PdfGraphics API (paths, text, images)
+│   └── Writing/                    # Save, incremental update
 │
-├── PdfEditor.Redaction/           # Redaction engine library
-│   ├── ContentStream/            # Content stream parsing
-│   ├── Operators/                # PDF operator handlers (Tj, TJ, Tm, etc.)
-│   ├── TextRedactor.cs           # Main redaction API
-│   └── ...
+├── Pdfe.Rendering/                 # Skia-based renderer
+│   ├── SkiaRenderer.cs             # Content-stream → SKBitmap
+│   ├── Fonts/                      # CFF parser, OpenType wrapper, AGL
+│   └── AdobeGlyphList.cs
 │
-├── PdfEditor.Redaction.Cli/       # CLI tool (pdfer)
-│   ├── Commands/                 # Redact, Search, Verify, Info
-│   └── Program.cs
+├── Pdfe.Ocr/                       # OCR shim
+│   ├── PdfOcrService.cs            # tesseract CLI invocation
+│   └── DifferentialOcrAuditor.cs   # render-twice-and-diff hidden-text finder
 │
-├── PdfEditor.Redaction.Cli.Tests/ # CLI tests (74 tests)
-│   ├── Unit/                     # Command tests
-│   └── Integration/              # Corpus tests
+├── Pdfe.Cli/                       # `pdfe` CLI
+│   └── Program.cs                  # render / redact / audit / ocr commands
 │
-├── PdfEditor.Redaction.Tests/     # Redaction library tests (136 tests)
-│   ├── Integration/              # Real-world PDF tests
-│   └── Unit/                     # Operator tests
+├── PdfEditor/                      # Desktop GUI
+│   ├── Controls/PdfViewerControl   # Reusable Avalonia PDF viewer
+│   ├── Models/                     # HiddenTextHighlight, etc.
+│   ├── Services/                   # 7 services on Pdfe.Core / Pdfe.Rendering
+│   ├── ViewModels/
+│   └── Views/
 │
-├── PdfEditor.Tests/               # GUI tests (144 tests)
-│   ├── Integration/              # End-to-end tests
-│   ├── Unit/                     # ViewModel tests
-│   ├── UI/                       # GUI automation tests
-│   └── Security/                 # Verification tests
-│
-├── automation-scripts/            # GUI automation scripts (.csx)
-│   ├── test-birth-certificate.csx
-│   ├── test-redact-text.csx
-│   └── README.md
-│
-├── scripts/                       # Build/test shell scripts
-│   ├── test.sh
-│   ├── build.sh
-│   └── demo.sh
-│
-└── wiki/                          # GitHub wiki (cloned)
-    ├── Project-Architecture.md
-    ├── Redaction-Engine.md
-    └── ...
+├── Pdfe.Core.Tests/                # 442 tests
+├── Pdfe.Rendering.Tests/           # 175 tests, including visual baselines
+├── Pdfe.Cli.Tests/                 # 7 tests
+├── PdfEditor.Tests/                # 221 tests, including headless GUI
+└── test-pdfs/                      # Smoke corpus + sample PDFs
 ```
 
 ## Testing
 
-Run the comprehensive test suite:
-
 ```bash
-# All tests (1600+ tests across all projects)
-dotnet test PdfEditor.Tests PdfEditor.Redaction.Tests PdfEditor.Redaction.Cli.Tests
-
-# GUI tests
-cd PdfEditor.Tests
+# Full suite
 dotnet test
 
-# CLI tests
-cd PdfEditor.Redaction.Cli.Tests
-dotnet test
+# Single project
+dotnet test Pdfe.Rendering.Tests
+dotnet test Pdfe.Core.Tests --filter "Redaction"
 
-# Redaction library tests
-cd PdfEditor.Redaction.Tests
-dotnet test
-
-# Run specific test category
-dotnet test --filter "FullyQualifiedName~BirthCertificate"
+# With detailed output
+dotnet test --logger "console;verbosity=detailed"
 ```
 
-**Test Statistics:**
-- **1600+ total tests** across 3 test projects
-- **809 library tests** - Redaction engine (PdfEditor.Redaction.Tests)
-- **74+ CLI tests** - pdfer command validation (PdfEditor.Redaction.Cli.Tests)
-- **899 GUI tests** - Application tests (PdfEditor.Tests)
+**Test counts (v2.0):**
+- Pdfe.Core.Tests: 442 passing, 2 skipped
+- Pdfe.Rendering.Tests: 175 passing
+- Pdfe.Cli.Tests: 7 passing
+- PdfEditor.Tests: 221 passing, 2 skipped (require `tesseract` installed)
 
-**Test Categories:**
-- **Unit tests** - ViewModel, operators, coordinate conversion
-- **Integration tests** - Real-world PDFs (birth certificates, forms)
-- **Corpus tests** - veraPDF test suite (2,694 PDFs)
-- **GUI automation tests** - Roslyn scripting-based
-- **Security tests** - Verify TRUE content removal
+**Total: 845 tests, 0 failing.**
 
-**Scripts:**
-- `./scripts/test.sh` - Run all tests with logging
-- `./scripts/test-birth-certificate-redaction.sh` - Birth certificate validation
+Test categories:
+- Unit tests — primitives, parser, content streams, segmentation, coordinate math
+- Integration tests — real-world PDFs (birth certificates, government forms, books)
+- Visual regression — PNG-baseline diffs against the renderer corpus
+- Headless GUI — `[AvaloniaFact]` tests render `PdfViewerControl` against fixtures
+- Security — content-stream verification that redacted text is structurally absent
 
 ## Building
 
-### Development Build
-```bash
-cd PdfEditor
-dotnet build
-dotnet run
-```
-
-### Release Build
 ```bash
 # Linux
-dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish PdfEditor -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
 
 # Windows
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish PdfEditor -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
-# macOS (Intel)
-dotnet publish -c Release -r osx-x64 --self-contained true -p:PublishSingleFile=true
-
-# macOS (Apple Silicon)
-dotnet publish -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true
+# macOS Intel / Apple Silicon
+dotnet publish PdfEditor -c Release -r osx-x64    --self-contained true -p:PublishSingleFile=true
+dotnet publish PdfEditor -c Release -r osx-arm64  --self-contained true -p:PublishSingleFile=true
 ```
+
+Published binaries land in `bin/Release/net8.0/<runtime>/publish/`.
 
 ## Documentation
 
-- **[GitHub Wiki](https://github.com/marctjones/pdfe/wiki)** - Project architecture, redaction engine, testing guide
-- **[CLAUDE.md](CLAUDE.md)** - AI assistant guidelines and development documentation
-- **[REDACTION_AI_GUIDELINES.md](REDACTION_AI_GUIDELINES.md)** - Critical guidelines for AI-assisted development
-- **[LICENSES.md](LICENSES.md)** - Complete dependency licensing
+- **[CHANGELOG.md](CHANGELOG.md)** — v2.0 release notes (full architectural changes)
+- **[GitHub Wiki](https://github.com/marctjones/pdfe/wiki)** — Architecture, redaction engine internals, PDF spec reference
+- **[CLAUDE.md](CLAUDE.md)** — Development guidelines (also for AI-assisted contributions)
+- **[REDACTION_AI_GUIDELINES.md](REDACTION_AI_GUIDELINES.md)** — Critical safety rules for redaction-code changes
 
 ## License
 
-MIT License - See [LICENSES.md](LICENSES.md) for complete dependency licensing.
-
-All dependencies use permissive licenses (MIT, Apache 2.0, BSD-3). No copyleft obligations.
+MIT License. See [LICENSES.md](LICENSES.md) for the complete dependency-license inventory. All dependencies are permissive (MIT / Apache 2.0 / BSD-3 / BSL-1.0); no copyleft.
 
 ## Contributing
 
-Contributions are welcome! Key areas:
-1. Additional PDF operator support
-2. Performance optimization for large PDFs
-3. Accessibility improvements
-4. Additional file format exports
+Contributions welcome. The biggest open areas tracked in GitHub Issues:
+
+- PDF encryption / password handling (#237) — v2.1
+- Annotations (#271), Forms (#272), Tagged PDF (#275) — v2.2
+- Advanced transparency (#274) — v2.2
+- Partial glyph rasterization for redaction cuts that bisect a glyph (#278)
+
+Smaller-scope improvements (additional operator coverage, performance, accessibility) are good first issues.
