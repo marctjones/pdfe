@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
 using PdfEditor.Controls;
 using PdfEditor.Models;
 using PdfEditor.ViewModels;
@@ -189,10 +190,25 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Ctrl+F: Toggle search
+        // Ctrl+F: Toggle search bar (and put focus in the input so the
+        // user can type immediately). Without the focus hop the search
+        // bar appears but keystrokes go to whatever was focused before
+        // — which looks like "search doesn't do anything".
         if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             viewModel.ToggleSearchCommand?.Execute().Subscribe();
+            if (viewModel.IsSearchVisible)
+            {
+                var searchBox = this.FindControl<TextBox>("SearchTextBox");
+                // The Border that hosts the TextBox just toggled
+                // IsVisible — wait for the layout pass to finish before
+                // we try to focus it.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    searchBox?.Focus();
+                    searchBox?.SelectAll();
+                }, DispatcherPriority.Background);
+            }
             e.Handled = true;
             return;
         }
