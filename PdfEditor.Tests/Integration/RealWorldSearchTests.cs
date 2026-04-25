@@ -142,6 +142,41 @@ public class RealWorldSearchTests
         }
     }
 
+    [Fact]
+    public void PragmaticBook_Search_EmitsProgressReports()
+    {
+        if (!File.Exists(PragmaticBook)) return;
+
+        var reports = new System.Collections.Generic.List<PdfSearchService.SearchProgress>();
+        var progress = new Progress<PdfSearchService.SearchProgress>(reports.Add);
+        var matches = NewService().Search(PragmaticBook, "open source",
+            progress: progress);
+
+        // Give the synchronous Progress<T> dispatcher time to drain.
+        // (Progress<T> posts to the SyncContext captured at construction;
+        // here we don't have one, so reports run inline — they should
+        // already be in `reports` by the time Search returns.)
+        reports.Should().NotBeEmpty(
+            "Search must emit at least one SearchProgress report");
+        reports.Should().Contain(r => r.PagesScanned == 0,
+            "first report should fire before any page is scanned so the UI " +
+            "shows the spinner immediately");
+
+        // Final report should equal full document size and a non-zero count.
+        var final = reports[^1];
+        final.PagesScanned.Should().Be(final.TotalPages,
+            "final report should mark the walk complete");
+        final.MatchesFound.Should().Be(matches.Count,
+            "final report's MatchesFound should match the returned list size");
+
+        // Reports must be monotonic in pages scanned + matches found.
+        for (int i = 1; i < reports.Count; i++)
+        {
+            reports[i].PagesScanned.Should().BeGreaterThanOrEqualTo(reports[i - 1].PagesScanned);
+            reports[i].MatchesFound.Should().BeGreaterThanOrEqualTo(reports[i - 1].MatchesFound);
+        }
+    }
+
     [SkippableFact]
     public void CjkFixture_Search_FindsLatinWord()
     {

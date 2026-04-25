@@ -36,6 +36,15 @@ public class PdfSearchService
     }
 
     /// <summary>
+    /// Progress report emitted as the service walks the document.
+    /// Consumed via IProgress&lt;SearchProgress&gt; — typical use is to
+    /// drive a status bar / inline spinner / determinate progress
+    /// indicator while a long search runs on a large file.
+    /// </summary>
+    public readonly record struct SearchProgress(
+        int PagesScanned, int TotalPages, int MatchesFound);
+
+    /// <summary>
     /// Search for text in a PDF file
     /// </summary>
     /// <param name="pdfPath">Path to the PDF file</param>
@@ -49,7 +58,8 @@ public class PdfSearchService
         string searchTerm,
         bool caseSensitive = false,
         bool wholeWordsOnly = false,
-        bool useRegex = false)
+        bool useRegex = false,
+        IProgress<SearchProgress>? progress = null)
     {
         var matches = new List<SearchMatch>();
 
@@ -62,7 +72,8 @@ public class PdfSearchService
         try
         {
             using var document = PdfDocument.Open(pdfPath);
-            return Search(document, searchTerm, caseSensitive, wholeWordsOnly, useRegex);
+            return Search(document, searchTerm, caseSensitive, wholeWordsOnly, useRegex,
+                progress: progress);
         }
         catch (Exception ex)
         {
@@ -85,7 +96,8 @@ public class PdfSearchService
         bool caseSensitive = false,
         bool wholeWordsOnly = false,
         bool useRegex = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<SearchProgress>? progress = null)
     {
         var matches = new List<SearchMatch>();
         if (document == null || string.IsNullOrWhiteSpace(searchTerm))
@@ -93,15 +105,26 @@ public class PdfSearchService
 
         try
         {
+            var totalPages = document.PageCount;
             _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages",
-                searchTerm, document.PageCount);
+                searchTerm, totalPages);
 
-            for (int i = 0; i < document.PageCount; i++)
+            // Initial 0/N report so the UI can show the spinner+text
+            // immediately rather than waiting for page 1 to finish.
+            progress?.Report(new SearchProgress(0, totalPages, 0));
+
+            for (int i = 0; i < totalPages; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var page = document.GetPage(i + 1);
                 var pageMatches = SearchInPage(page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, i);
                 matches.AddRange(pageMatches);
+
+                // Throttle progress callbacks to keep the dispatcher
+                // unflooded — every 4 pages, plus always the last page
+                // (so the final report shows total = scanned).
+                if (progress != null && ((i & 3) == 0 || i == totalPages - 1))
+                    progress.Report(new SearchProgress(i + 1, totalPages, matches.Count));
             }
 
             _logger.LogInformation("Found {MatchCount} matches for '{SearchTerm}'",
