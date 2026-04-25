@@ -35,6 +35,27 @@ public partial class MainWindowViewModel
     // intermediate keystrokes when typing a multi-letter word at speed.
     private const int SearchDebounceMs = 150;
 
+    private bool _isSearching;
+    private string _searchProgressText = string.Empty;
+
+    /// <summary>True while a search is in flight. Drives the inline spinner.</summary>
+    public bool IsSearching
+    {
+        get => _isSearching;
+        private set => this.RaiseAndSetIfChanged(ref _isSearching, value);
+    }
+
+    /// <summary>
+    /// "Searching page 47 of 455 — 12 matches so far" while a search is
+    /// running, empty otherwise. Drives the inline progress text in the
+    /// search bar.
+    /// </summary>
+    public string SearchProgressText
+    {
+        get => _searchProgressText;
+        private set => this.RaiseAndSetIfChanged(ref _searchProgressText, value);
+    }
+
     // Search Properties
     public string SearchText
     {
@@ -250,16 +271,37 @@ public partial class MainWindowViewModel
                 "Searching for '{Query}' (CaseSensitive={CaseSensitive}, WholeWords={WholeWords})",
                 query, caseSensitive, wholeWords);
 
+            // Show the spinner + progress text immediately. Both run on
+            // the UI thread to avoid cross-thread RaisePropertyChanged.
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                IsSearching = true;
+                SearchProgressText = "Searching…";
+            });
+
+            // Progress reports come on the search worker thread; marshal
+            // each one to the UI thread to update the bound property.
+            // The service throttles the callback rate so we don't flood
+            // the dispatcher.
+            var progress = new Progress<PdfSearchService.SearchProgress>(p =>
+            {
+                if (token.IsCancellationRequested) return;
+                SearchProgressText = p.PagesScanned == 0
+                    ? $"Searching… 0 of {p.TotalPages} pages"
+                    : $"Searching… page {p.PagesScanned} of {p.TotalPages} — " +
+                      $"{p.MatchesFound} match{(p.MatchesFound == 1 ? "" : "es")} so far";
+            });
+
             System.Collections.Generic.List<PdfSearchService.SearchMatch> matches;
             if (doc != null)
             {
                 matches = _searchService.Search(doc, query, caseSensitive, wholeWords,
-                    useRegex: false, cancellationToken: token);
+                    useRegex: false, cancellationToken: token, progress: progress);
             }
             else if (!string.IsNullOrEmpty(_currentFilePath))
             {
                 matches = _searchService.Search(_currentFilePath, query,
-                    caseSensitive, wholeWords, useRegex: false);
+                    caseSensitive, wholeWords, useRegex: false, progress: progress);
             }
             else return;
 
@@ -284,6 +326,8 @@ public partial class MainWindowViewModel
                 }
 
                 this.RaisePropertyChanged(nameof(SearchResultText));
+                IsSearching = false;
+                SearchProgressText = string.Empty;
                 OperationStatus = string.Empty;
             });
 
@@ -293,7 +337,11 @@ public partial class MainWindowViewModel
         {
             _logger.LogError(ex, "Error performing search: {Message}", ex.Message);
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                OperationStatus = string.Empty);
+            {
+                IsSearching = false;
+                SearchProgressText = string.Empty;
+                OperationStatus = string.Empty;
+            });
         }
     }
 

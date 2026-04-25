@@ -283,6 +283,7 @@
                 BorderThickness="0,0,0,1"
                 Padding="8,6"
                 IsVisible="{Binding IsSearchVisible}">
+          <StackPanel Orientation="Vertical" Spacing="4">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <!-- Search Label -->
                 <TextBlock Grid.Column="0" Text="Find:"
@@ -365,6 +366,28 @@
                         AutomationProperties.Name="Close Search"
                         AutomationProperties.HelpText="Close the find bar"/>
             </Grid>
+
+            <!-- Inline search progress: indeterminate bar + page-progress
+                 text. Both visible only while a search is actively running.
+                 The "X of Y matches" final-state count stays in
+                 SearchResultText so this row vanishes when the search
+                 completes. -->
+            <Grid ColumnDefinitions="*,Auto"
+                  IsVisible="{Binding IsSearching}"
+                  Margin="0,2,0,0">
+                <ProgressBar Grid.Column="0"
+                             IsIndeterminate="True"
+                             Height="2"
+                             Margin="0,0,8,0"
+                             VerticalAlignment="Center"
+                             ShowProgressText="False" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding SearchProgressText}"
+                           VerticalAlignment="Center"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Grid>
+          </StackPanel>
         </Border>
 
         <!-- Main Content Area. Auto/Auto on the sidebar columns lets them
