@@ -135,6 +135,17 @@ public class PdfStream : PdfDictionary
     /// <summary>
     /// Set the decoded data directly (used by StreamDecompressor).
     /// </summary>
+    /// <summary>
+    /// Replaces the encoded (possibly compressed/encrypted) stream bytes.
+    /// Used by the security handler to swap ciphertext for plaintext
+    /// before the /Filter pipeline runs.
+    /// </summary>
+    internal void SetEncodedData(byte[] data)
+    {
+        _encodedData = data ?? throw new ArgumentNullException(nameof(data));
+        _decodedData = null;
+    }
+
     internal void SetDecodedData(byte[] data)
     {
         _decodedData = data;

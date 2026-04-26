@@ -11,7 +11,19 @@ public sealed class PdfString : PdfObject, IEquatable<PdfString>
     /// <summary>
     /// The raw bytes of the string.
     /// </summary>
-    public byte[] Bytes { get; }
+    public byte[] Bytes { get; private set; }
+
+    /// <summary>
+    /// Replaces the underlying bytes. Intended for in-place decryption
+    /// of strings encountered during indirect-object parsing — the
+    /// security handler XORs each PdfString's bytes with its per-object
+    /// RC4 keystream. Treat as internal — public callers should not
+    /// mutate strings.
+    /// </summary>
+    internal void ReplaceBytes(byte[] newBytes)
+    {
+        Bytes = newBytes ?? throw new ArgumentNullException(nameof(newBytes));
+    }
 
     /// <summary>
     /// Whether this string was originally a hex string.

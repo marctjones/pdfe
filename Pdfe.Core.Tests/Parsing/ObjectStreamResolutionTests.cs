@@ -183,39 +183,102 @@ public class ObjectStreamResolutionTests
     private const string EncryptedRC4Pdf =
         "../../../../test-pdfs/isartor/Isartor testsuite/PDFA-1b/6.1 File structure/6.1.3 File trailer/isartor-6-1-3-t02-fail-a.pdf";
 
-    [Fact]
-    public void OpensEncryptedPdf_DefaultBehaviour_ThrowsClearException()
-    {
-        // Pre-fix: opening an encrypted PDF returned a "successful" doc
-        // whose content streams were ciphertext garbage (57% printable
-        // bytes that looked nothing like valid PDF operators). Any
-        // downstream code — text extraction, redaction, search — would
-        // silently produce wrong output.
-        //
-        // Defensive fix: PdfDocument.Open now throws a clear, named
-        // exception by default. Callers that want the old behaviour
-        // (e.g. for inspecting the encryption dict itself) can pass
-        // allowEncrypted: true.
-        if (!File.Exists(EncryptedRC4Pdf)) return;
+    // qpdf-generated test PDFs: the Isartor file works for testing the
+    // open path, but its single page has an empty content stream
+    // (deliberately malformed file). For end-to-end "did the bytes
+    // come back as real PDF operators" we need an encrypted file
+    // with non-trivial page content. Generated via:
+    //   qpdf --allow-weak-crypto --encrypt '' '' 128 -- src.pdf rc4-128.pdf
+    //   qpdf --allow-weak-crypto --encrypt '' '' 40  -- src.pdf rc4-40.pdf
+    private const string EncryptedRC4_128 =
+        "../../../../test-pdfs/encrypted/birth-cert-rc4-128.pdf";
+    private const string EncryptedRC4_40 =
+        "../../../../test-pdfs/encrypted/birth-cert-rc4-40.pdf";
 
-        Action open = () => { using var _ = PdfDocument.Open(EncryptedRC4Pdf); };
-        open.Should().Throw<Pdfe.Core.Parsing.PdfEncryptionNotSupportedException>(
-            "encrypted PDFs must throw a clear exception by default — silent " +
-            "ciphertext-as-content was a security-adjacent failure mode");
+    [Theory]
+    [InlineData(EncryptedRC4_128, "RC4 V=2 R=3 (128-bit)")]
+    [InlineData(EncryptedRC4_40, "RC4 V=1 R=2 (40-bit legacy)")]
+    public void OpensRealEncryptedPdf_DecryptedContentIsValidPdfOperators(string path, string description)
+    {
+        // End-to-end Phase 2 RC4 test: take a known PDF (the scrambled
+        // birth certificate, which we already test extensively in Phase
+        // 1), encrypt it with qpdf using empty user password, then
+        // verify pdfe decrypts it transparently and the content stream
+        // bytes are recognisable PDF operators ("BT", "Tj", "ET", etc.)
+        // not RC4 ciphertext.
+        if (!File.Exists(path)) return;
+
+        using var doc = PdfDocument.Open(path);
+        doc.IsEncrypted.Should().BeTrue();
+        doc.IsDecrypting.Should().BeTrue($"{description}: handler must build for empty password");
+
+        var page = doc.GetPage(1);
+        var content = page.GetContentStreamBytes();
+        content.Should().NotBeNull();
+        content!.Length.Should().BeGreaterThan(50,
+            $"{description}: page has real content; decrypted+decoded bytes should be substantive");
+
+        var text = System.Text.Encoding.Latin1.GetString(content);
+        _out.WriteLine($"{description}: {content.Length} bytes, preview: " +
+                       text.Substring(0, Math.Min(150, text.Length)).Replace('\n', ' ').Replace('\r', ' '));
+
+        // PDF text-drawing operators that should appear if the content
+        // stream is real PDF — these are present in the source's
+        // content streams.
+        text.Should().ContainAny(new[] { "BT", "Tj", "TJ", "ET" },
+            $"{description}: decrypted content must look like real PDF operators");
     }
 
     [Fact]
-    public void OpensEncryptedPdf_WithAllowEncrypted_ReturnsDocumentForInspection()
+    public void OpensEncryptedPdf_RC4_BuildsHandlerAndDecryptsStreams()
     {
-        // The opt-in escape: callers that want to inspect the /Encrypt
-        // dict, list xref entries, etc. without actually reading
-        // encrypted streams can pass allowEncrypted: true. This is
-        // explicitly best-effort — content streams will still be
-        // ciphertext until #324 lands real decryption.
+        // Pin down that the Isartor encrypted file (RC4 V=2 R=3 with empty
+        // password) opens via the security-handler path. The file's
+        // single page deliberately has an empty content stream — it's a
+        // PDF/A "fail" test fixture — so we can't assert on operators
+        // here. End-to-end content-bytes-are-operators is covered by
+        // OpensRealEncryptedPdf_DecryptedContentIsValidPdfOperators on
+        // qpdf-generated files with real content.
+        if (!File.Exists(EncryptedRC4Pdf)) return;
+
+        using var doc = PdfDocument.Open(EncryptedRC4Pdf);
+        doc.IsEncrypted.Should().BeTrue("file's trailer carries /Encrypt");
+        doc.IsDecrypting.Should().BeTrue(
+            "the security handler must have built successfully for the empty-password case " +
+            "— means key derivation matches Algorithm 2 and password verification matches Algorithm 6");
+        doc.PageCount.Should().BeGreaterThan(0);
+
+        // Decryption must produce valid zlib bytes (deflate header) for
+        // the page content stream — even when the resulting decoded
+        // content is empty.
+        var page = doc.GetPage(1);
+        var contentsObj = page.Dictionary.GetOptional("Contents");
+        if (contentsObj is PdfReference cref &&
+            doc.GetObject(cref) is PdfStream ps && ps.Filters.Contains("FlateDecode"))
+        {
+            // First two bytes of a valid zlib stream: CMF (0x78) + FLG.
+            // (CMF*256 + FLG) % 31 == 0 per RFC 1950.
+            ps.EncodedData[0].Should().Be(0x78,
+                "decryption must produce a valid zlib header (CMF=0x78). " +
+                "Pre-decryption these were ciphertext that wouldn't pass any header check.");
+            int header = (ps.EncodedData[0] << 8) | ps.EncodedData[1];
+            (header % 31).Should().Be(0, "zlib header checksum must validate");
+        }
+    }
+
+    [Fact]
+    public void OpensEncryptedPdf_WithAllowEncrypted_StillReturnsDocumentForInspection()
+    {
+        // The opt-in escape from before the RC4 path landed: when the
+        // handler can't be built (unsupported V/R, wrong password),
+        // allowEncrypted=true keeps returning a doc for inspecting the
+        // /Encrypt dict at the caller's risk. With RC4 working, the
+        // empty-password case won't hit this fallback path; this test
+        // just keeps the API contract pinned.
         if (!File.Exists(EncryptedRC4Pdf)) return;
 
         using var doc = PdfDocument.Open(EncryptedRC4Pdf, allowEncrypted: true);
-        doc.IsEncrypted.Should().BeTrue("file actually is encrypted; the flag just suppresses the throw");
+        doc.IsEncrypted.Should().BeTrue();
         doc.Trailer.GetOptional("Encrypt").Should().NotBeNull(
             "/Encrypt dict must be reachable so callers inspecting encryption parameters can read /V, /R, /U, /O");
     }
