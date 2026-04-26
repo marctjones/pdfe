@@ -36,6 +36,7 @@
                     <Canvas Name="OverlayCanvas"
                             Background="Transparent"
                             IsHitTestVisible="True">
+                        <Canvas Name="AnnotationsLayer" />
                         <Canvas Name="SearchHighlightsLayer" />
                         <Canvas Name="AppliedRedactionsLayer" />
                         <Canvas Name="PendingRedactionsLayer" />

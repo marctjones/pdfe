@@ -1,6 +1,7 @@
 using System.Text;
 using FluentAssertions;
 using Pdfe.Core.Content;
+using Pdfe.Core.Document;
 using Xunit;
 
 namespace Pdfe.Core.Tests.Content.Operators;
@@ -415,6 +416,140 @@ public class GraphicsStateOperatorTests
         var op = result.Operators.Single();
         op.Name.Should().Be("gs");
         op.GetName(0).Should().Be("GS1");
+    }
+
+    [Fact]
+    public void Parse_gs_WithPageExtGState_ParsesWithoutThrowing()
+    {
+        // Build a PDF with /Resources << /ExtGState << /GS1 << /LW 5.0 >> >> >>
+        // and verify the gs operator is parsed and text still produces bounds.
+        var pdf = MakePdfWithExtGState("/GS1 gs BT /F1 12 Tf 100 100 Td (text) Tj ET");
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+
+        var page = doc.GetPage(1);
+        var stream = page.GetContentStream();
+
+        stream.Operators.Should().ContainSingle(op => op.Name == "gs",
+            "ExtGState reference in page resources must produce a gs operator");
+        stream.Operators.Should().ContainSingle(op => op.Name == "Tj",
+            "text operators after gs must still be parsed");
+    }
+
+    #endregion
+
+    #region Line state save/restore
+
+    [Fact]
+    public void Parse_LineWidthWithQQ_TextOperationsUnaffected()
+    {
+        // Setting line width inside q/Q must not corrupt text-operator parsing.
+        var content = "q 5 w Q BT /F1 12 Tf 100 100 Td (text) Tj ET";
+        var result = new ContentStreamParser(Encoding.UTF8.GetBytes(content)).Parse();
+
+        var tj = result.Operators.Single(op => op.Name == "Tj");
+        tj.BoundingBox.Should().NotBeNull("text bounds must survive q/Q line-state changes");
+    }
+
+    [Fact]
+    public void Parse_NestedLineStateQQ_ProducesCorrectOperatorCount()
+    {
+        // q 1 w q 2 w Q Q  →  six operators, nesting must be balanced
+        var content = "q 1 w q 2 w Q Q";
+        var result = new ContentStreamParser(Encoding.UTF8.GetBytes(content)).Parse();
+
+        result.Operators.Should().HaveCount(6);
+        result.Operators.Select(o => o.Name).Should()
+            .ContainInOrder("q", "w", "q", "w", "Q", "Q");
+    }
+
+    [Fact]
+    public void Parse_LineCap_J_Parsed()
+    {
+        var content = "1 J";
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var op = result.Operators.Single(o => o.Name == "J");
+        op.GetNumber(0).Should().Be(1);
+    }
+
+    [Fact]
+    public void Parse_LineJoin_j_Parsed()
+    {
+        var content = "2 j";
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var op = result.Operators.Single(o => o.Name == "j");
+        op.GetNumber(0).Should().Be(2);
+    }
+
+    [Fact]
+    public void Parse_MiterLimit_M_Parsed()
+    {
+        var content = "4 M";
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var op = result.Operators.Single(o => o.Name == "M");
+        op.GetNumber(0).Should().Be(4);
+    }
+
+    #endregion
+
+    #region Helpers
+
+    /// <summary>Build a minimal single-page PDF with an ExtGState resource GS1 (LW=5) and the given content stream.</summary>
+    private static byte[] MakePdfWithExtGState(string contentStr)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long obj1Pos, obj2Pos, obj3Pos, obj4Pos, obj5Pos;
+
+        obj1Pos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine("<< /Type /Catalog /Pages 2 0 R >>");
+        sb.AppendLine("endobj");
+
+        obj2Pos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        obj3Pos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]");
+        sb.AppendLine("   /Resources << /Font << /F1 5 0 R >> /ExtGState << /GS1 << /LW 5.0 >> >> >>");
+        sb.AppendLine("   /Contents 4 0 R >>");
+        sb.AppendLine("endobj");
+
+        var contentBytes = Encoding.Latin1.GetBytes(contentStr);
+        obj4Pos = sb.Length;
+        var header4 = $"4 0 obj\n<< /Length {contentBytes.Length} >>\nstream\n";
+        sb.Append(header4);
+        sb.Append(contentStr);
+        sb.AppendLine("\nendstream");
+        sb.AppendLine("endobj");
+
+        obj5Pos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{obj1Pos:D10} 00000 n ");
+        sb.AppendLine($"{obj2Pos:D10} 00000 n ");
+        sb.AppendLine($"{obj3Pos:D10} 00000 n ");
+        sb.AppendLine($"{obj4Pos:D10} 00000 n ");
+        sb.AppendLine($"{obj5Pos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
     #endregion

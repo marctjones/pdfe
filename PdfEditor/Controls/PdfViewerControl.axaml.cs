@@ -112,6 +112,19 @@ public partial class PdfViewerControl : UserControl
     }
 
     /// <summary>
+    /// PDF annotations from the current page. When set, the AnnotationsLayer
+    /// canvas is redrawn with coloured rectangles per annotation subtype.
+    /// </summary>
+    public static readonly StyledProperty<System.Collections.Generic.IEnumerable<Pdfe.Core.Document.PdfAnnotation>?> AnnotationsProperty =
+        AvaloniaProperty.Register<PdfViewerControl, System.Collections.Generic.IEnumerable<Pdfe.Core.Document.PdfAnnotation>?>(nameof(Annotations));
+
+    public System.Collections.Generic.IEnumerable<Pdfe.Core.Document.PdfAnnotation>? Annotations
+    {
+        get => GetValue(AnnotationsProperty);
+        set => SetValue(AnnotationsProperty, value);
+    }
+
+    /// <summary>
     /// Highlights for hidden-behind-overlay text to paint on top of the
     /// rendered page. Bound to a VM observable collection; whenever it
     /// changes, <see cref="RefreshHiddenTextOverlays"/> redraws them.
@@ -220,6 +233,8 @@ public partial class PdfViewerControl : UserControl
             control.OnErrorStateChanged());
         ErrorMessageProperty.Changed.AddClassHandler<PdfViewerControl>((control, e) =>
             control.OnErrorMessageChanged());
+        AnnotationsProperty.Changed.AddClassHandler<PdfViewerControl>((control, _) =>
+            control.RedrawAnnotationsLayer());
         HiddenTextHighlightsProperty.Changed.AddClassHandler<PdfViewerControl>((control, e) =>
             control.OnHiddenTextHighlightsChanged(
                 e.OldValue as System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>,
@@ -296,6 +311,61 @@ public partial class PdfViewerControl : UserControl
             Canvas.SetTop(label, h.ScreenBounds.Y);
             layer.Children.Add(label);
         }
+    }
+
+    // DPI used for annotation-rect scaling (must match DefaultRenderDpi).
+    private const double AnnotationRenderDpi = DefaultRenderDpi;
+
+    private void RedrawAnnotationsLayer()
+    {
+        var layer = this.FindControl<Canvas>("AnnotationsLayer");
+        if (layer == null) return;
+        layer.Children.Clear();
+
+        var annots = Annotations;
+        if (annots == null || Document == null) return;
+
+        var page = Document.GetPage(CurrentPage);
+        double pageHeight = page.Height;
+        double scale = AnnotationRenderDpi / 72.0;
+
+        foreach (var a in annots)
+        {
+            var (fillColor, strokeColor) = AnnotationColors(a);
+            var r = a.Rect;
+            // Y-flip: PDF bottom-left → DIP top-left
+            double dipX = r.Left  * scale;
+            double dipY = (pageHeight - r.Top) * scale;
+            double dipW = Math.Max((r.Right  - r.Left) * scale, 4);
+            double dipH = Math.Max((r.Top - r.Bottom)  * scale, 4);
+
+            var rect = new Rectangle
+            {
+                Width = dipW,
+                Height = dipH,
+                Fill = new SolidColorBrush(fillColor),
+                Stroke = new SolidColorBrush(strokeColor),
+                StrokeThickness = 1.5,
+            };
+            Canvas.SetLeft(rect, dipX);
+            Canvas.SetTop(rect, dipY);
+            layer.Children.Add(rect);
+        }
+    }
+
+    private static (Color Fill, Color Stroke) AnnotationColors(Pdfe.Core.Document.PdfAnnotation a)
+    {
+        return a.Subtype switch
+        {
+            Pdfe.Core.Document.PdfAnnotationSubtype.Highlight  => (Color.FromArgb(0x50, 0xFF, 0xFF, 0x00), Color.FromArgb(0xFF, 0xCC, 0xAA, 0x00)),
+            Pdfe.Core.Document.PdfAnnotationSubtype.Underline  => (Color.FromArgb(0x40, 0x00, 0x80, 0xFF), Color.FromArgb(0xFF, 0x00, 0x60, 0xFF)),
+            Pdfe.Core.Document.PdfAnnotationSubtype.StrikeOut  => (Color.FromArgb(0x40, 0xFF, 0x00, 0x00), Color.FromArgb(0xFF, 0xCC, 0x00, 0x00)),
+            Pdfe.Core.Document.PdfAnnotationSubtype.Squiggly   => (Color.FromArgb(0x40, 0xFF, 0x80, 0x00), Color.FromArgb(0xFF, 0xFF, 0x60, 0x00)),
+            Pdfe.Core.Document.PdfAnnotationSubtype.Link       => (Color.FromArgb(0x20, 0x00, 0x80, 0xFF), Color.FromArgb(0xFF, 0x00, 0x80, 0xFF)),
+            Pdfe.Core.Document.PdfAnnotationSubtype.Text       => (Color.FromArgb(0x40, 0xFF, 0xDD, 0x00), Color.FromArgb(0xFF, 0xAA, 0x88, 0x00)),
+            Pdfe.Core.Document.PdfAnnotationSubtype.Widget     => (Color.FromArgb(0x20, 0x00, 0xAA, 0x44), Color.FromArgb(0xFF, 0x00, 0x88, 0x33)),
+            _                                                  => (Color.FromArgb(0x30, 0x80, 0x80, 0x80), Color.FromArgb(0xFF, 0x60, 0x60, 0x60)),
+        };
     }
 
     private void InitializeComponent()
@@ -454,10 +524,12 @@ public partial class PdfViewerControl : UserControl
 
         if (Document != null)
         {
+            RefreshPageAnnotations();
             await RenderCurrentPageAsync();
         }
         else
         {
+            Annotations = null;
             ClearDisplay();
         }
     }
@@ -478,8 +550,29 @@ public partial class PdfViewerControl : UserControl
             _linksPageNumber = -1;
             ClearSelectionHighlight();
 
+            // Load annotations for the new page and refresh the overlay.
+            RefreshPageAnnotations();
+
             await RenderCurrentPageAsync();
             PageChanged?.Invoke(this, new PageChangedEventArgs(CurrentPage));
+        }
+    }
+
+    private void RefreshPageAnnotations()
+    {
+        if (Document == null || CurrentPage < 1 || CurrentPage > Document.PageCount)
+        {
+            Annotations = null;
+            return;
+        }
+        try
+        {
+            var page = Document.GetPage(CurrentPage);
+            Annotations = page.GetAnnotations();
+        }
+        catch
+        {
+            Annotations = null;
         }
     }
 
