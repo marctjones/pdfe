@@ -605,32 +605,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (string.IsNullOrEmpty(text)) return;
         SelectedText = text;
-        try
-        {
-            var topLevel = Avalonia.Application.Current?.ApplicationLifetime is
-                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                ? desktop.MainWindow
-                : null;
-            if (topLevel?.Clipboard != null)
-            {
-                await topLevel.Clipboard.SetTextAsync(text);
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    ClipboardHistory.Insert(0, new ClipboardEntry
-                    {
-                        Text = text,
-                        Timestamp = DateTime.Now,
-                        PageNumber = CurrentPageIndex + 1,
-                    });
-                    while (ClipboardHistory.Count > 20)
-                        ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to copy selected text to clipboard");
-        }
+        await PublishToClipboardAndHistoryAsync(text);
     }
 
     public bool DebugVerifyRedaction
@@ -1257,77 +1232,82 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             string textToCopy;
 
-            // If there's a selection area, extract text from that area
-            if (CurrentTextSelectionArea.Width > 0 && CurrentTextSelectionArea.Height > 0)
+            // Letter-walk selection (PdfViewerControl.OnInteractionLayerPointerReleased)
+            // already populated SelectedText with the exact text the user
+            // dragged over. Use it directly. The earlier rect-based path
+            // re-extracted from CurrentTextSelectionArea, which silently
+            // grabbed extra glyphs from neighbouring lines/columns when
+            // the bbox extended past the actual selection — the user's
+            // "Ctrl+C copies wrong text" bug.
+            if (!string.IsNullOrEmpty(SelectedText))
             {
-                _logger.LogInformation(
-                    "Extracting text from selection area on page {PageIndex}: ({X:F2},{Y:F2},{W:F2}x{H:F2})",
-                    CurrentPageIndex + 1,
-                    CurrentTextSelectionArea.X, CurrentTextSelectionArea.Y,
-                    CurrentTextSelectionArea.Width, CurrentTextSelectionArea.Height);
-
-                textToCopy = _textExtractionService.ExtractTextFromArea(
-                    _currentFilePath, CurrentPageIndex, CurrentTextSelectionArea);
+                textToCopy = SelectedText;
             }
             else
             {
-                // No selection, extract all text from current page
-                _logger.LogInformation("Extracting all text from page {PageIndex}", CurrentPageIndex + 1);
+                // No live selection — fall back to whole-page extraction.
+                _logger.LogInformation("No live selection; extracting all text from page {PageIndex}", CurrentPageIndex + 1);
                 textToCopy = _textExtractionService.ExtractTextFromPage(_currentFilePath, CurrentPageIndex);
             }
 
-            if (!string.IsNullOrEmpty(textToCopy))
+            if (string.IsNullOrEmpty(textToCopy))
             {
-                // Log the actual text being copied (first 200 chars for preview)
-                var textPreview = textToCopy.Length > 200 ? textToCopy.Substring(0, 200) + "..." : textToCopy;
-                _logger.LogInformation(
-                    "TEXT EXTRACTED ({Length} chars): \"{Text}\"",
-                    textToCopy.Length, textPreview);
-
-                // Copy to clipboard using TopLevel
-                var topLevel = Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                    ? desktop.MainWindow
-                    : null;
-
-                if (topLevel?.Clipboard != null)
-                {
-                    await topLevel.Clipboard.SetTextAsync(textToCopy);
-                    SelectedText = textToCopy;
-                    _logger.LogInformation("✓ Successfully copied {Length} characters to clipboard", textToCopy.Length);
-
-                    // Add to clipboard history
-                    var clipboardEntry = new ClipboardEntry
-                    {
-                        Text = textToCopy,
-                        Timestamp = DateTime.Now,
-                        PageNumber = CurrentPageIndex + 1
-                    };
-
-                    // Add to beginning of list (most recent first)
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        ClipboardHistory.Insert(0, clipboardEntry);
-
-                        // Keep only last 20 entries
-                        while (ClipboardHistory.Count > 20)
-                        {
-                            ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
-                        }
-                    });
-                }
-                else
-                {
-                    _logger.LogWarning("Clipboard not available");
-                }
+                _logger.LogWarning("No text to copy");
+                return;
             }
-            else
-            {
-                _logger.LogWarning("No text extracted from selection - area may not contain any text");
-            }
+
+            SelectedText = textToCopy;
+            await PublishToClipboardAndHistoryAsync(textToCopy);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error copying text");
+        }
+    }
+
+    /// <summary>
+    /// Copy the given text to the OS clipboard (best effort) AND record
+    /// it in <see cref="ClipboardHistory"/>. Splitting these concerns
+    /// keeps the in-app history correct even when the OS clipboard isn't
+    /// reachable (headless tests, transient lifecycle states).
+    /// </summary>
+    private async Task PublishToClipboardAndHistoryAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        var entry = new ClipboardEntry
+        {
+            Text = text,
+            Timestamp = DateTime.Now,
+            PageNumber = CurrentPageIndex + 1,
+        };
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            ClipboardHistory.Insert(0, entry);
+            while (ClipboardHistory.Count > 20)
+                ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
+        });
+
+        try
+        {
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow
+                : null;
+            if (topLevel?.Clipboard != null)
+            {
+                await topLevel.Clipboard.SetTextAsync(text);
+                _logger.LogInformation("✓ Copied {Length} characters to clipboard", text.Length);
+            }
+            else
+            {
+                _logger.LogWarning("OS clipboard unavailable; text recorded in history only");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to set OS clipboard");
         }
     }
 
