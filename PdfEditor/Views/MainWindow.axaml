@@ -97,7 +97,9 @@
                     <MenuItem.Icon><TextBlock Text="⬛" Foreground="Red"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="_View Clipboard History">
+                <MenuItem Header="_View Clipboard History"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsClipboardSidebarVisible, Mode=TwoWay}">
                     <MenuItem.Icon><TextBlock Text="📋"/></MenuItem.Icon>
                 </MenuItem>
             </MenuItem>
