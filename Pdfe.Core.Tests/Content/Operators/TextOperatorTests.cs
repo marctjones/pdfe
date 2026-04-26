@@ -236,6 +236,20 @@ public class TextOperatorTests
         trOp.GetNumber(0).Should().Be(mode, because: description);
     }
 
+    [Fact]
+    public void Parse_Tr_InvisibleMode3_BoundingBoxStillGenerated()
+    {
+        // Render mode 3 = invisible text, but bounding boxes must still be
+        // computed — text extraction and redaction need glyph positions
+        // regardless of whether the text is visually rendered.
+        var content = "BT /F1 12 Tf 100 100 Td 3 Tr (hidden) Tj ET";
+        var result = new ContentStreamParser(Encoding.UTF8.GetBytes(content)).Parse();
+
+        var tj = result.Operators.Single(op => op.Name == "Tj");
+        tj.BoundingBox.Should().NotBeNull(
+            "invisible text (Tr=3) still requires a bounding box for extraction/redaction");
+    }
+
     #endregion
 
     #region Ts - Text Rise
