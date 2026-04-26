@@ -124,12 +124,12 @@ public class PdfDocument : IDisposable
     /// <summary>
     /// Open a PDF document from a file.
     /// </summary>
-    public static PdfDocument Open(string path)
+    public static PdfDocument Open(string path, bool allowEncrypted = false)
     {
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            return Open(stream, ownsStream: true);
+            return Open(stream, ownsStream: true, allowEncrypted: allowEncrypted);
         }
         catch
         {
@@ -141,7 +141,16 @@ public class PdfDocument : IDisposable
     /// <summary>
     /// Open a PDF document from a stream.
     /// </summary>
-    public static PdfDocument Open(Stream stream, bool ownsStream = false)
+    /// <param name="stream">Stream to read.</param>
+    /// <param name="ownsStream">Whether the document should dispose the stream on close.</param>
+    /// <param name="allowEncrypted">When false (default), opening an encrypted
+    /// PDF throws <see cref="Pdfe.Core.Parsing.PdfEncryptionNotSupportedException"/>.
+    /// pdfe cannot yet decrypt encrypted streams (tracked: GitHub #324).
+    /// Without this guard, encrypted streams return ciphertext bytes — features
+    /// like text extraction and redaction would silently produce wrong output.
+    /// Pass true to bypass the guard for unencrypted-dict / encrypted-stream
+    /// inspection at the caller's own risk.</param>
+    public static PdfDocument Open(Stream stream, bool ownsStream = false, bool allowEncrypted = false)
     {
         // Read PDF version from header
         string version = ReadVersion(stream);
@@ -173,6 +182,16 @@ public class PdfDocument : IDisposable
             currentTrailer = prevTrailer;
         }
 
+        // Encrypted PDFs: pdfe parses the (unencrypted) catalog/page-tree
+        // dicts fine but every stream we hand back is ciphertext. That
+        // silently corrupts text extraction, search, redaction, etc.
+        // Refuse by default; let callers opt in with allowEncrypted=true.
+        if (trailer.ContainsKey("Encrypt") && !allowEncrypted)
+        {
+            if (ownsStream) stream.Dispose();
+            throw new Pdfe.Core.Parsing.PdfEncryptionNotSupportedException();
+        }
+
         // Create document (loads catalog internally)
         return new PdfDocument(stream, ownsStream, fullXRef, trailer, version);
     }
@@ -180,9 +199,9 @@ public class PdfDocument : IDisposable
     /// <summary>
     /// Open a PDF document from a byte array.
     /// </summary>
-    public static PdfDocument Open(byte[] data)
+    public static PdfDocument Open(byte[] data, bool allowEncrypted = false)
     {
-        return Open(new MemoryStream(data, writable: false), ownsStream: true);
+        return Open(new MemoryStream(data, writable: false), ownsStream: true, allowEncrypted: allowEncrypted);
     }
 
     /// <summary>

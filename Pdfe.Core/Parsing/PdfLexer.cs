@@ -551,3 +551,25 @@ public class PdfParseException : Exception
     public PdfParseException(string message) : base(message) { }
     public PdfParseException(string message, Exception inner) : base(message, inner) { }
 }
+
+/// <summary>
+/// Thrown when an encrypted PDF is opened but decryption is not yet
+/// implemented. Encrypted streams in such files contain ciphertext that
+/// pdfe cannot read; silently parsing the unencrypted catalog and
+/// returning garbage stream bytes was the prior behaviour and produced
+/// confusing failures (e.g. redactions appearing to succeed but doing
+/// nothing). Callers can pass <c>allowEncrypted: true</c> to
+/// <c>PdfDocument.Open</c> to suppress this and accept best-effort
+/// behaviour at their own risk.
+/// </summary>
+public class PdfEncryptionNotSupportedException : Exception
+{
+    public PdfEncryptionNotSupportedException()
+        : base("This PDF is encrypted and pdfe does not yet support decryption. " +
+               "See https://github.com/marctjones/pdfe/issues/324. " +
+               "Pass allowEncrypted: true to Open() to bypass this check (returns garbage for encrypted streams).")
+    {
+    }
+
+    public PdfEncryptionNotSupportedException(string message) : base(message) { }
+}
