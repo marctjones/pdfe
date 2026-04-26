@@ -16,6 +16,7 @@ public class PdfDocument : IDisposable
     private readonly Dictionary<int, PdfObject> _objectCache;
     private readonly PdfParser _parser;
     private readonly StreamDecompressor _decompressor;
+    private readonly Pdfe.Core.Security.PdfStandardSecurityHandler? _securityHandler;
     private PageCollection? _pages;
 
     /// <summary>
@@ -91,7 +92,8 @@ public class PdfDocument : IDisposable
         bool ownsStream,
         Dictionary<int, XRefEntry> xref,
         PdfDictionary trailer,
-        string version)
+        string version,
+        Pdfe.Core.Security.PdfStandardSecurityHandler? securityHandler = null)
     {
         _stream = stream;
         _ownsStream = ownsStream;
@@ -99,6 +101,7 @@ public class PdfDocument : IDisposable
         _objectCache = new Dictionary<int, PdfObject>();
         _parser = new PdfParser(new PdfLexer(stream, ownsStream: false));
         _decompressor = new StreamDecompressor();
+        _securityHandler = securityHandler;
 
         // Let the parser resolve indirect /Length refs on stream dicts by
         // calling back into our object cache — needed for PDFs (notably
@@ -182,18 +185,67 @@ public class PdfDocument : IDisposable
             currentTrailer = prevTrailer;
         }
 
-        // Encrypted PDFs: pdfe parses the (unencrypted) catalog/page-tree
-        // dicts fine but every stream we hand back is ciphertext. That
-        // silently corrupts text extraction, search, redaction, etc.
-        // Refuse by default; let callers opt in with allowEncrypted=true.
-        if (trailer.ContainsKey("Encrypt") && !allowEncrypted)
+        // Encrypted PDFs: try to build a security handler that decrypts
+        // streams + strings as they're read. If /Encrypt is present and
+        // we can verify the empty user password (the common case), we
+        // continue with full decryption. If we can't (unsupported V/R,
+        // wrong password), we honour `allowEncrypted` — true keeps
+        // returning ciphertext for inspection; false (default) throws.
+        Pdfe.Core.Security.PdfStandardSecurityHandler? handler = null;
+        if (trailer.ContainsKey("Encrypt"))
         {
-            if (ownsStream) stream.Dispose();
-            throw new Pdfe.Core.Parsing.PdfEncryptionNotSupportedException();
+            try
+            {
+                // Resolve the /Encrypt dict (it can be an indirect ref).
+                var encryptObj = trailer.GetOptional("Encrypt");
+                if (encryptObj is PdfReference encryptRef)
+                {
+                    // Need to read the object directly from xref since
+                    // we don't have a document yet.
+                    encryptObj = ReadIndirectObjectAt(stream, fullXRef[encryptRef.ObjectNum].Offset);
+                }
+                if (encryptObj is not PdfDictionary encryptDict)
+                    throw new Pdfe.Core.Parsing.PdfParseException("/Encrypt is not a dictionary");
+
+                // /ID is required; first element is what the security handler hashes.
+                var idArr = trailer.GetArray("ID");
+                if (idArr.Count == 0 || idArr[0] is not PdfString idStr)
+                    throw new Pdfe.Core.Parsing.PdfParseException("/ID array missing or empty");
+                var firstId = idStr.Bytes;
+
+                // Try the empty user password first — by far the most common case.
+                handler = Pdfe.Core.Security.PdfStandardSecurityHandler.Build(
+                    encryptDict, firstId, Array.Empty<byte>());
+            }
+            catch (Pdfe.Core.Parsing.PdfEncryptionNotSupportedException)
+            {
+                if (!allowEncrypted)
+                {
+                    if (ownsStream) stream.Dispose();
+                    throw;
+                }
+                // allowEncrypted=true: caller wants the doc anyway, accept
+                // that streams will be ciphertext.
+                handler = null;
+            }
         }
 
         // Create document (loads catalog internally)
-        return new PdfDocument(stream, ownsStream, fullXRef, trailer, version);
+        return new PdfDocument(stream, ownsStream, fullXRef, trailer, version, handler);
+    }
+
+    /// <summary>
+    /// One-shot reader used by <see cref="Open(Stream, bool, bool)"/> to
+    /// resolve an indirect /Encrypt reference *before* the PdfDocument
+    /// (and therefore the parser's resolver) exists. Seeks to the given
+    /// offset, parses an indirect object, returns its value.
+    /// </summary>
+    private static PdfObject ReadIndirectObjectAt(Stream stream, long offset)
+    {
+        var lexer = new Pdfe.Core.Parsing.PdfLexer(stream, ownsStream: false);
+        lexer.Seek(offset);
+        var parser = new Pdfe.Core.Parsing.PdfParser(lexer);
+        return parser.ParseIndirectObject().Value;
     }
 
     /// <summary>
@@ -387,7 +439,10 @@ public class PdfDocument : IDisposable
 
         if (entry.IsCompressed)
         {
-            // Object is in an object stream
+            // Object is in an object stream. The parent /ObjStm itself is
+            // decrypted by this same code path when GetObjectFromStream
+            // calls back into GetObject(streamNumber); the contained
+            // objects are then plaintext and need no further decryption.
             obj = GetObjectFromStream(entry.ObjectStreamNumber!.Value, entry.IndexInStream!.Value);
         }
         else
@@ -397,12 +452,33 @@ public class PdfDocument : IDisposable
             var indirectObj = _parser.ParseIndirectObject();
             obj = indirectObj.Value;
 
+            // Apply the security handler before any /Filter pipeline.
+            // For RC4: ciphertext is stream's encoded bytes (post-compression
+            // on encrypt, so we decrypt FIRST and then run FlateDecode etc.).
+            // Strings inside the parsed object are also encrypted with the
+            // same per-object key — walk the dict and decrypt them in place.
+            // The /Encrypt dict itself is exempt (its strings are read with
+            // a one-shot lexer in Open() before we have a handler).
+            if (_securityHandler != null)
+            {
+                int objNum = indirectObj.ObjectNumber;
+                int gen = indirectObj.Generation;
+
+                if (obj is PdfStream stream)
+                {
+                    var encrypted = stream.EncodedData;
+                    var decrypted = _securityHandler.DecryptStream(objNum, gen, encrypted);
+                    stream.SetEncodedData(decrypted);
+                }
+                DecryptStringsInPlace(obj, objNum, gen);
+            }
+
             // Decompress streams
-            if (obj is PdfStream stream && stream.IsFiltered)
+            if (obj is PdfStream s && s.IsFiltered)
             {
                 try
                 {
-                    _decompressor.Decompress(stream);
+                    _decompressor.Decompress(s);
                 }
                 catch
                 {
@@ -544,6 +620,50 @@ public class PdfDocument : IDisposable
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
         Save(fs);
     }
+
+    /// <summary>
+    /// Walk the parsed object tree and decrypt every <see cref="PdfString"/>
+    /// in place. Each indirect object has its own RC4 keystream derived
+    /// from (objNum, gen) — strings inside the same indirect object share
+    /// that keystream regardless of how deeply they're nested in dicts
+    /// or arrays.
+    /// </summary>
+    private void DecryptStringsInPlace(PdfObject root, int objNum, int gen)
+    {
+        if (_securityHandler == null) return;
+
+        // BFS via stack to avoid recursion depth on pathological PDFs.
+        var stack = new Stack<PdfObject>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            switch (node)
+            {
+                case PdfString str:
+                    str.ReplaceBytes(_securityHandler.DecryptString(objNum, gen, str.Bytes));
+                    break;
+                case PdfDictionary dict:
+                    foreach (var kv in dict)
+                        stack.Push(kv.Value);
+                    break;
+                case PdfArray arr:
+                    foreach (var item in arr) stack.Push(item);
+                    break;
+                // Streams: their dict's strings still need decryption,
+                // so recurse into the dict portion. The encoded data is
+                // handled separately by the caller.
+                // (PdfStream inherits from PdfDictionary so the dict
+                // case above already covers it — guard just in case.)
+            }
+        }
+    }
+
+    /// <summary>
+    /// True if this document was opened with a working security handler
+    /// (i.e. encryption is being decrypted transparently).
+    /// </summary>
+    public bool IsDecrypting => _securityHandler != null;
 
     /// <summary>
     /// Get all objects in the document (for writing).
