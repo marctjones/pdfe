@@ -27,6 +27,8 @@ public class ContentStreamParser
     private double _charSpacing;
     private double _wordSpacing;
     private double _horizontalScaling = 100;
+    private double _textRise;
+    private int _textRenderMode;
 
     // Text matrix
     private double _tm_a = 1, _tm_b, _tm_c, _tm_d = 1, _tm_e, _tm_f;
@@ -67,12 +69,27 @@ public class ContentStreamParser
 
             if (token is string op && IsOperator(op))
             {
-                var contentOp = CreateOperator(op, operands);
-                if (contentOp != null)
+                if (op == "BI")
                 {
-                    operators.Add(contentOp);
+                    // Inline image — parse the image dict + binary data in one shot
+                    // so that the raw pixel bytes never enter the general token stream
+                    var contentOp = ParseInlineImage();
+                    if (contentOp != null)
+                        operators.Add(contentOp);
+                    operands.Clear();
                 }
-                operands.Clear();
+                else if (op is "ID" or "EI")
+                {
+                    // Should only appear inside BI handling above; skip if stray
+                    operands.Clear();
+                }
+                else
+                {
+                    var contentOp = CreateOperator(op, operands);
+                    if (contentOp != null)
+                        operators.Add(contentOp);
+                    operands.Clear();
+                }
             }
             else if (token is PdfObject pdfObj)
             {
@@ -124,6 +141,39 @@ public class ContentStreamParser
                     var f = GetNumber(operands[5]);
                     _state.MultiplyCtm(a, b, c, d, e, f);
                 }
+                break;
+
+            // Line state operators (§8.4.3 table 57)
+            case "w":
+                if (operands.Count >= 1)
+                    _state.LineWidth = GetNumber(operands[0]);
+                break;
+
+            case "J":
+                if (operands.Count >= 1)
+                    _state.LineCap = (int)GetNumber(operands[0]);
+                break;
+
+            case "j":
+                if (operands.Count >= 1)
+                    _state.LineJoin = (int)GetNumber(operands[0]);
+                break;
+
+            case "M":
+                if (operands.Count >= 1)
+                    _state.MiterLimit = GetNumber(operands[0]);
+                break;
+
+            case "d":
+            case "ri":
+            case "i":
+                // Dash pattern, rendering intent, flatness — stored in operands, no bounds effect
+                break;
+
+            case "gs":
+                // Apply named ExtGState dictionary
+                if (operands.Count >= 1 && operands[0] is PdfName gsName && _page != null)
+                    ApplyExtGState(gsName.Value);
                 break;
 
             // Path construction
@@ -247,6 +297,16 @@ public class ContentStreamParser
             case "Tz":
                 if (operands.Count >= 1)
                     _horizontalScaling = GetNumber(operands[0]);
+                break;
+
+            case "Tr":
+                if (operands.Count >= 1)
+                    _textRenderMode = (int)GetNumber(operands[0]);
+                break;
+
+            case "Ts":
+                if (operands.Count >= 1)
+                    _textRise = GetNumber(operands[0]);
                 break;
 
             // Text positioning
@@ -415,8 +475,8 @@ public class ContentStreamParser
             var unicode = DecodeCharacter(charCode);
             var charWidth = GetCharWidth(charCode);
 
-            // Transform position
-            var (x, y) = TransformTextPoint(_tm_e, _tm_f);
+            // Transform position — text rise shifts the baseline vertically (§9.3.7)
+            var (x, y) = TransformTextPoint(_tm_e, _tm_f + _textRise);
 
             // Calculate glyph dimensions
             var glyphWidth = charWidth * _fontSize * (_horizontalScaling / 100.0) / 1000.0;
@@ -451,6 +511,95 @@ public class ContentStreamParser
         var x = tx * _state.Ctm_a + ty * _state.Ctm_c + _state.Ctm_e;
         var y = tx * _state.Ctm_b + ty * _state.Ctm_d + _state.Ctm_f;
         return (x, y);
+    }
+
+    /// <summary>
+    /// Parse an inline image (§8.9.7).
+    /// Called immediately after the BI token is consumed.
+    /// Reads the image-parameter key-value pairs, skips past ID, and
+    /// consumes the binary image data up to (and including) EI.
+    /// Returns a BI operator whose first operand is the image-parameter dict.
+    /// </summary>
+    private ContentOperator? ParseInlineImage()
+    {
+        // --- 1. Parse abbreviated image parameters until 'ID' ---
+        var imageParams = new PdfDictionary();
+        while (_pos < _content.Length)
+        {
+            SkipWhitespaceAndComments();
+            if (_pos >= _content.Length) break;
+
+            // Peek: is this 'ID'?
+            if (_content[_pos] == 'I' && _pos + 1 < _content.Length && _content[_pos + 1] == 'D' &&
+                (_pos + 2 >= _content.Length || IsWhitespaceByte(_content[_pos + 2])))
+            {
+                _pos += 2; // consume 'ID'
+                // Consume exactly one whitespace char that separates ID from data (per spec)
+                if (_pos < _content.Length && IsWhitespaceByte(_content[_pos]))
+                    _pos++;
+                break;
+            }
+
+            var keyToken = ParseToken();
+            if (keyToken is not PdfName keyName) continue;
+
+            SkipWhitespaceAndComments();
+            var valToken = ParseToken();
+            if (valToken is PdfObject valObj)
+                imageParams[keyName.Value] = valObj;
+        }
+
+        // --- 2. Scan for 'EI' at a word boundary, consuming raw image data ---
+        var dataStart = _pos;
+        while (_pos < _content.Length)
+        {
+            if (IsWhitespaceByte(_content[_pos]) || _pos == dataStart)
+            {
+                // Consume the whitespace, then check for 'EI'
+                int wsPos = _pos;
+                if (_pos != dataStart) _pos++; // skip whitespace byte
+
+                if (_pos + 1 < _content.Length &&
+                    _content[_pos] == 'E' && _content[_pos + 1] == 'I' &&
+                    (_pos + 2 >= _content.Length || IsWordBoundaryByte(_content[_pos + 2])))
+                {
+                    _pos += 2; // consume 'EI'
+                    break;
+                }
+                // Not EI — roll back to whitespace position and advance one
+                _pos = wsPos + 1;
+            }
+            else
+            {
+                _pos++;
+            }
+        }
+
+        // Compute operator bounds from current CTM (inline image fills the unit square
+        // mapped through the CTM, i.e. the four corners (0,0),(1,0),(1,1),(0,1))
+        var b = TransformBounds(0, 0, 1, 1);
+        var op = new ContentOperator("BI", new PdfObject[] { imageParams });
+        op.BoundingBox = b;
+        return op;
+    }
+
+    private static bool IsWhitespaceByte(byte b) =>
+        b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D || b == 0x0C || b == 0x00;
+
+    private static bool IsWordBoundaryByte(byte b) =>
+        IsWhitespaceByte(b) || b == '/' || b == '(' || b == ')' || b == '[' || b == ']';
+
+    private void ApplyExtGState(string gsName)
+    {
+        var gsDict = _page?.GetExtGState(gsName);
+        if (gsDict == null) return;
+
+        if (gsDict.ContainsKey("LW")) _state.LineWidth = gsDict.GetNumber("LW", _state.LineWidth);
+        if (gsDict.ContainsKey("LC")) _state.LineCap   = gsDict.GetInt("LC", _state.LineCap);
+        if (gsDict.ContainsKey("LJ")) _state.LineJoin  = gsDict.GetInt("LJ", _state.LineJoin);
+        if (gsDict.ContainsKey("ML")) _state.MiterLimit = gsDict.GetNumber("ML", _state.MiterLimit);
+        if (gsDict.ContainsKey("Tr") && gsDict.GetOptional("Tr") is { } trObj)
+            _textRenderMode = (int)GetNumber(trObj);
     }
 
     private void LoadFont()
@@ -922,6 +1071,12 @@ public class ContentStreamParser
     {
         public double Ctm_a = 1, Ctm_b, Ctm_c, Ctm_d = 1, Ctm_e, Ctm_f;
 
+        // Line state (§8.4.3 table 57)
+        public double LineWidth = 1;
+        public int    LineCap;
+        public int    LineJoin;
+        public double MiterLimit = 10;
+
         public void MultiplyCtm(double a, double b, double c, double d, double e, double f)
         {
             var na = a * Ctm_a + b * Ctm_c;
@@ -938,7 +1093,9 @@ public class ContentStreamParser
         public GraphicsState Clone() => new()
         {
             Ctm_a = Ctm_a, Ctm_b = Ctm_b, Ctm_c = Ctm_c,
-            Ctm_d = Ctm_d, Ctm_e = Ctm_e, Ctm_f = Ctm_f
+            Ctm_d = Ctm_d, Ctm_e = Ctm_e, Ctm_f = Ctm_f,
+            LineWidth = LineWidth, LineCap = LineCap,
+            LineJoin  = LineJoin,  MiterLimit = MiterLimit
         };
     }
 }
