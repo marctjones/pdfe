@@ -28,5 +28,11 @@ qpdf --allow-weak-crypto --encrypt '' '' 128 -- "$SRC" "$DEST_DIR/birth-cert-rc4
 # RC4 V=1 R=2 (40-bit legacy) — earliest standard handler
 qpdf --allow-weak-crypto --encrypt '' '' 40 -- "$SRC" "$DEST_DIR/birth-cert-rc4-40.pdf"
 
+# AES-128 V=4 R=4 (CFM=AESV2) — modern but pre-PDF-2.0
+qpdf --encrypt '' '' 128 --use-aes=y -- "$SRC" "$DEST_DIR/birth-cert-aes-128.pdf"
+
+# AES-256 V=5 R=6 — PDF 2.0 native handler with SHA-256 KDF
+qpdf --encrypt '' '' 256 -- "$SRC" "$DEST_DIR/birth-cert-aes-256.pdf"
+
 echo "Regenerated:"
 ls -la "$DEST_DIR"
