@@ -75,6 +75,17 @@ public class PdfPage
     }
 
     /// <summary>
+    /// All annotations on this page (§12.5).
+    /// Covers every subtype: Text, Link, Highlight, Widget, Stamp, Ink, etc.
+    /// </summary>
+    public IReadOnlyList<PdfAnnotation> GetAnnotations()
+    {
+        var pageMap    = PdfOutlineParser.BuildPageRefMap(_document);
+        var namedDests = PdfOutlineParser.BuildNamedDestinations(_document);
+        return PdfAnnotationParser.Parse(_document, _pageDict, pageMap, namedDests);
+    }
+
+    /// <summary>
     /// Internal-document link annotations on this page (PDF spec §12.5.6.5).
     /// External / URI links are filtered out; what's returned is only the
     /// kind of link a clickable table-of-contents or back-of-book index
