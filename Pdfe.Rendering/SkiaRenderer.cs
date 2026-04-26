@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Pdfe.Core.ColorSpaces;
 using Pdfe.Core.Document;
 using SkiaSharp;
 
@@ -1690,27 +1691,23 @@ internal class RenderContext
 
     private SKBitmap? CreateBitmapFromRawData(byte[] data, int width, int height, int bitsPerComponent, string colorSpace, Pdfe.Core.Primitives.PdfStream stream)
     {
-        // Handle different color spaces
-        int componentsPerPixel = colorSpace switch
-        {
-            "DeviceGray" => 1,
-            "DeviceRGB" => 3,
-            "DeviceCMYK" => 4,
-            "CalGray" => 1,
-            "CalRGB" => 3,
-            _ => 3 // Default to RGB
-        };
+        PdfColorSpace? pdfColorSpace = null;
+        int componentsPerPixel = 3;
 
-        // Check for indexed color space
         var csObj = stream.GetOptional("ColorSpace");
-        if (csObj is Pdfe.Core.Primitives.PdfArray csArray && csArray.Count >= 1)
+        if (csObj != null)
         {
-            var csName = (csArray[0] as Pdfe.Core.Primitives.PdfName)?.Value;
-            if (csName == "Indexed")
-            {
-                componentsPerPixel = 1; // Indexed uses palette lookup
-            }
+            pdfColorSpace = PdfColorSpace.Parse(csObj, _page.Document);
+            componentsPerPixel = pdfColorSpace.Components;
         }
+        else
+        {
+            pdfColorSpace = PdfColorSpace.FromName(colorSpace);
+            componentsPerPixel = pdfColorSpace.Components;
+        }
+
+        if (componentsPerPixel == 0)
+            componentsPerPixel = 3;
 
         var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
         var pixels = new byte[width * height * 4];
@@ -1726,36 +1723,19 @@ internal class RenderContext
                 {
                     byte r = 0, g = 0, b = 0, a = 255;
 
-                    if (bitsPerComponent == 8)
+                    if (bitsPerComponent == 8 && pdfColorSpace != null)
                     {
-                        switch (componentsPerPixel)
+                        var pixelValues = new double[componentsPerPixel];
+                        if (srcIndex + componentsPerPixel <= data.Length)
                         {
-                            case 1: // Grayscale
-                                if (srcIndex < data.Length)
-                                {
-                                    r = g = b = data[srcIndex++];
-                                }
-                                break;
-                            case 3: // RGB
-                                if (srcIndex + 2 < data.Length)
-                                {
-                                    r = data[srcIndex++];
-                                    g = data[srcIndex++];
-                                    b = data[srcIndex++];
-                                }
-                                break;
-                            case 4: // CMYK
-                                if (srcIndex + 3 < data.Length)
-                                {
-                                    var c = data[srcIndex++] / 255.0;
-                                    var m = data[srcIndex++] / 255.0;
-                                    var yy = data[srcIndex++] / 255.0;
-                                    var k = data[srcIndex++] / 255.0;
-                                    r = (byte)Math.Clamp(255 * (1 - c) * (1 - k), 0, 255);
-                                    g = (byte)Math.Clamp(255 * (1 - m) * (1 - k), 0, 255);
-                                    b = (byte)Math.Clamp(255 * (1 - yy) * (1 - k), 0, 255);
-                                }
-                                break;
+                            for (int i = 0; i < componentsPerPixel; i++)
+                                pixelValues[i] = data[srcIndex + i] / 255.0;
+                            srcIndex += componentsPerPixel;
+
+                            var (rd, gd, bd) = pdfColorSpace.ToRgb(pixelValues);
+                            r = (byte)Math.Clamp(rd * 255, 0, 255);
+                            g = (byte)Math.Clamp(gd * 255, 0, 255);
+                            b = (byte)Math.Clamp(bd * 255, 0, 255);
                         }
                     }
                     else if (bitsPerComponent == 1)
@@ -1997,43 +1977,42 @@ internal class RenderContext
 
     private SKColor? ParseColorFromOperands(List<string> operands, string colorSpace)
     {
-        // Filter out pattern names (start with /)
         var values = operands.Where(o => !o.StartsWith("/")).ToList();
+
+        if (values.Count == 0)
+            return null;
+
+        var doubleValues = new double[values.Count];
+        for (int i = 0; i < values.Count; i++)
+            doubleValues[i] = ParseNumber(values[i]);
+
+        var cs = ResolveColorSpace(colorSpace);
+        if (cs != null && cs.Type != PdfColorSpaceType.Pattern)
+        {
+            var (r, g, b) = cs.ToRgb(doubleValues);
+            return RgbToColor(r, g, b);
+        }
 
         return colorSpace switch
         {
-            "DeviceGray" or "CalGray" when values.Count >= 1 =>
-                GrayToColor(ParseNumber(values[0])),
-
-            "DeviceRGB" or "CalRGB" when values.Count >= 3 =>
-                RgbToColor(
-                    ParseNumber(values[0]),
-                    ParseNumber(values[1]),
-                    ParseNumber(values[2])),
-
-            "DeviceCMYK" when values.Count >= 4 =>
-                CmykToColor(
-                    ParseNumber(values[0]),
-                    ParseNumber(values[1]),
-                    ParseNumber(values[2]),
-                    ParseNumber(values[3])),
-
-            // Pattern color space - the pattern name is handled separately
             "Pattern" when operands.Any(o => o.StartsWith("/")) =>
-                null, // Pattern fills are handled by pattern rendering
-
-            // ICCBased, Lab, Indexed, Separation, DeviceN - fallback behavior
-            _ when values.Count >= 3 =>
-                RgbToColor(
-                    ParseNumber(values[0]),
-                    ParseNumber(values[1]),
-                    ParseNumber(values[2])),
-
-            _ when values.Count >= 1 =>
-                GrayToColor(ParseNumber(values[0])),
+                null,
 
             _ => null
         };
+    }
+
+    private PdfColorSpace? ResolveColorSpace(string name)
+    {
+        var cs = PdfColorSpace.FromName(name);
+        if (cs.Type != PdfColorSpaceType.Unknown)
+            return cs;
+
+        var csObj = _page.GetColorSpaceObject(name);
+        if (csObj != null)
+            return PdfColorSpace.Parse(csObj, _page.Document);
+
+        return null;
     }
 
     #endregion

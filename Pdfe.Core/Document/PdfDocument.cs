@@ -591,6 +591,23 @@ public class PdfDocument : IDisposable
     /// </summary>
     public string? Producer => Info?.GetStringOrNull("Producer");
 
+    /// <summary>
+    /// Get the document's interactive form (AcroForm), if present.
+    /// Returns null if the document has no AcroForm.
+    /// PDF spec §12.7.
+    /// </summary>
+    public PdfAcroForm? GetAcroForm()
+    {
+        var acroFormObj = Catalog.GetOptional("AcroForm");
+        if (acroFormObj == null)
+            return null;
+
+        if (Resolve(acroFormObj) is not PdfDictionary acroFormDict)
+            return null;
+
+        return PdfAcroFormParser.Parse(this, acroFormDict);
+    }
+
     #region Save Methods
 
     /// <summary>

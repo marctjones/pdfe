@@ -1,0 +1,193 @@
+namespace Pdfe.Core.ColorSpaces;
+
+using Pdfe.Core.Document;
+using Pdfe.Core.Primitives;
+
+/// <summary>
+/// Resolved PDF color space (ISO 32000-2 §8.6).
+/// Converts n-component color values to device RGB for rendering.
+/// </summary>
+public sealed class PdfColorSpace
+{
+    public PdfColorSpaceType Type { get; }
+    public int Components { get; }
+
+    private readonly PdfColorSpace? _indexedBase;
+    private readonly byte[]? _indexedLookup;
+
+    private PdfColorSpace(PdfColorSpaceType type, int components,
+        PdfColorSpace? indexedBase = null, byte[]? indexedLookup = null)
+    {
+        Type = type;
+        Components = components;
+        _indexedBase = indexedBase;
+        _indexedLookup = indexedLookup;
+    }
+
+    public static readonly PdfColorSpace DeviceGray = new(PdfColorSpaceType.DeviceGray, 1);
+    public static readonly PdfColorSpace DeviceRGB = new(PdfColorSpaceType.DeviceRGB, 3);
+    public static readonly PdfColorSpace DeviceCMYK = new(PdfColorSpaceType.DeviceCMYK, 4);
+
+    public static PdfColorSpace FromName(string name) => name switch
+    {
+        "DeviceGray" or "G" => DeviceGray,
+        "DeviceRGB" or "RGB" => DeviceRGB,
+        "DeviceCMYK" or "CMYK" => DeviceCMYK,
+        "CalGray" => new PdfColorSpace(PdfColorSpaceType.CalGray, 1),
+        "CalRGB" => new PdfColorSpace(PdfColorSpaceType.CalRGB, 3),
+        "Lab" => new PdfColorSpace(PdfColorSpaceType.Lab, 3),
+        "Separation" => new PdfColorSpace(PdfColorSpaceType.Separation, 1),
+        _ => new PdfColorSpace(PdfColorSpaceType.Unknown, 1)
+    };
+
+    /// <summary>
+    /// Parse a color space from a PdfObject (name or array) using the document.
+    /// </summary>
+    public static PdfColorSpace Parse(PdfObject csObj, PdfDocument doc)
+    {
+        if (csObj is PdfName n)
+            return FromName(n.Value);
+
+        var resolved = doc.Resolve(csObj);
+        if (resolved is PdfArray arr && arr.Count >= 1)
+        {
+            var typeName = (arr[0] as PdfName)?.Value ?? "";
+            return typeName switch
+            {
+                "ICCBased" => ParseICCBased(arr, doc),
+                "Indexed" => ParseIndexed(arr, doc),
+                "CalGray" => new PdfColorSpace(PdfColorSpaceType.CalGray, 1),
+                "CalRGB" => new PdfColorSpace(PdfColorSpaceType.CalRGB, 3),
+                "Lab" => new PdfColorSpace(PdfColorSpaceType.Lab, 3),
+                "Separation" => new PdfColorSpace(PdfColorSpaceType.Separation, 1),
+                "DeviceN" => ParseDeviceN(arr),
+                "Pattern" => new PdfColorSpace(PdfColorSpaceType.Pattern, 0),
+                "DeviceGray" => DeviceGray,
+                "DeviceRGB" => DeviceRGB,
+                "DeviceCMYK" => DeviceCMYK,
+                _ => new PdfColorSpace(PdfColorSpaceType.Unknown, 1)
+            };
+        }
+
+        return DeviceRGB;
+    }
+
+    private static PdfColorSpace ParseICCBased(PdfArray arr, PdfDocument doc)
+    {
+        if (arr.Count < 2) return DeviceRGB;
+        var iccStream = doc.Resolve(arr[1]) as PdfStream;
+        if (iccStream == null) return DeviceRGB;
+
+        var n = iccStream.GetInt("N", 3);
+        return n switch
+        {
+            1 => DeviceGray,
+            4 => DeviceCMYK,
+            _ => DeviceRGB
+        };
+    }
+
+    private static PdfColorSpace ParseIndexed(PdfArray arr, PdfDocument doc)
+    {
+        if (arr.Count < 4) return DeviceRGB;
+
+        var baseCs = Parse(arr[1], doc);
+        var hival = (arr[2] as PdfInteger)?.Value ?? 255;
+
+        byte[] lookup;
+        var lookupObj = doc.Resolve(arr[3]);
+        if (lookupObj is PdfString ps)
+            lookup = System.Text.Encoding.Latin1.GetBytes(ps.Value);
+        else if (lookupObj is PdfStream ls)
+            lookup = ls.DecodedData ?? ls.EncodedData;
+        else
+            lookup = Array.Empty<byte>();
+
+        return new PdfColorSpace(PdfColorSpaceType.Indexed, 1, baseCs, lookup);
+    }
+
+    private static PdfColorSpace ParseDeviceN(PdfArray arr)
+    {
+        int n = 1;
+        if (arr.Count >= 2 && arr[1] is PdfArray names)
+            n = names.Count;
+        return new PdfColorSpace(PdfColorSpaceType.DeviceN, n);
+    }
+
+    /// <summary>
+    /// Convert n-component values (0..1 each) to (R, G, B) each 0..1.
+    /// </summary>
+    public (double R, double G, double B) ToRgb(double[] values)
+    {
+        if (values.Length == 0)
+            return (0, 0, 0);
+
+        return Type switch
+        {
+            PdfColorSpaceType.DeviceGray or PdfColorSpaceType.CalGray =>
+                (values[0], values[0], values[0]),
+
+            PdfColorSpaceType.DeviceRGB or PdfColorSpaceType.CalRGB =>
+                (values.Length >= 3) ? (values[0], values[1], values[2]) : (values[0], values[0], values[0]),
+
+            PdfColorSpaceType.DeviceCMYK =>
+                (values.Length >= 4) ? CmykToRgb(values[0], values[1], values[2], values[3]) : (0, 0, 0),
+
+            PdfColorSpaceType.Lab =>
+                (values.Length >= 3) ? LabToRgb(values[0], values[1], values[2]) : (0, 0, 0),
+
+            PdfColorSpaceType.ICCBased =>
+                Components == 1 ? (values[0], values[0], values[0]) :
+                Components == 4 ? (values.Length >= 4 ? CmykToRgb(values[0], values[1], values[2], values[3]) : (0, 0, 0)) :
+                (values.Length >= 3) ? (values[0], values[1], values[2]) : (0, 0, 0),
+
+            PdfColorSpaceType.Separation =>
+                (values.Length >= 1) ? (1 - values[0], 1 - values[0], 1 - values[0]) : (0, 0, 0),
+
+            PdfColorSpaceType.Indexed =>
+                (values.Length >= 1) ? LookupIndexed((int)Math.Round(values[0])) : (0, 0, 0),
+
+            _ => (values.Length >= 3) ? (values[0], values[1], values[2]) :
+                 (values.Length >= 1) ? (values[0], values[0], values[0]) : (0, 0, 0)
+        };
+    }
+
+    /// <summary>Convert an Indexed color index to RGB using the lookup table.</summary>
+    public (double R, double G, double B) LookupIndexed(int index)
+    {
+        if (_indexedBase == null || _indexedLookup == null)
+            return (0, 0, 0);
+
+        int baseComps = _indexedBase.Components;
+        int offset = index * baseComps;
+        if (offset + baseComps > _indexedLookup.Length)
+            return (0, 0, 0);
+
+        var baseValues = new double[baseComps];
+        for (int i = 0; i < baseComps; i++)
+            baseValues[i] = _indexedLookup[offset + i] / 255.0;
+
+        return _indexedBase.ToRgb(baseValues);
+    }
+
+    private static (double, double, double) CmykToRgb(double c, double m, double y, double k)
+    {
+        return ((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k));
+    }
+
+    private static (double, double, double) LabToRgb(double L, double a, double b)
+    {
+        double fy = (L + 16) / 116.0;
+        double fx = a / 500.0 + fy;
+        double fz = fy - b / 200.0;
+        double x = 0.96422 * Fcube(fx);
+        double y = 1.00000 * Fcube(fy);
+        double z = 0.82521 * Fcube(fz);
+        double r = 3.1338561 * x - 1.6168667 * y - 0.4906146 * z;
+        double g = -0.9787684 * x + 1.9161415 * y + 0.0334540 * z;
+        double bv = 0.0719453 * x - 0.2289914 * y + 1.4052427 * z;
+        return (Math.Clamp(r, 0, 1), Math.Clamp(g, 0, 1), Math.Clamp(bv, 0, 1));
+    }
+
+    private static double Fcube(double t) => t > 0.206897 ? t * t * t : (t - 16.0 / 116) / 7.787;
+}
