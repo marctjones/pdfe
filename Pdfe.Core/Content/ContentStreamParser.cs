@@ -23,6 +23,9 @@ public class ContentStreamParser
     private string _fontName = "";
     private PdfDictionary? _currentFont;
     private Dictionary<int, string>? _toUnicodeMap;
+    private bool _is2ByteFont = false;
+    private PdfDictionary? _cidFontDict;
+    private Dictionary<int, double>? _cidWidths;
     private double _textLeading;
     private double _charSpacing;
     private double _wordSpacing;
@@ -469,9 +472,13 @@ public class ContentStreamParser
         double minX = double.MaxValue, minY = double.MaxValue;
         double maxX = double.MinValue, maxY = double.MinValue;
 
-        foreach (var b in bytes)
+        int stride = _is2ByteFont ? 2 : 1;
+        for (int i = 0; i + stride <= bytes.Length; i += stride)
         {
-            var charCode = (int)b;
+            int charCode = _is2ByteFont
+                ? (bytes[i] << 8) | bytes[i + 1]
+                : bytes[i];
+
             var unicode = DecodeCharacter(charCode);
             var charWidth = GetCharWidth(charCode);
 
@@ -608,9 +615,32 @@ public class ContentStreamParser
 
         _currentFont = _page.GetFont(_fontName);
         _toUnicodeMap = null;
+        _is2ByteFont = false;
+        _cidFontDict = null;
+        _cidWidths = null;
 
         if (_currentFont != null)
         {
+            // Detect Type0 (composite) fonts
+            var subtype = _currentFont.GetNameOrNull("Subtype");
+            _is2ByteFont = subtype == "Type0";
+
+            if (_is2ByteFont)
+            {
+                // Type0 font: load descendant CID font
+                var descendantFontsObj = _currentFont.GetOptional("DescendantFonts");
+                if (descendantFontsObj is PdfArray descendantFonts && descendantFonts.Count > 0)
+                {
+                    var descendantRef = descendantFonts[0];
+                    var descendantResolved = _page.Document.Resolve(descendantRef);
+                    if (descendantResolved is PdfDictionary cidFont)
+                    {
+                        _cidFontDict = cidFont;
+                        ParseCidWidths();
+                    }
+                }
+            }
+
             var toUnicodeObj = _currentFont.GetOptional("ToUnicode");
             if (toUnicodeObj != null)
             {
@@ -625,6 +655,60 @@ public class ContentStreamParser
                     {
                         // Ignore CMap parsing errors
                     }
+                }
+            }
+        }
+    }
+
+    private void ParseCidWidths()
+    {
+        if (_cidFontDict == null) return;
+
+        _cidWidths = new Dictionary<int, double>();
+        var widthsObj = _cidFontDict.GetOptional("W");
+
+        if (widthsObj is PdfArray widths)
+        {
+            int i = 0;
+            while (i < widths.Count)
+            {
+                var first = widths[i];
+                if (first is not (PdfInteger or PdfReal)) { i++; continue; }
+
+                var firstCid = (int)GetNumber(first);
+                i++;
+
+                if (i >= widths.Count) break;
+
+                var second = widths[i];
+
+                if (second is PdfArray cidWidthArray)
+                {
+                    // Format: c [w1 w2 w3 ...]
+                    for (int j = 0; j < cidWidthArray.Count; j++)
+                    {
+                        _cidWidths[firstCid + j] = GetNumber(cidWidthArray[j]);
+                    }
+                    i++;
+                }
+                else if (second is PdfInteger or PdfReal)
+                {
+                    // Format: c1 c2 w
+                    var lastCid = (int)GetNumber(second);
+                    i++;
+
+                    if (i >= widths.Count) break;
+
+                    var width = GetNumber(widths[i]);
+                    for (int cid = firstCid; cid <= lastCid; cid++)
+                    {
+                        _cidWidths[cid] = width;
+                    }
+                    i++;
+                }
+                else
+                {
+                    i++;
                 }
             }
         }
@@ -654,6 +738,13 @@ public class ContentStreamParser
 
     private double GetCharWidth(int charCode)
     {
+        // Check CID width table for Type0 fonts first
+        if (_cidWidths != null && _cidWidths.TryGetValue(charCode, out var cidWidth))
+            return cidWidth;
+
+        if (_cidFontDict != null)
+            return _cidFontDict.GetNumber("DW", 1000);
+
         if (_currentFont != null)
         {
             var widthsObj = _currentFont.GetOptional("Widths");

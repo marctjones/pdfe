@@ -408,6 +408,20 @@ public class PdfPage
         return obj != null ? _document.Resolve(obj) as PdfDictionary : null;
     }
 
+    /// <summary>
+    /// Get a color space object from the page resources.
+    /// Returns the raw PdfObject (name or array) for parsing into PdfColorSpace.
+    /// </summary>
+    public PdfObject? GetColorSpaceObject(string name)
+    {
+        var colorSpaces = Resources?.GetDictionaryOrNull("ColorSpace");
+        if (colorSpaces == null)
+            return null;
+
+        var obj = colorSpaces.GetOptional(name);
+        return obj != null ? _document.Resolve(obj) : null;
+    }
+
     #region Inherited Properties
 
     /// <summary>
