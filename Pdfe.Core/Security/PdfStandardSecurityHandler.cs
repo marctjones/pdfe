@@ -16,11 +16,12 @@ namespace Pdfe.Core.Security;
 /// This implementation supports:
 /// - V=1 R=2 (40-bit RC4) — legacy
 /// - V=2 R=3 (128-bit RC4) — most common
-/// - V=4 R=4 with CFM=V2 (RC4-128 with crypt filters) — common
+/// - V=4 R=4 with CFM=V2 (RC4-128 via crypt filters) — common
+/// - V=4 R=4 with CFM=AESV2 (AES-128 in CBC mode) — modern pre-PDF-2.0
 ///
-/// AES (V=4 R=4 CFM=AESV2 and V=5 R=6) is NOT yet implemented;
-/// callers will get a NotSupportedException for those files until
-/// the AES path lands.
+/// AES-256 (V=5 R=6) — the PDF 2.0 native handler with SHA-256-based
+/// key derivation — is NOT yet implemented. Callers get a clear
+/// NotSupportedException for those files until that path lands.
 /// </summary>
 public sealed class PdfStandardSecurityHandler
 {
@@ -98,15 +99,16 @@ public sealed class PdfStandardSecurityHandler
             }
         }
 
-        if (v == 5 || (v == 4 && usesAes))
+        if (v == 5)
         {
             throw new PdfEncryptionNotSupportedException(
-                $"AES decryption (V={v}, CFM={(usesAes ? "AESV2/V3" : "?")}) is not yet implemented. " +
-                "Tracked in GitHub #324; RC4 is currently supported.");
+                "AES-256 (V=5 R=6, the PDF 2.0 native handler) is not yet implemented. " +
+                "Tracked in GitHub #324; RC4 (V=1, V=2, V=4 with CFM=V2) and AES-128 " +
+                "(V=4 with CFM=AESV2) are currently supported.");
         }
         if (v != 1 && v != 2 && v != 4)
             throw new PdfEncryptionNotSupportedException(
-                $"Encryption algorithm V={v} is not supported. Only V=1, V=2, V=4 (RC4) are implemented.");
+                $"Encryption algorithm V={v} is not supported. Only V=1, V=2, V=4 are implemented.");
 
         // /O, /U: usually 32-byte hex strings. Read as raw bytes.
         var oBytes = GetByteString(encryptDict, "O", 32);
@@ -138,22 +140,71 @@ public sealed class PdfStandardSecurityHandler
     /// (FlateDecode etc.) — Crypt is conceptually the first filter.
     /// </summary>
     public byte[] DecryptStream(int objNum, int gen, byte[] cipherBytes)
-        => Rc4.Transform(DeriveObjectKey(objNum, gen), cipherBytes);
+    {
+        var key = DeriveObjectKey(objNum, gen);
+        return UsesAes ? AesCbcDecrypt(key, cipherBytes) : Rc4.Transform(key, cipherBytes);
+    }
 
     /// <summary>
     /// Decrypt a PDF string belonging to the given indirect object.
+    /// AES-mode strings are also AES-CBC encrypted with a 16-byte IV
+    /// prefix.
     /// </summary>
     public byte[] DecryptString(int objNum, int gen, byte[] cipherBytes)
-        => Rc4.Transform(DeriveObjectKey(objNum, gen), cipherBytes);
+    {
+        var key = DeriveObjectKey(objNum, gen);
+        return UsesAes ? AesCbcDecrypt(key, cipherBytes) : Rc4.Transform(key, cipherBytes);
+    }
 
     /// <summary>
-    /// Algorithm 1: per-object key from file key + obj# + gen#.
-    /// Used by both string and stream decryption with RC4.
+    /// AES-128/CBC with PKCS#7 padding. Per PDF spec the first 16 bytes
+    /// of <paramref name="cipherBytes"/> are the IV; the rest is the
+    /// ciphertext. Empty/under-block-size inputs are returned as-is —
+    /// some PDFs (notably qpdf-emitted ones) emit empty AES strings
+    /// when the underlying string is empty.
+    /// </summary>
+    private static byte[] AesCbcDecrypt(byte[] key, byte[] cipherBytes)
+    {
+        if (cipherBytes.Length < 16)
+            return Array.Empty<byte>();
+
+        var iv = new byte[16];
+        Array.Copy(cipherBytes, 0, iv, 0, 16);
+        int cipherLen = cipherBytes.Length - 16;
+        if (cipherLen == 0) return Array.Empty<byte>();
+
+        using var aes = Aes.Create();
+        aes.Key = key;
+        aes.IV = iv;
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+
+        try
+        {
+            using var decryptor = aes.CreateDecryptor();
+            return decryptor.TransformFinalBlock(cipherBytes, 16, cipherLen);
+        }
+        catch (CryptographicException)
+        {
+            // Fall back to no-padding: some non-PKCS7 PDFs emit garbage
+            // tails. Return whatever survives stripping the trailing block.
+            aes.Padding = PaddingMode.None;
+            using var decryptor = aes.CreateDecryptor();
+            return decryptor.TransformFinalBlock(cipherBytes, 16, cipherLen);
+        }
+    }
+
+    /// <summary>
+    /// Algorithm 1: per-object key from file key + obj# + gen# (+ "sAlT"
+    /// for AES). Used by both string and stream decryption.
     /// </summary>
     private byte[] DeriveObjectKey(int objNum, int gen)
     {
         // Append low-order 3 bytes of obj#, low-order 2 bytes of gen# (LE).
-        var input = new byte[_fileEncryptionKey.Length + 5];
+        // For AES (CFM=AESV2), append "sAlT" (4 bytes 0x73 0x41 0x6C 0x54)
+        // before MD5 — this differentiates AES per-object keys from RC4.
+        int extra = UsesAes ? 9 : 5;
+        var input = new byte[_fileEncryptionKey.Length + extra];
         Array.Copy(_fileEncryptionKey, input, _fileEncryptionKey.Length);
         int p = _fileEncryptionKey.Length;
         input[p + 0] = (byte)(objNum & 0xFF);
@@ -161,9 +212,17 @@ public sealed class PdfStandardSecurityHandler
         input[p + 2] = (byte)((objNum >> 16) & 0xFF);
         input[p + 3] = (byte)(gen & 0xFF);
         input[p + 4] = (byte)((gen >> 8) & 0xFF);
+        if (UsesAes)
+        {
+            input[p + 5] = 0x73; // 's'
+            input[p + 6] = 0x41; // 'A'
+            input[p + 7] = 0x6C; // 'l'
+            input[p + 8] = 0x54; // 'T'
+        }
 
         var hash = MD5.HashData(input);
-        // Object key length: min(filekey + 5, 16)
+        // Object key length: min(filekey + 5, 16). For AES the cipher
+        // requires exactly the file-key length bytes (16 for AES-128).
         int n = Math.Min(_fileEncryptionKey.Length + 5, 16);
         var key = new byte[n];
         Array.Copy(hash, key, n);

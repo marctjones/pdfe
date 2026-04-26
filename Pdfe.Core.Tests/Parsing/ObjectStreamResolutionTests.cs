@@ -194,10 +194,15 @@ public class ObjectStreamResolutionTests
         "../../../../test-pdfs/encrypted/birth-cert-rc4-128.pdf";
     private const string EncryptedRC4_40 =
         "../../../../test-pdfs/encrypted/birth-cert-rc4-40.pdf";
+    private const string EncryptedAES_128 =
+        "../../../../test-pdfs/encrypted/birth-cert-aes-128.pdf";
+    private const string EncryptedAES_256 =
+        "../../../../test-pdfs/encrypted/birth-cert-aes-256.pdf";
 
     [Theory]
     [InlineData(EncryptedRC4_128, "RC4 V=2 R=3 (128-bit)")]
     [InlineData(EncryptedRC4_40, "RC4 V=1 R=2 (40-bit legacy)")]
+    [InlineData(EncryptedAES_128, "AES-128 V=4 R=4 CFM=AESV2")]
     public void OpensRealEncryptedPdf_DecryptedContentIsValidPdfOperators(string path, string description)
     {
         // End-to-end Phase 2 RC4 test: take a known PDF (the scrambled
@@ -227,6 +232,24 @@ public class ObjectStreamResolutionTests
         // content streams.
         text.Should().ContainAny(new[] { "BT", "Tj", "TJ", "ET" },
             $"{description}: decrypted content must look like real PDF operators");
+    }
+
+    [Fact]
+    public void OpensAes256Pdf_StillThrowsBecauseV5HandlerNotYetImplemented()
+    {
+        // AES-256 (V=5 R=6, the PDF 2.0 native handler with SHA-256-based
+        // key derivation) is materially different from V=4: the file key
+        // isn't derived via Algorithm 2, /U and /O are 48 bytes instead
+        // of 32, and the password-verification flow uses SHA-256 with a
+        // per-file salt. Pin that we still throw a clear exception until
+        // that path lands; this test should be inverted when V=5 ships.
+        if (!File.Exists(EncryptedAES_256)) return;
+
+        Action open = () => { using var _ = PdfDocument.Open(EncryptedAES_256); };
+        open.Should().Throw<Pdfe.Core.Parsing.PdfEncryptionNotSupportedException>(
+            "AES-256 is the PDF 2.0 native handler and needs separate KDF work; " +
+            "throw clearly until V=5 lands so users don't get silent garbage")
+            .WithMessage("*V=5*");
     }
 
     [Fact]
