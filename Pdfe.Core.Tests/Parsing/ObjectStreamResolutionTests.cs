@@ -203,6 +203,7 @@ public class ObjectStreamResolutionTests
     [InlineData(EncryptedRC4_128, "RC4 V=2 R=3 (128-bit)")]
     [InlineData(EncryptedRC4_40, "RC4 V=1 R=2 (40-bit legacy)")]
     [InlineData(EncryptedAES_128, "AES-128 V=4 R=4 CFM=AESV2")]
+    [InlineData(EncryptedAES_256, "AES-256 V=5 R=6 CFM=AESV3 (PDF 2.0)")]
     public void OpensRealEncryptedPdf_DecryptedContentIsValidPdfOperators(string path, string description)
     {
         // End-to-end Phase 2 RC4 test: take a known PDF (the scrambled
@@ -235,21 +236,26 @@ public class ObjectStreamResolutionTests
     }
 
     [Fact]
-    public void OpensAes256Pdf_StillThrowsBecauseV5HandlerNotYetImplemented()
+    public void OpensAes256Pdf_VerifiesPasswordViaAlgorithm2BAndDerivesFileKey()
     {
-        // AES-256 (V=5 R=6, the PDF 2.0 native handler with SHA-256-based
-        // key derivation) is materially different from V=4: the file key
-        // isn't derived via Algorithm 2, /U and /O are 48 bytes instead
-        // of 32, and the password-verification flow uses SHA-256 with a
-        // per-file salt. Pin that we still throw a clear exception until
-        // that path lands; this test should be inverted when V=5 ships.
+        // AES-256 (V=5 R=6) is the PDF 2.0 native handler. Different KDF
+        // from V=4: 48-byte /U /O carrying validation+key salts, /UE /OE
+        // holding the encrypted file key, the chained SHA-256/384/512
+        // hash from Algorithm 2.B for password verification + key
+        // derivation.
+        //
+        // This test asserts the V=5 path successfully verifies the empty
+        // user password (Algorithm 11), AES-decrypts /UE to recover the
+        // 32-byte file encryption key, and produces a usable handler.
+        // End-to-end content is also covered by the parameterised theory
+        // above since AES-256 is included there.
         if (!File.Exists(EncryptedAES_256)) return;
 
-        Action open = () => { using var _ = PdfDocument.Open(EncryptedAES_256); };
-        open.Should().Throw<Pdfe.Core.Parsing.PdfEncryptionNotSupportedException>(
-            "AES-256 is the PDF 2.0 native handler and needs separate KDF work; " +
-            "throw clearly until V=5 lands so users don't get silent garbage")
-            .WithMessage("*V=5*");
+        using var doc = PdfDocument.Open(EncryptedAES_256);
+        doc.IsEncrypted.Should().BeTrue();
+        doc.IsDecrypting.Should().BeTrue(
+            "V=5 R=6 with empty password must verify via Algorithm 2.B and yield a working handler");
+        doc.PageCount.Should().BeGreaterThan(0);
     }
 
     [Fact]
