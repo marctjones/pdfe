@@ -147,15 +147,17 @@ public class RealWorldSearchTests
     {
         if (!File.Exists(PragmaticBook)) return;
 
+        // Use a synchronous IProgress<T> implementation. Progress<T> would
+        // capture SynchronizationContext.Current (null in xUnit test threads)
+        // and post via ThreadPool.QueueUserWorkItem — under parallel test
+        // load, those queued callbacks may not have run by the time Search
+        // returns, so the assertions race with the threadpool.
         var reports = new System.Collections.Generic.List<PdfSearchService.SearchProgress>();
-        var progress = new Progress<PdfSearchService.SearchProgress>(reports.Add);
+        var progress = new SynchronousProgress<PdfSearchService.SearchProgress>(
+            r => { lock (reports) reports.Add(r); });
         var matches = NewService().Search(PragmaticBook, "open source",
             progress: progress);
 
-        // Give the synchronous Progress<T> dispatcher time to drain.
-        // (Progress<T> posts to the SyncContext captured at construction;
-        // here we don't have one, so reports run inline — they should
-        // already be in `reports` by the time Search returns.)
         reports.Should().NotBeEmpty(
             "Search must emit at least one SearchProgress report");
         reports.Should().Contain(r => r.PagesScanned == 0,
@@ -198,5 +200,17 @@ public class RealWorldSearchTests
             "fixture. Search service finds 0 matches; this is a known " +
             "extraction gap, not a search-pipeline bug.");
         matches.Should().NotBeEmpty("'English' appears in the fixture");
+    }
+
+    /// <summary>
+    /// IProgress that invokes the callback synchronously on the calling thread,
+    /// avoiding Progress&lt;T&gt;'s ThreadPool dispatch. Tests need this so they can
+    /// assert against the report list immediately after Search() returns.
+    /// </summary>
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
     }
 }
