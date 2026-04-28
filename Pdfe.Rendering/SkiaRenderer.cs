@@ -56,6 +56,13 @@ public class SkiaRenderer
 /// </summary>
 internal class RenderContext
 {
+    // SkiaSharp's font subsystem is not safe under concurrent typeface creation:
+    // SKTypeface.FromData and SKTypeface.FromFamilyName both reach into a process-wide
+    // native font manager whose cache can corrupt or deadlock when two managed threads
+    // call them simultaneously. Visual tests previously failed under xUnit parallelism
+    // because of this; we serialize all typeface acquisition with a process-wide lock.
+    private static readonly object _typefaceLoadLock = new();
+
     private readonly SKCanvas _canvas;
     private readonly PdfPage _page;
     private readonly RenderOptions _options;
@@ -881,25 +888,28 @@ internal class RenderContext
         }
 
         SKTypeface? typeface;
-        try
+        lock (_typefaceLoadLock)
         {
-            using var data = SKData.CreateCopy(loadableBytes);
-            typeface = SKTypeface.FromData(data);
-        }
-        catch { typeface = null; }
+            try
+            {
+                using var data = SKData.CreateCopy(loadableBytes);
+                typeface = SKTypeface.FromData(data);
+            }
+            catch { typeface = null; }
 
-        if (typeface == null) return null;
+            if (typeface == null) return null;
 
-        // Sanity-probe the wrapped font — for some CFF subsets (most commonly
-        // dingbat fonts produced by the XEP toolchain) Skia loads our wrapper
-        // and resolves the cmap, but its CFF interpreter finds no charstring
-        // outlines and silently draws nothing. Detect that and fall back to
-        // the system-font path so the user at least sees *some* glyph for the
-        // codepoint instead of empty whitespace.
-        if (isCff && !ProducesGlyphOutlines(typeface))
-        {
-            typeface.Dispose();
-            return null;
+            // Sanity-probe the wrapped font — for some CFF subsets (most commonly
+            // dingbat fonts produced by the XEP toolchain) Skia loads our wrapper
+            // and resolves the cmap, but its CFF interpreter finds no charstring
+            // outlines and silently draws nothing. Detect that and fall back to
+            // the system-font path so the user at least sees *some* glyph for the
+            // codepoint instead of empty whitespace.
+            if (isCff && !ProducesGlyphOutlines(typeface))
+            {
+                typeface.Dispose();
+                return null;
+            }
         }
 
         _embeddedTypefaces[fontName] = typeface;
@@ -1125,7 +1135,10 @@ internal class RenderContext
         else if (bareName.Contains("Italic") || bareName.Contains("Oblique"))
             style = SKFontStyle.Italic;
 
-        return SKTypeface.FromFamilyName(family, style) ?? SKTypeface.Default;
+        lock (_typefaceLoadLock)
+        {
+            return SKTypeface.FromFamilyName(family, style) ?? SKTypeface.Default;
+        }
     }
 
     private static bool Starts(string s, string prefix) =>
