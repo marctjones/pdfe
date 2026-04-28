@@ -17,6 +17,7 @@ public class ContentStreamParser
     // Graphics state tracking
     private readonly Stack<GraphicsState> _stateStack = new();
     private GraphicsState _state = new();
+    private bool _inCompatibilitySection;
 
     // Text state tracking
     private double _fontSize = 12;
@@ -255,10 +256,12 @@ public class ContentStreamParser
                 {
                     op.BoundingBox = TransformBounds(_pathMinX, _pathMinY, _pathMaxX, _pathMaxY);
                 }
+                _state.PendingClip = null; // §8.5.4: clip applied at painting op, then consumed
                 EndPath();
                 break;
 
             case "n":
+                _state.PendingClip = null;
                 EndPath();
                 break;
 
@@ -407,6 +410,81 @@ public class ContentStreamParser
             case "Do":
                 // XObject bounds depend on the object type and CTM
                 // For now, we don't calculate bounds for XObjects
+                break;
+
+            // Clipping (§8.5.4) — applies to the current path, takes effect at the next painting op.
+            case "W":
+                _state.PendingClip = "W";
+                break;
+            case "W*":
+                _state.PendingClip = "W*";
+                break;
+
+            // Shading (§8.7.4)
+            case "sh":
+                // No bounds tracked; the shading dictionary controls the painted region.
+                break;
+
+            // Type 3 font glyph metrics (§9.6.5)
+            case "d0":
+                // Width-only: wx wy d0 (wy is always 0 per spec)
+                break;
+            case "d1":
+                // Width + bounding box: wx wy llx lly urx ury d1
+                if (operands.Count >= 6)
+                {
+                    op.BoundingBox = new PdfRectangle(
+                        GetNumber(operands[2]),
+                        GetNumber(operands[3]),
+                        GetNumber(operands[4]),
+                        GetNumber(operands[5]));
+                }
+                break;
+
+            // Color space selection (§8.6.5)
+            case "CS":
+                if (operands.Count >= 1 && operands[0] is PdfName csNameStroke)
+                    _state.StrokeColorSpace = csNameStroke.Value;
+                break;
+            case "cs":
+                if (operands.Count >= 1 && operands[0] is PdfName csNameFill)
+                    _state.FillColorSpace = csNameFill.Value;
+                break;
+
+            // Color operators — track only nominal space for now; values are operand-only.
+            case "G":
+                _state.StrokeColorSpace = "DeviceGray"; break;
+            case "g":
+                _state.FillColorSpace = "DeviceGray"; break;
+            case "RG":
+                _state.StrokeColorSpace = "DeviceRGB"; break;
+            case "rg":
+                _state.FillColorSpace = "DeviceRGB"; break;
+            case "K":
+                _state.StrokeColorSpace = "DeviceCMYK"; break;
+            case "k":
+                _state.FillColorSpace = "DeviceCMYK"; break;
+            case "SC":
+            case "SCN":
+            case "sc":
+            case "scn":
+                // Operands carry the color values; no state change beyond what CS/cs already set.
+                break;
+
+            // Marked content (§14.6) — informational, no state effects on geometry.
+            case "MP":
+            case "DP":
+            case "BMC":
+            case "BDC":
+            case "EMC":
+                break;
+
+            // Compatibility operators
+            case "BX":
+                _inCompatibilitySection = true;
+                break;
+            case "EX":
+                _inCompatibilitySection = false;
                 break;
         }
     }
@@ -607,6 +685,25 @@ public class ContentStreamParser
         if (gsDict.ContainsKey("ML")) _state.MiterLimit = gsDict.GetNumber("ML", _state.MiterLimit);
         if (gsDict.ContainsKey("Tr") && gsDict.GetOptional("Tr") is { } trObj)
             _textRenderMode = (int)GetNumber(trObj);
+
+        // Transparency parameters (§11.6.4)
+        if (gsDict.ContainsKey("ca")) _state.FillAlpha   = gsDict.GetNumber("ca", _state.FillAlpha);
+        if (gsDict.ContainsKey("CA")) _state.StrokeAlpha = gsDict.GetNumber("CA", _state.StrokeAlpha);
+        if (gsDict.ContainsKey("BM"))
+        {
+            var bmObj = gsDict.GetOptional("BM");
+            if (bmObj is PdfName bmName) _state.BlendMode = bmName.Value;
+            else if (bmObj is PdfArray bmArr && bmArr.Count > 0 && bmArr[0] is PdfName firstBm)
+                _state.BlendMode = firstBm.Value;
+        }
+        if (gsDict.ContainsKey("SMask"))
+        {
+            // SMask=/None disables; otherwise a soft mask dictionary is referenced.
+            var smaskObj = gsDict.GetOptional("SMask");
+            _state.HasSoftMask = !(smaskObj is PdfName smaskName && smaskName.Value == "None");
+        }
+        if (gsDict.ContainsKey("AIS")) _state.AlphaIsShape = gsDict.GetBool("AIS", _state.AlphaIsShape);
+        if (gsDict.ContainsKey("SA"))  _state.StrokeAdjustment = gsDict.GetBool("SA", _state.StrokeAdjustment);
     }
 
     private void LoadFont()
@@ -1147,7 +1244,9 @@ public class ContentStreamParser
         "sh",
         // XObject/Images
         "Do", "BI", "ID", "EI",
-        // Marked content
+        // Type 3 font character widths
+        "d0", "d1",
+        // Marked content + compatibility
         "MP", "DP", "BMC", "BDC", "EMC", "BX", "EX"
     };
 
@@ -1168,6 +1267,21 @@ public class ContentStreamParser
         public int    LineJoin;
         public double MiterLimit = 10;
 
+        // Transparency (§11.3 table 128)
+        public double FillAlpha = 1.0;
+        public double StrokeAlpha = 1.0;
+        public string BlendMode = "Normal";
+        public bool   HasSoftMask;
+        public bool   AlphaIsShape;
+        public bool   StrokeAdjustment;
+
+        // Color state — name only; fully resolving colors requires the resource dict.
+        public string FillColorSpace = "DeviceGray";
+        public string StrokeColorSpace = "DeviceGray";
+
+        // Pending clipping operator queued by W / W*; consumed at the next path-painting op.
+        public string? PendingClip;
+
         public void MultiplyCtm(double a, double b, double c, double d, double e, double f)
         {
             var na = a * Ctm_a + b * Ctm_c;
@@ -1186,7 +1300,13 @@ public class ContentStreamParser
             Ctm_a = Ctm_a, Ctm_b = Ctm_b, Ctm_c = Ctm_c,
             Ctm_d = Ctm_d, Ctm_e = Ctm_e, Ctm_f = Ctm_f,
             LineWidth = LineWidth, LineCap = LineCap,
-            LineJoin  = LineJoin,  MiterLimit = MiterLimit
+            LineJoin  = LineJoin,  MiterLimit = MiterLimit,
+            FillAlpha = FillAlpha, StrokeAlpha = StrokeAlpha,
+            BlendMode = BlendMode, HasSoftMask = HasSoftMask,
+            AlphaIsShape = AlphaIsShape, StrokeAdjustment = StrokeAdjustment,
+            FillColorSpace = FillColorSpace,
+            StrokeColorSpace = StrokeColorSpace,
+            PendingClip = PendingClip
         };
     }
 }

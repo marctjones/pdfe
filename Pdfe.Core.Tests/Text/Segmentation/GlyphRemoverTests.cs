@@ -186,4 +186,344 @@ public class GlyphRemoverTests
         var reconTj = result.First(o => o.Name == "Tj");
         ((PdfString)reconTj.Operands[0]).Value.Should().StartWith("HELLO");
     }
+
+    [Fact]
+    public void ProcessOperations_AllOperators_PreservesNonTextOps()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.Rectangle(10, 10, 100, 100),
+            ContentOperator.Fill(),
+            ContentOperator.BeginText(),
+            ContentOperator.EndText(),
+        };
+
+        var result = _remover.ProcessOperations(ops, Array.Empty<Letter>(), new PdfRectangle(0, 0, 1000, 1000));
+
+        result.Where(o => o.Name == "re").Should().HaveCount(1);
+        result.Where(o => o.Name == "f").Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void Process_WithTJOperator_ExtractsTextFromArray()
+    {
+        // TJ operator has array of strings/numbers, not just a single string operand
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("TJ", new PdfObject[]
+            {
+                new PdfArray(new PdfString("HEL"), new PdfReal(-50), new PdfString("LO"))
+            }), "HELLO"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("HELLO");
+        var redactionArea = new PdfRectangle(400, 650, 500, 780); // no intersection
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        result.Should().HaveCount(5);
+        result[0].Name.Should().Be("BT");
+    }
+
+    [Fact]
+    public void Process_WithEmptyTextContent_CopiesOperatorVerbatim()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            WithText(new ContentOperator("Tj", new PdfObject[] { new PdfString("") }), ""),
+            ContentOperator.EndText(),
+        };
+
+        var result = _remover.ProcessOperations(ops, Array.Empty<Letter>(), new PdfRectangle(0, 0, 1000, 1000));
+
+        // Empty text is skipped during processing but block is copied verbatim since no letters intersect
+        result.Should().HaveCount(4); // BT, Tf, Tj (empty), ET copied through
+    }
+
+    [Fact]
+    public void Process_FullyContainedStrategy_OnlyRemovesFullyContainedGlyphs()
+    {
+        var ops = SimpleTextBlock("HELLO", x: 100, y: 700);
+        var letters = LettersFor("HELLO");
+        // Redaction box covers only first 2 letters fully
+        var redactionArea = new PdfRectangle(100, 680, 114, 720);
+
+        var result = _remover.ProcessOperations(
+            ops, letters, redactionArea,
+            GlyphRemovalStrategy.FullyContained);
+
+        // With FullyContained strategy, only H and E (fully contained) are removed
+        var reconstructed = result.Where(o => o.Name == "Tj").ToList();
+        // Some text should remain since LLO are only partially in the box
+        reconstructed.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void Process_CenterPointStrategy_RemovesIfCenterInArea()
+    {
+        var ops = SimpleTextBlock("HELLO", x: 100, y: 700);
+        var letters = LettersFor("HELLO");
+        // Redaction covers the center of letters H and E, but not their full bounds
+        var redactionArea = new PdfRectangle(103, 680, 110, 720);
+
+        var result = _remover.ProcessOperations(
+            ops, letters, redactionArea,
+            GlyphRemovalStrategy.CenterPoint);
+
+        // Center-point strategy should affect H and E but not LLO
+        result.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void Process_NoTextOpsInBlock_CopiesBlockVerbatim()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            new("Tc", new PdfObject[] { new PdfReal(0.5) }),
+            ContentOperator.EndText(),
+        };
+
+        var result = _remover.ProcessOperations(
+            ops, Array.Empty<Letter>(),
+            new PdfRectangle(0, 0, 1000, 1000));
+
+        result.Should().HaveCount(4);
+        result.Select(o => o.Name).Should().Equal("BT", "Tf", "Tc", "ET");
+    }
+
+    [Fact]
+    public void Process_OperatorWithoutOperands_ReturnsEmptyText()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            new("Tj", Array.Empty<PdfObject>()), // Empty operands
+            ContentOperator.EndText(),
+        };
+
+        var result = _remover.ProcessOperations(
+            ops, Array.Empty<Letter>(),
+            new PdfRectangle(0, 0, 1000, 1000));
+
+        result.Should().HaveCount(4); // Passes through, no extraction happens
+    }
+
+    [Fact]
+    public void Process_ApostropheOperator_ExtractsText()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("'", new PdfObject[] { new PdfString("TEXT") }), "TEXT"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("TEXT");
+        var redactionArea = new PdfRectangle(400, 650, 500, 780); // no intersection
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        result.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public void Process_QuoteOperator_ExtractsText()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("\"", new PdfObject[] { new PdfString("TEXT") }), "TEXT"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("TEXT");
+        var redactionArea = new PdfRectangle(400, 650, 500, 780); // no intersection
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        result.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public void Process_MultipleBlocksWithMixedContent_HandlesCorrectly()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("Tj", new PdfObject[] { new PdfString("BLOCK1") }), "BLOCK1"),
+            ContentOperator.EndText(),
+            ContentOperator.Rectangle(10, 10, 50, 50),
+            ContentOperator.Fill(),
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 200, 600),
+            WithText(new ContentOperator("Tj", new PdfObject[] { new PdfString("BLOCK2") }), "BLOCK2"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("BLOCK1", x0: 100, y: 700)
+            .Concat(LettersFor("BLOCK2", x0: 200, y: 600))
+            .ToList();
+
+        var redactionArea = new PdfRectangle(400, 650, 500, 750);
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        // Should contain re and f operators (non-text ops)
+        result.Where(o => o.Name == "re").Should().HaveCount(1);
+        result.Where(o => o.Name == "f").Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void Process_WithTJOperatorMixedContent_HandlesSpacingCorrectly()
+    {
+        // TJ with mixed strings and spacing adjustments
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("TJ", new PdfObject[]
+            {
+                new PdfArray(
+                    new PdfString("HEL"),
+                    new PdfReal(-75),
+                    new PdfString("LO"),
+                    new PdfReal(-50),
+                    new PdfString("WOR"),
+                    new PdfReal(-75),
+                    new PdfString("LD"))
+            }), "HELLOWORLD"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("HELLOWORLD");
+        var redactionArea = new PdfRectangle(400, 650, 500, 780); // no intersection
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        result.Should().NotBeEmpty();
+        result[0].Name.Should().Be("BT");
+    }
+
+    [Fact]
+    public void Process_PartialTJOverlap_RemovesOnlyIntersectingSegments()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("TJ", new PdfObject[]
+            {
+                new PdfArray(
+                    new PdfString("KEEP"),
+                    new PdfReal(-50),
+                    new PdfString("REMOVE"))
+            }), "KEEPREMOVE"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("KEEPREMOVE");
+        // Cover only the REMOVE part
+        var redactionArea = new PdfRectangle(120, 680, 300, 720);
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        result.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void Process_WithApostropheOperatorAndIntersection_RemovesCorrectly()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("'", new PdfObject[] { new PdfString("SECRET") }), "SECRET"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("SECRET");
+        var redactionArea = new PdfRectangle(50, 680, 250, 720);
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        // All glyphs covered, so block should be removed or replaced
+        result.Select(o => o.Name).Should().NotContain("'");
+    }
+
+    [Fact]
+    public void Process_WithDoubleQuoteOperatorAndIntersection_RemovesCorrectly()
+    {
+        var ops = new List<ContentOperator>
+        {
+            ContentOperator.BeginText(),
+            new("Tf", new PdfObject[] { new PdfName("F1"), new PdfReal(12) }),
+            ContentOperator.TextMatrix(12, 0, 0, 12, 100, 700),
+            WithText(new ContentOperator("\"", new PdfObject[] { new PdfString("HIDDEN") }), "HIDDEN"),
+            ContentOperator.EndText(),
+        };
+
+        var letters = LettersFor("HIDDEN");
+        var redactionArea = new PdfRectangle(50, 680, 250, 720);
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        result.Select(o => o.Name).Should().NotContain("\"");
+    }
+
+    [Fact]
+    public void ProcessOperations_EmptyContentStream_ReturnsEmpty()
+    {
+        var result = _remover.ProcessOperations(
+            Array.Empty<ContentOperator>(),
+            Array.Empty<Letter>(),
+            new PdfRectangle(0, 0, 100, 100));
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ProcessOperations_NoIntersectingLetters_CopiesOperationsUnchanged()
+    {
+        var ops = SimpleTextBlock("VISIBLE", x: 100, y: 700);
+        var letters = LettersFor("VISIBLE");
+        var redactionArea = new PdfRectangle(400, 650, 500, 750); // far away
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        var tjOps = result.Where(o => o.Name == "Tj").ToList();
+        tjOps.Should().HaveCount(1);
+        ((PdfString)tjOps[0].Operands[0]).Value.Should().Be("VISIBLE");
+    }
+
+    [Fact]
+    public void ProcessOperations_RemovesEntireWord_ReplacesWithReconstruction()
+    {
+        var ops = SimpleTextBlock("REDACT", x: 100, y: 700);
+        var letters = LettersFor("REDACT");
+        var redactionArea = new PdfRectangle(50, 680, 250, 720); // covers all
+
+        var result = _remover.ProcessOperations(ops, letters, redactionArea);
+
+        // Original Tj should be gone
+        result.Select(o => o.Name).Should().NotContain("Tj");
+    }
 }

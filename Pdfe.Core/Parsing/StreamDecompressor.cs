@@ -309,11 +309,13 @@ public class StreamDecompressor
         // Handle partial group at end
         if (group.Count > 0)
         {
+            int originalCount = group.Count;
             while (group.Count < 5)
                 group.Add(84); // Pad with 'u' (highest value)
 
-            int outBytes = group.Count - 1; // Partial group produces fewer bytes
-            DecodeASCII85Group(group, output, outBytes);
+            int outBytes = originalCount - 1; // Partial group produces n-1 bytes
+            if (outBytes > 0)
+                DecodeASCII85Group(group, output, outBytes);
         }
 
         return output.ToArray();
@@ -552,8 +554,13 @@ public class StreamDecompressor
 
             while (reader.HasBits && (rows == 0 || rowsDecoded < rows))
             {
+                int bitsBefore = reader.Position;
                 var currentRow = DecodeGroup4Row(reader, refRow, columns);
                 if (currentRow == null)
+                    break;
+
+                // Malformed input: row decoder couldn't make any progress. Stop instead of looping.
+                if (reader.Position == bitsBefore)
                     break;
 
                 AppendRowToOutput(output, currentRow, bytesPerRow, blackIs1);
@@ -578,7 +585,7 @@ public class StreamDecompressor
         int a0 = -1;
         bool color = false;
 
-        while (a0 < columns - 1)
+        while (a0 < columns - 1 && reader.HasBits)
         {
             int code = reader.PeekBits(6);
 
@@ -633,8 +640,11 @@ public class StreamDecompressor
 
             while (reader.HasBits && (rows == 0 || rowsDecoded < rows))
             {
+                int bitsBefore = reader.Position;
                 var row = Decode1DRow(reader, columns, false);
                 if (row == null)
+                    break;
+                if (reader.Position == bitsBefore)
                     break;
 
                 AppendRowToOutput(output, row, bytesPerRow, blackIs1);
@@ -667,10 +677,13 @@ public class StreamDecompressor
 
             while (reader.HasBits && (rows == 0 || rowsDecoded < rows))
             {
+                int bitsBefore = reader.Position;
                 if (rowsInGroup == 0)
                 {
                     var row = Decode1DRow(reader, columns, false);
                     if (row == null)
+                        break;
+                    if (reader.Position == bitsBefore)
                         break;
 
                     AppendRowToOutput(output, row, bytesPerRow, blackIs1);
@@ -683,6 +696,8 @@ public class StreamDecompressor
                 {
                     var row = DecodeGroup3_2DRow(reader, refRow, columns);
                     if (row == null)
+                        break;
+                    if (reader.Position == bitsBefore)
                         break;
 
                     AppendRowToOutput(output, row, bytesPerRow, blackIs1);
@@ -841,7 +856,9 @@ public class StreamDecompressor
                     break;
             }
 
-            if (!found || totalLen >= 2560)
+            if (!found)
+                return totalLen > 0 ? totalLen : -1;
+            if (totalLen >= 2560)
                 break;
         }
 
@@ -921,6 +938,8 @@ public class StreamDecompressor
         }
 
         public bool HasBits => _bitPos < _data.Length * 8;
+
+        public int Position => _bitPos;
 
         public int PeekBits(int count)
         {

@@ -30,6 +30,7 @@ public class SignatureVerificationService
 
     public SignatureVerificationService(ILogger<SignatureVerificationService> logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
     }
 

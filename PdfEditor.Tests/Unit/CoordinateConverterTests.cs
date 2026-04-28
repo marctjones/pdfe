@@ -554,4 +554,281 @@ public class CoordinateConverterTests
         CoordinateConverter.DefaultRenderDpi.Should().Be(150, "Default render DPI should be 150");
         CoordinateConverter.PdfPointsPerInch.Should().Be(72, "PDF spec defines 72 points per inch");
     }
+
+    // ========================================================================
+    // PAGE ROTATION SUPPORT TESTS
+    // ========================================================================
+
+    [Fact]
+    public void TransformForRotation_NoRotation_ReturnsUnchanged()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, 0, LetterWidth, LetterHeight);
+
+        result.X.Should().Be(100);
+        result.Y.Should().Be(100);
+        result.Width.Should().Be(200);
+        result.Height.Should().Be(50);
+    }
+
+    [Fact]
+    public void TransformForRotation_360Degrees_ReturnsUnchanged()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, 360, LetterWidth, LetterHeight);
+
+        result.X.Should().Be(100);
+        result.Y.Should().Be(100);
+        result.Width.Should().Be(200);
+        result.Height.Should().Be(50);
+    }
+
+    [Fact]
+    public void TransformForRotation_NegativeRotation_NormalizesCorrectly()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, -90, LetterWidth, LetterHeight);
+
+        result.Should().NotBeNull();
+        result.Width.Should().Be(50);   // Height becomes width
+        result.Height.Should().Be(200); // Width becomes height
+    }
+
+    [Fact]
+    public void TransformForRotation_90Degrees_SwapsDimensions()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, 90, LetterWidth, LetterHeight);
+
+        result.Width.Should().Be(50);   // Original height
+        result.Height.Should().Be(200); // Original width
+    }
+
+    [Fact]
+    public void TransformForRotation_180Degrees_FlipsCoordinates()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, 180, LetterWidth, LetterHeight);
+
+        // At 180°, position is flipped
+        result.Width.Should().Be(200);  // Width unchanged
+        result.Height.Should().Be(50);  // Height unchanged
+    }
+
+    [Fact]
+    public void TransformForRotation_270Degrees_SwapsDimensions()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, 270, LetterWidth, LetterHeight);
+
+        result.Width.Should().Be(50);   // Original height
+        result.Height.Should().Be(200); // Original width
+    }
+
+    [Fact]
+    public void TransformForRotation_InvalidRotation_ReturnsUnchanged()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        var result = CoordinateConverter.TransformForRotation(area, 45, LetterWidth, LetterHeight);
+
+        // 45 degrees is not supported, should return unchanged
+        result.X.Should().Be(100);
+        result.Y.Should().Be(100);
+        result.Width.Should().Be(200);
+        result.Height.Should().Be(50);
+    }
+
+    [Fact]
+    public void TransformForRotation_LargeRotationValue_NormalizesCorrectly()
+    {
+        var area = new Rect(100, 100, 200, 50);
+
+        // 450 degrees = 90 degrees
+        var result = CoordinateConverter.TransformForRotation(area, 450, LetterWidth, LetterHeight);
+
+        result.Width.Should().Be(50);   // Should behave like 90 degrees
+        result.Height.Should().Be(200);
+    }
+
+    [Fact]
+    public void GetRotatedPageDimensions_NoRotation_DimensionsUnchanged()
+    {
+        var (width, height) = CoordinateConverter.GetRotatedPageDimensions(LetterWidth, LetterHeight, 0);
+
+        width.Should().Be(LetterWidth);
+        height.Should().Be(LetterHeight);
+    }
+
+    [Fact]
+    public void GetRotatedPageDimensions_90Degrees_DimensionsSwapped()
+    {
+        var (width, height) = CoordinateConverter.GetRotatedPageDimensions(LetterWidth, LetterHeight, 90);
+
+        width.Should().Be(LetterHeight);
+        height.Should().Be(LetterWidth);
+    }
+
+    [Fact]
+    public void GetRotatedPageDimensions_180Degrees_DimensionsUnchanged()
+    {
+        var (width, height) = CoordinateConverter.GetRotatedPageDimensions(LetterWidth, LetterHeight, 180);
+
+        width.Should().Be(LetterWidth);
+        height.Should().Be(LetterHeight);
+    }
+
+    [Fact]
+    public void GetRotatedPageDimensions_270Degrees_DimensionsSwapped()
+    {
+        var (width, height) = CoordinateConverter.GetRotatedPageDimensions(LetterWidth, LetterHeight, 270);
+
+        width.Should().Be(LetterHeight);
+        height.Should().Be(LetterWidth);
+    }
+
+    [Fact]
+    public void GetRotatedPageDimensions_NegativeRotation_NormalizesCorrectly()
+    {
+        var (width, height) = CoordinateConverter.GetRotatedPageDimensions(LetterWidth, LetterHeight, -90);
+
+        width.Should().Be(LetterHeight);
+        height.Should().Be(LetterWidth);
+    }
+
+    [Fact]
+    public void GetRotatedPageDimensions_LargeRotationValue_NormalizesCorrectly()
+    {
+        // 450 degrees = 90 degrees
+        var (width, height) = CoordinateConverter.GetRotatedPageDimensions(LetterWidth, LetterHeight, 450);
+
+        width.Should().Be(LetterHeight);
+        height.Should().Be(LetterWidth);
+    }
+
+    // ========================================================================
+    // DEBUG HELPER TESTS
+    // ========================================================================
+
+    [Fact]
+    public void DescribeConversion_ContainsInputAndOutput()
+    {
+        var input = new Rect(10, 20, 30, 40);
+        var output = new Rect(50, 60, 70, 80);
+
+        var description = CoordinateConverter.DescribeConversion(
+            input, "ImagePixels",
+            output, "PdfPoints");
+
+        description.Should().Contain("ImagePixels");
+        description.Should().Contain("PdfPoints");
+        description.Should().Contain("10");
+        description.Should().Contain("50");
+    }
+
+    [Fact]
+    public void DescribeConversion_IncludesAllDimensions()
+    {
+        var input = new Rect(1.5, 2.5, 3.5, 4.5);
+        var output = new Rect(5.5, 6.5, 7.5, 8.5);
+
+        var description = CoordinateConverter.DescribeConversion(
+            input, "From",
+            output, "To");
+
+        description.Should().Contain("1.5");
+        description.Should().Contain("5.5");
+        description.Should().Contain("3.5");
+        description.Should().Contain("7.5");
+    }
+
+    // ========================================================================
+    // DPI EDGE CASES
+    // ========================================================================
+
+    [Fact]
+    public void ImagePixelsToPdfPoints_WithVeryHighDpi_ScalesCorrectly()
+    {
+        var result = CoordinateConverter.ImagePixelsToPdfPoints(300, 600);
+
+        result.Should().BeApproximately(36, 0.001, "300 pixels at 600 DPI = 36 points");
+    }
+
+    [Fact]
+    public void ImagePixelsToPdfPoints_WithVeryLowDpi_ScalesCorrectly()
+    {
+        var result = CoordinateConverter.ImagePixelsToPdfPoints(1, 1);
+
+        result.Should().BeApproximately(72, 0.001, "1 pixel at 1 DPI = 72 points");
+    }
+
+    [Fact]
+    public void PdfPointsToImagePixels_WithVeryHighDpi_ScalesCorrectly()
+    {
+        var result = CoordinateConverter.PdfPointsToImagePixels(36, 600);
+
+        result.Should().BeApproximately(300, 0.001, "36 points at 600 DPI = 300 pixels");
+    }
+
+    // ========================================================================
+    // COORDINATE SYSTEM CONSISTENCY
+    // ========================================================================
+
+    [Fact]
+    public void AllConversions_MaintainConsistency()
+    {
+        // Start with image pixels
+        var imagePixels = 150.0;
+        var renderDpi = 150;
+
+        // Convert to PDF points
+        var pdfPoints = CoordinateConverter.ImagePixelsToPdfPoints(imagePixels, renderDpi);
+
+        // Should be 72 points
+        pdfPoints.Should().BeApproximately(72, 0.001);
+
+        // Convert back
+        var backToPixels = CoordinateConverter.PdfPointsToImagePixels(pdfPoints, renderDpi);
+
+        // Should match original
+        backToPixels.Should().BeApproximately(imagePixels, 0.0001);
+    }
+
+    [Fact]
+    public void YAxisFlip_IsSymmetric()
+    {
+        double pageHeight = 792;
+        double originalY = 500;
+
+        var flipped = CoordinateConverter.PdfYToAvaloniaY(originalY, pageHeight);
+        var backToOriginal = CoordinateConverter.AvaloniaYToPdfY(flipped, pageHeight);
+
+        backToOriginal.Should().BeApproximately(originalY, 0.0001);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100)]
+    [InlineData(400)]
+    [InlineData(792)]
+    public void PdfRectToAvaloniaRect_RoundTrip_PreservesRect(double yValue)
+    {
+        double pdfLeft = 50, pdfBottom = yValue, pdfRight = 250, pdfTop = yValue + 50;
+
+        var avaloniaRect = CoordinateConverter.PdfRectToAvaloniaRect(
+            pdfLeft, pdfBottom, pdfRight, pdfTop, 792);
+
+        var (left2, bottom2, right2, top2) = CoordinateConverter.AvaloniaRectToPdfRect(avaloniaRect, 792);
+
+        left2.Should().BeApproximately(pdfLeft, 0.001);
+        bottom2.Should().BeApproximately(pdfBottom, 0.001);
+        right2.Should().BeApproximately(pdfRight, 0.001);
+        top2.Should().BeApproximately(pdfTop, 0.001);
+    }
 }

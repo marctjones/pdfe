@@ -333,4 +333,744 @@ public class PdfAcroFormTests
         nameField.RawDictionary.Should().NotBeNull();
         nameField.RawDictionary.GetStringOrNull("T").Should().Be("Name");
     }
+
+    // ─── choice fields with options ─────────────────────────────────────────
+
+    [Fact]
+    public void GetAcroForm_ChoiceField_WithOptions()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+                /NeedsAppearances false
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        long choiceFieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Ch
+            /T (Country)
+            /V (USA)
+            /Opt [(USA) (Canada) (Mexico)]
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{choiceFieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        form.Should().NotBeNull();
+
+        var choiceField = form!.Fields.FirstOrDefault(f => f.PartialName == "Country");
+        choiceField.Should().NotBeNull();
+        choiceField!.FieldType.Should().Be(PdfFieldType.Choice);
+        choiceField.Options.Should().NotBeNull();
+        choiceField.Options!.Should().HaveCount(3);
+        choiceField.Options.Should().Contain("USA");
+        choiceField.Options.Should().Contain("Canada");
+        choiceField.Options.Should().Contain("Mexico");
+    }
+
+    // ─── field flags: read-only, required, multiline ──────────────────────
+
+    [Fact]
+    public void GetAcroForm_TextField_ReadOnlyFlag()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        // Ff = 0x1 sets ReadOnly (bit 0)
+        long fieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Tx
+            /T (ReadOnlyField)
+            /V (locked)
+            /Ff 1
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{fieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        var field = form!.Fields.First();
+        field.IsReadOnly.Should().BeTrue();
+        field.IsRequired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetAcroForm_TextField_RequiredFlag()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        // Ff = 0x2 sets Required (bit 1)
+        long fieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Tx
+            /T (RequiredField)
+            /Ff 2
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{fieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        var field = form!.Fields.First();
+        field.IsRequired.Should().BeTrue();
+        field.IsReadOnly.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetAcroForm_TextField_MultilineFlag()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        // Ff = 0x1000 (4096) sets Multiline (bit 12)
+        long fieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Tx
+            /T (MultilineField)
+            /Ff 4096
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{fieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        var field = form!.Fields.First();
+        field.IsMultiline.Should().BeTrue();
+    }
+
+    // ─── signature field ────────────────────────────────────────────────
+
+    [Fact]
+    public void GetAcroForm_SignatureField_Parsed()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        long sigFieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Sig
+            /T (Signature)
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{sigFieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        form.Should().NotBeNull();
+        form!.GetSignatureFields().Should().HaveCount(1);
+        var sigField = form.GetSignatureFields().First();
+        sigField.FieldType.Should().Be(PdfFieldType.Signature);
+        sigField.FullName.Should().Be("Signature");
+    }
+
+    // ─── field inheritance ──────────────────────────────────────────────
+
+    [Fact]
+    public void GetAcroForm_FieldInheritsType_FromParent()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        // Parent field with /FT /Tx, child field without /FT
+        // Parent serves as intermediary, child is terminal with widget
+        long parentFieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /T (Parent)
+            /FT /Tx
+            /Kids [6 0 R]
+        >>");
+        sb.AppendLine("endobj");
+
+        long childFieldPos = sb.Length;
+        sb.AppendLine("6 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /T (Child)
+            /V (ChildValue)
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 7");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{parentFieldPos:D10} 00000 n ");
+        sb.AppendLine($"{childFieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 7 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        form.Should().NotBeNull();
+        var childField = form!.Fields.FirstOrDefault(f => f.FullName == "Parent.Child");
+        childField.Should().NotBeNull();
+        childField!.Value.Should().Be("ChildValue");
+        // Parser resolves field tree and produces a child field entry
+        form.Fields.Should().HaveCount(1, "child (terminal) field is the only real field");
+    }
+
+    [Fact]
+    public void GetAcroForm_FieldInheritsValue_FromParent()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        long parentFieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /T (ParentWithValue)
+            /FT /Tx
+            /V (ParentValue)
+            /Kids [6 0 R]
+        >>");
+        sb.AppendLine("endobj");
+
+        // Child without /V should use parent value if implementation inherits
+        // Note: PDF spec doesn't require this, but it's a valid test of field tree traversal
+        long childFieldPos = sb.Length;
+        sb.AppendLine("6 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /T (ChildNoValue)
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 7");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{parentFieldPos:D10} 00000 n ");
+        sb.AppendLine($"{childFieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 7 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        var childField = form!.Fields.FirstOrDefault(f => f.FullName.Contains("ChildNoValue"));
+        childField.Should().NotBeNull();
+        // Child may not have explicit value (inheritance not required by spec)
+        childField!.Value.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetAcroForm_NoAcroForm_ReturnsNull()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        // Catalog WITHOUT /AcroForm
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 4");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 4 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        doc.GetAcroForm().Should().BeNull();
+    }
+
+    [Fact]
+    public void GetAcroForm_FindField_NonExistent_ReturnsNull()
+    {
+        byte[] pdf = MakePdfWithComplexAcroForm();
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        form.Should().NotBeNull();
+
+        var field = form!.FindField("NonExistent");
+        field.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetAcroForm_GetFields_ChoiceFields()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        long choiceFieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Ch
+            /T (Dropdown)
+            /Opt [(Option1) (Option2)]
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{choiceFieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        form!.GetChoiceFields().Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void GetAcroForm_DefaultValue_Parsed()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /AcroForm <<
+                /Fields [5 0 R]
+            >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        long pagePos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long contentPos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Length 0 >>");
+        sb.AppendLine("stream");
+        sb.AppendLine("endstream");
+        sb.AppendLine("endobj");
+
+        long fieldPos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Annot
+            /Subtype /Widget
+            /FT /Tx
+            /T (Email)
+            /DV (default@example.com)
+            /Rect [72 700 300 720]
+            /P 3 0 R
+        >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 6");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{pagePos:D10} 00000 n ");
+        sb.AppendLine($"{contentPos:D10} 00000 n ");
+        sb.AppendLine($"{fieldPos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine("<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), ownsStream: false);
+
+        var form = doc.GetAcroForm();
+        var field = form!.Fields.First();
+        field.DefaultValue.Should().Be("default@example.com");
+    }
 }

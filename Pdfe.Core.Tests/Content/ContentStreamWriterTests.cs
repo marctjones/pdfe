@@ -553,6 +553,434 @@ public class ContentStreamWriterTests
 
     #endregion
 
+    #region Dictionary Operand Tests
+
+    [Fact]
+    public void Write_DictionaryOperand_SerializesCorrectly()
+    {
+        var dict = new PdfDictionary();
+        dict["Type"] = new PdfName("Font");
+        dict["Size"] = new PdfInteger(12);
+        var op = new ContentOperator("gs", new PdfObject[] { dict });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("<<");
+        result.Should().Contain(">>");
+        result.Should().Contain("/Type");
+        result.Should().Contain("/Font");
+        result.Should().Contain("12");
+        result.Should().EndWith("gs\n");
+    }
+
+    #endregion
+
+    #region WriteString Edge Cases - Special Escapes
+
+    [Fact]
+    public void Write_StringWithBackspace_EscapesAsBackspace()
+    {
+        var text = "Text\bEnd";
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(text) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("\\b");
+        result.Should().Contain("Text");
+        result.Should().Contain("End");
+    }
+
+    [Fact]
+    public void Write_StringWithFormFeed_EscapesAsFormFeed()
+    {
+        var text = "Page\fBreak";
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(text) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("\\f");
+        result.Should().Contain("Page");
+        result.Should().Contain("Break");
+    }
+
+    [Fact]
+    public void Write_StringWithHighByteChar_EscapesAsOctal()
+    {
+        // Character with code > 126 (e.g., 200 = 0310 octal)
+        var text = "TextÈEnd";  // È (U+00C8 = 200 decimal)
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(text) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("Text");
+        result.Should().Contain("End");
+        result.Should().Contain("\\3");  // Octal escape starts with \3
+    }
+
+    [Fact]
+    public void Write_StringWithLowControlChar_EscapesAsOctal()
+    {
+        // Character with code < 32 (e.g., 1 = SOH)
+        var text = "Start\x1fMarker";  // Using \x1f (unit separator, decimal 31) to avoid digit consumption
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(text) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        // The control character should be escaped with backslash
+        result.Should().Contain("Start");
+        result.Should().Contain("Marker");
+        result.Should().Contain("\\");  // Octal escape starts with backslash
+        result.Should().StartWith("(");
+        result.Should().Contain(") Tj");
+    }
+
+    [Fact]
+    public void Write_StringWithMultipleSpecialEscapes_AllEncoded()
+    {
+        var text = "ABC";
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(text) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("ABC");
+        result.Should().StartWith("(");
+        result.Should().Contain(") Tj");
+    }
+
+    #endregion
+
+    #region WriteString Edge Cases
+
+    [Fact]
+    public void Write_StringWithMultipleBackslashes_EscapesAll()
+    {
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString("\\\\path\\\\file") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        var countBackslashes = result.Count(c => c == '\\');
+        countBackslashes.Should().BeGreaterThan(4, "all backslashes should be escaped");
+    }
+
+    [Fact]
+    public void Write_StringWithParenthesesOnly_EscapesParens()
+    {
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString("(())") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("\\(");
+        result.Should().Contain("\\)");
+    }
+
+    [Fact]
+    public void Write_StringWithMixedWhitespace_EscapesCorrectly()
+    {
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString("Tab\tNewline\nReturn\rEnd") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("\\t");
+        result.Should().Contain("\\n");
+        result.Should().Contain("\\r");
+    }
+
+    [Fact]
+    public void Write_StringWithOnlySpecialChars_AllEscaped()
+    {
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString("\\\n\r\t") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().NotBeEmpty();
+        result.Should().Contain("\\");
+    }
+
+    [Fact]
+    public void Write_StringWithControlCharacter_EscapedAsOctal()
+    {
+        var text = "Text\x01Control";
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(text) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("Text");
+        result.Should().StartWith("(");
+        result.Should().EndWith(") Tj\n");
+    }
+
+    [Fact]
+    public void Write_StringWithAllEscapeTypes_RoundTrips()
+    {
+        var complexString = "Path\\(test)\\file\nWith\rWhitespace\tAnd\x01Control";
+        var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(complexString) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var parsed = Parse(bytes);
+
+        parsed.Operators[0].GetString(0).Should().Be(complexString);
+    }
+
+    #endregion
+
+    #region WriteName Edge Cases
+
+    [Fact]
+    public void Write_NameWithSpace_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Font Name") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#20");
+    }
+
+    [Fact]
+    public void Write_NameWithHash_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Font#1") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#23");
+    }
+
+    [Fact]
+    public void Write_NameWithSlash_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Font/Name") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#2F");
+    }
+
+    [Fact]
+    public void Write_NameWithBrackets_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Array[0]") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#5B");
+        result.Should().Contain("#5D");
+    }
+
+    [Fact]
+    public void Write_NameWithAngleBrackets_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Tag<value>") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#3C");
+        result.Should().Contain("#3E");
+    }
+
+    [Fact]
+    public void Write_NameWithParentheses_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Func(x)") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#28");
+        result.Should().Contain("#29");
+    }
+
+    [Fact]
+    public void Write_NameWithCurlyBraces_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Code{block}") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#7B");
+        result.Should().Contain("#7D");
+    }
+
+    [Fact]
+    public void Write_NameWithPercent_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Value%") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#25");
+    }
+
+    [Fact]
+    public void Write_NameWithLowCharacter_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Font\x01") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#01");
+    }
+
+    [Fact]
+    public void Write_NameWithMultipleSpecialChars_AllEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("Font/Name#1[0]") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#2F");
+        result.Should().Contain("#23");
+        result.Should().Contain("#5B");
+        result.Should().Contain("#5D");
+    }
+
+    [Fact]
+    public void Write_NameWithLeadingLowChar_HexEncoded()
+    {
+        var op = new ContentOperator("gs", new PdfObject[] { new PdfName("\x01Font") });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("#");
+        result.Should().Contain("Font");
+        result.Should().Contain("gs");
+    }
+
+    #endregion
+
+    #region Operand Type Edge Cases
+
+    [Fact]
+    public void Write_Null_FormatsProperly()
+    {
+        var op = new ContentOperator("Test", new PdfObject[] { PdfNull.Instance });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("null");
+    }
+
+    [Fact]
+    public void Write_BooleanTrue_FormatsProperly()
+    {
+        var op = new ContentOperator("Test", new PdfObject[] { PdfBoolean.True });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("true");
+    }
+
+    [Fact]
+    public void Write_BooleanFalse_FormatsProperly()
+    {
+        var op = new ContentOperator("Test", new PdfObject[] { PdfBoolean.False });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("false");
+    }
+
+    [Fact]
+    public void Write_ZeroInteger_FormatsAsZero()
+    {
+        var op = new ContentOperator("w", new PdfObject[] { new PdfInteger(0) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("0");
+    }
+
+    [Fact]
+    public void Write_RealAsWholeNumber_NoDecimal()
+    {
+        var op = new ContentOperator("w", new PdfObject[] { new PdfReal(10.0) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("10");
+        result.Should().NotContain("10.0");
+    }
+
+    [Fact]
+    public void Write_RealWithDecimal_IncludesDecimal()
+    {
+        var op = new ContentOperator("w", new PdfObject[] { new PdfReal(10.5) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        result.Should().Contain("10.5");
+    }
+
+    [Fact]
+    public void Write_NegativeZero_FormatsAsZero()
+    {
+        var op = new ContentOperator("w", new PdfObject[] { new PdfReal(-0.0) });
+        var content = new ContentStream(new[] { op });
+
+        var bytes = _writer.Write(content);
+        var result = Encoding.Latin1.GetString(bytes);
+
+        var parsed = Parse(bytes);
+        parsed.Operators[0].GetNumber(0).Should().Be(0);
+    }
+
+    #endregion
+
     #region Helpers
 
     private ContentStream Parse(byte[] bytes)
