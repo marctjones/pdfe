@@ -122,7 +122,8 @@ public class PdfLexer : IDisposable
         }
 
         // Keyword (true, false, null, obj, endobj, etc.)
-        if (IsRegularChar(c))
+        // Keywords always start with an ASCII letter (or '*' for hex-string-like)
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
         {
             UnreadByte();
             return ReadKeyword(startPos);

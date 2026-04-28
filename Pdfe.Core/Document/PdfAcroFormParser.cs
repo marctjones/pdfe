@@ -63,18 +63,31 @@ internal static class PdfAcroFormParser
 
         if (hasKids && kidsObj != null)
         {
-            // This is a non-terminal field (parent field). Recurse into kids.
             if (doc.Resolve(kidsObj) is PdfArray kidsArray)
             {
-                foreach (var kidRef in kidsArray)
+                // If all kids are pure Widget annotations (no /T name), treat current node as a leaf.
+                // Widget kids WITH /T are sub-fields that happen to also be widgets — recurse into them.
+                bool allPureWidgets = kidsArray.All(k =>
+                    doc.Resolve(k) is PdfDictionary d &&
+                    d.GetNameOrNull("Subtype") == "Widget" &&
+                    d.GetStringOrNull("T") == null);
+
+                if (allPureWidgets)
                 {
-                    ParseFieldTree(doc, kidRef, fullName, outputFields, pageRefToNumber);
+                    var field = ExtractField(doc, fieldDict, fullName, partialName, pageRefToNumber);
+                    if (field != null)
+                        outputFields.Add(field);
+                }
+                else
+                {
+                    foreach (var kidRef in kidsArray)
+                        ParseFieldTree(doc, kidRef, fullName, outputFields, pageRefToNumber);
                 }
             }
         }
         else
         {
-            // This is a terminal field (leaf). Extract its properties and create a PdfField.
+            // Terminal field (leaf). Extract its properties and create a PdfField.
             var field = ExtractField(doc, fieldDict, fullName, partialName, pageRefToNumber);
             if (field != null)
                 outputFields.Add(field);

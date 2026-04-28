@@ -64,7 +64,6 @@ public class ContentStreamWriter
                 break;
 
             case PdfReal r:
-                // Format with enough precision but without unnecessary decimals
                 var value = r.Value;
                 if (Math.Abs(value - Math.Round(value)) < 0.00001)
                 {

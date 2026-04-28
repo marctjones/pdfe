@@ -242,9 +242,9 @@ public class TextExtractor
         return null;
     }
 
-    private string ParseStringLiteral(string content, ref int pos)
+    private byte[] ParseStringLiteral(string content, ref int pos)
     {
-        var sb = new StringBuilder();
+        var bytes = new List<byte>();
         pos++; // Skip opening '('
         int parenDepth = 1;
 
@@ -258,14 +258,14 @@ public class TextExtractor
                 var escaped = content[pos];
                 switch (escaped)
                 {
-                    case 'n': sb.Append('\n'); break;
-                    case 'r': sb.Append('\r'); break;
-                    case 't': sb.Append('\t'); break;
-                    case 'b': sb.Append('\b'); break;
-                    case 'f': sb.Append('\f'); break;
-                    case '(': sb.Append('('); break;
-                    case ')': sb.Append(')'); break;
-                    case '\\': sb.Append('\\'); break;
+                    case 'n': bytes.Add((byte)'\n'); break;
+                    case 'r': bytes.Add((byte)'\r'); break;
+                    case 't': bytes.Add((byte)'\t'); break;
+                    case 'b': bytes.Add((byte)'\b'); break;
+                    case 'f': bytes.Add((byte)'\f'); break;
+                    case '(': bytes.Add((byte)'('); break;
+                    case ')': bytes.Add((byte)')'); break;
+                    case '\\': bytes.Add((byte)'\\'); break;
                     default:
                         // Octal escape
                         if (escaped >= '0' && escaped <= '7')
@@ -278,12 +278,11 @@ public class TextExtractor
                                 pos++;
                                 octal.Append(content[pos]);
                             }
-                            var code = Convert.ToInt32(octal.ToString(), 8);
-                            sb.Append((char)code);
+                            bytes.Add((byte)Convert.ToInt32(octal.ToString(), 8));
                         }
                         else
                         {
-                            sb.Append(escaped);
+                            bytes.Add((byte)escaped);
                         }
                         break;
                 }
@@ -291,22 +290,22 @@ public class TextExtractor
             else if (c == '(')
             {
                 parenDepth++;
-                sb.Append(c);
+                bytes.Add((byte)c);
             }
             else if (c == ')')
             {
                 parenDepth--;
                 if (parenDepth > 0)
-                    sb.Append(c);
+                    bytes.Add((byte)c);
             }
             else
             {
-                sb.Append(c);
+                bytes.Add((byte)c);
             }
             pos++;
         }
 
-        return sb.ToString();
+        return bytes.ToArray();
     }
 
     private byte[] ParseHexString(string content, ref int pos)

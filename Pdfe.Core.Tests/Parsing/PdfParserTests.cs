@@ -263,4 +263,388 @@ public class PdfParserTests
         act.Should().Throw<PdfParseException>()
             .WithMessage("*indirect reference but no resolver*");
     }
+
+    [Fact]
+    public void PdfParser_ConstructorWithStream()
+    {
+        var data = Encoding.ASCII.GetBytes("123");
+        using var stream = new MemoryStream(data);
+
+        using var parser = new PdfParser(stream);
+
+        var obj = parser.ParseObject();
+        ((PdfInteger)obj).Value.Should().Be(123);
+    }
+
+    [Fact]
+    public void PdfParser_Position_Property()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("123 456"));
+
+        var pos1 = parser.Position;
+        parser.ParseObject();
+        var pos2 = parser.Position;
+
+        pos1.Should().Be(0);
+        pos2.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void PdfParser_Seek_MovesToPosition()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("123 456"));
+
+        parser.ParseObject();
+        parser.Seek(0);
+        var obj = parser.ParseObject();
+
+        ((PdfInteger)obj).Value.Should().Be(123);
+    }
+
+    [Fact]
+    public void TryParseIndirectObject_ValidObject_ReturnsObject()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("5 0 obj\n123\nendobj"));
+
+        var indObj = parser.TryParseIndirectObject();
+
+        indObj.Should().NotBeNull();
+        indObj!.ObjectNumber.Should().Be(5);
+        ((PdfInteger)indObj.Value).Value.Should().Be(123);
+    }
+
+    [Fact]
+    public void TryParseIndirectObject_NoObjectNumber_ReturnsNull()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("true"));
+
+        var indObj = parser.TryParseIndirectObject();
+
+        indObj.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryParseIndirectObject_OnlyObjectNumber_ReturnsNull()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("5 true"));
+
+        var indObj = parser.TryParseIndirectObject();
+
+        indObj.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryParseIndirectObject_MissingObjKeyword_ReturnsNull()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("5 0 123"));
+
+        var indObj = parser.TryParseIndirectObject();
+
+        indObj.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryParseIndirectObject_ResetsPositionOnFailure()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("false 456"));
+
+        var indObj = parser.TryParseIndirectObject();
+        var obj = parser.ParseObject();
+
+        indObj.Should().BeNull();
+        obj.Should().Be(PdfBoolean.False);
+    }
+
+    [Fact]
+    public void ParseDictionaryContents_WithMixedValueTypes()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("<< /Int 42 /Real 3.14 /Name /Type /String (test) /Bool true >>"));
+
+        var dict = (PdfDictionary)parser.ParseObject();
+
+        dict.GetInt("Int").Should().Be(42);
+        ((PdfReal)dict["Real"]).Value.Should().BeApproximately(3.14, 0.01);
+        dict.GetName("Name").Should().Be("Type");
+        dict.GetString("String").Should().Be("test");
+        dict["Bool"].Should().Be(PdfBoolean.True);
+    }
+
+    [Fact]
+    public void ParseDictionaryContents_EmptyDictionary()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("<< >>"));
+
+        var dict = (PdfDictionary)parser.ParseObject();
+
+        dict.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public void ParseDictionaryContents_DuplicateKey_LastValueWins()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("<< /Key 1 /Key 2 >>"));
+
+        var dict = (PdfDictionary)parser.ParseObject();
+
+        dict.GetInt("Key").Should().Be(2);
+    }
+
+    [Fact]
+    public void ParseArray_EmptyArray()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("[]"));
+
+        var arr = (PdfArray)parser.ParseObject();
+
+        arr.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public void ParseObjectFromToken_Eof_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(""));
+
+        Action act = () => parser.ParseObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Unexpected end of file*");
+    }
+
+    [Fact]
+    public void ParseObjectFromToken_InvalidKeyword_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("invalid"));
+
+        Action act = () => parser.ParseObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Unexpected keyword*");
+    }
+
+    [Fact]
+    public void ParseIndirectObject_InvalidObjectNumber_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("true 0 obj\n123\nendobj"));
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Expected object number*");
+    }
+
+    [Fact]
+    public void ParseIndirectObject_InvalidGenerationNumber_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("5 false obj\n123\nendobj"));
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Expected generation number*");
+    }
+
+    [Fact]
+    public void ParseIndirectObject_MissingObjKeyword_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("5 0 notobj\n123\nendobj"));
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Expected 'obj'*");
+    }
+
+    [Fact]
+    public void ParseIndirectObject_MissingEndobjKeyword_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("5 0 obj\n123\nnotendobj"));
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Expected 'endobj'*");
+    }
+
+    [Fact]
+    public void ParseStream_MissingLength_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("1 0 obj\n<< >>\nstream\ndata\nendstream\nendobj"));
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*missing /Length*");
+    }
+
+    [Fact]
+    public void ParseStream_InvalidLengthType_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("1 0 obj\n<< /Length /NotANumber >>\nstream\ndata\nendstream\nendobj"));
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*missing /Length*");
+    }
+
+    [Fact]
+    public void ParseStream_ResolvedIndirectLengthNotInteger_ThrowsException()
+    {
+        var pdfData = "1 0 obj\n<< /Length 2 0 R >>\nstream\nHello\nendstream\nendobj";
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(pdfData));
+
+        parser.IndirectObjectResolver = num => num == 2 ? new PdfName("NotInt") : null;
+
+        Action act = () => parser.ParseIndirectObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*did not resolve to an integer*");
+    }
+
+    [Fact]
+    public void ParseArray_UntermatedArray_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("[1 2 3"));
+
+        Action act = () => parser.ParseObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Unterminated array*");
+    }
+
+    [Fact]
+    public void ParseDictionary_UntermatedDictionary_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("<< /Key 1"));
+
+        Action act = () => parser.ParseObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Unterminated dictionary*");
+    }
+
+    [Fact]
+    public void ParseDictionary_NonNameKey_ThrowsException()
+    {
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("<< 123 /Value >>"));
+
+        Action act = () => parser.ParseObject();
+
+        act.Should().Throw<PdfParseException>()
+            .WithMessage("*Expected name in dictionary*");
+    }
+
+    [Fact]
+    public void PdfParseException_WithMessage()
+    {
+        var ex = new PdfParseException("Test error");
+
+        ex.Message.Should().Be("Test error");
+    }
+
+    [Fact]
+    public void PdfParseException_WithMessageAndInnerException()
+    {
+        var inner = new InvalidOperationException("Inner error");
+        var ex = new PdfParseException("Test error", inner);
+
+        ex.Message.Should().Be("Test error");
+        ex.InnerException.Should().Be(inner);
+    }
+
+    [Fact]
+    public void PdfEncryptionNotSupportedException_DefaultConstructor()
+    {
+        var ex = new PdfEncryptionNotSupportedException();
+
+        ex.Message.Should().Contain("encrypted");
+        ex.Message.Should().Contain("allowEncrypted");
+    }
+
+    [Fact]
+    public void PdfEncryptionNotSupportedException_WithMessage()
+    {
+        var ex = new PdfEncryptionNotSupportedException("Custom message");
+
+        ex.Message.Should().Be("Custom message");
+    }
+
+    #region Unexpected Token Tests
+
+    [Fact]
+    public void ParseObject_UnexpectedTokenType_ThrowsPdfParseException()
+    {
+        // Test line 111: "Unexpected token" - thrown when ParseObject encounters an unexpected token type
+        // Use a token type that would be unexpected in an object context (e.g., DictionaryEnd without matching DictionaryStart)
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(">>"));
+
+        var action = () => parser.ParseObject();
+
+        action.Should().Throw<PdfParseException>()
+            .WithMessage("*Unexpected token*");
+    }
+
+    [Fact]
+    public void ParseObject_ArrayEndWithoutStart_ThrowsParseException()
+    {
+        // Stray array end token
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes("]"));
+
+        var action = () => parser.ParseObject();
+
+        action.Should().Throw<PdfParseException>();
+    }
+
+    #endregion
+
+    #region Stream Endstream Recovery Tests
+
+    [Fact]
+    public void ParseIndirectObject_EndstreamEmbeddedInKeyword_Recovers()
+    {
+        // Test lines 256-264: endstream recovery when "endstream" is embedded in keyword
+        // The code checks: token.Value.StartsWith("endstream") as recovery
+        var pdfData = "1 0 obj\n<< /Length 4 >>\nstream\ntest\nendstreamExtra\nendobj";
+
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(pdfData));
+
+        var indObj = parser.ParseIndirectObject();
+
+        indObj.Should().NotBeNull();
+        indObj.Value.Should().BeOfType<PdfStream>();
+        var stream = (PdfStream)indObj.Value;
+        stream.EncodedData.Length.Should().Be(4);
+        Encoding.ASCII.GetString(stream.EncodedData).Should().Be("test");
+    }
+
+    [Fact]
+    public void ParseIndirectObject_ValidEndstream_ParsesSuccessfully()
+    {
+        // Positive test: standard endstream token
+        var pdfData = "1 0 obj\n<< /Length 5 >>\nstream\nhello\nendstream\nendobj";
+
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(pdfData));
+
+        var indObj = parser.ParseIndirectObject();
+
+        indObj.Should().NotBeNull();
+        var stream = (PdfStream)indObj.Value;
+        Encoding.ASCII.GetString(stream.EncodedData).Should().Be("hello");
+    }
+
+    [Fact]
+    public void ParseIndirectObject_WrongTokenAfterData_ThrowsException()
+    {
+        // Negative test: invalid token instead of endstream
+        var pdfData = "1 0 obj\n<< /Length 4 >>\nstream\ntest\ngarbage\nendobj";
+
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(pdfData));
+
+        var action = () => parser.ParseIndirectObject();
+
+        action.Should().Throw<PdfParseException>()
+            .WithMessage("*Expected 'endstream'*");
+    }
+
+    #endregion
 }

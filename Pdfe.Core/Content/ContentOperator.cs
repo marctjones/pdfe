@@ -47,6 +47,30 @@ public class ContentOperator
         Name = name ?? throw new ArgumentNullException(nameof(name));
         Operands = operands ?? Array.Empty<PdfObject>();
         Category = CategorizeOperator(name);
+        TextContent = ExtractTextContent(name, Operands);
+    }
+
+    private static string? ExtractTextContent(string name, IReadOnlyList<PdfObject> operands)
+    {
+        switch (name)
+        {
+            case "Tj":
+            case "'":
+                return operands.Count >= 1 ? (operands[0] as PdfString)?.Value : null;
+            case "\"":
+                return operands.Count >= 3 ? (operands[2] as PdfString)?.Value : null;
+            case "TJ":
+                if (operands.Count >= 1 && operands[0] is PdfArray arr)
+                {
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var item in arr)
+                        if (item is PdfString s) sb.Append(s.Value);
+                    return sb.Length > 0 ? sb.ToString() : null;
+                }
+                return null;
+            default:
+                return null;
+        }
     }
 
     /// <summary>

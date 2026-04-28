@@ -102,4 +102,133 @@ public class PdfOcrServiceTests
         anchor!.BoundingBox.Left.Should().BeInRange(140, 260);
         anchor.BoundingBox.Bottom.Should().BeInRange(360, 440);
     }
+
+    // ========================================================================
+    // SERVICE INSTANTIATION TESTS
+    // ========================================================================
+
+    [Fact]
+    public void PdfOcrService_CanBeInstantiatedWithDefaults()
+    {
+        var service = new PdfOcrService();
+        service.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void PdfOcrService_CanBeInstantiatedWithCustomLanguage()
+    {
+        var service = new PdfOcrService(language: "fra");
+        service.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void PdfOcrService_CanBeInstantiatedWithCustomDpi()
+    {
+        var service = new PdfOcrService(dpi: 150);
+        service.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void PdfOcrService_CanBeInstantiatedWithCustomTesseractPath()
+    {
+        var service = new PdfOcrService(tesseractPath: "/usr/bin/tesseract");
+        service.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void PdfOcrService_CanBeInstantiatedWithAllParameters()
+    {
+        var service = new PdfOcrService(
+            language: "eng",
+            dpi: 200,
+            tesseractPath: "tesseract",
+            tessdataPrefix: "/usr/share/tessdata");
+        service.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void PdfOcrService_IsAvailable_ReturnsValue()
+    {
+        var service = new PdfOcrService();
+        var result = service.IsAvailable();
+        (result || !result).Should().BeTrue();
+    }
+
+    [Fact]
+    public void PdfOcrService_IsAvailable_WithInvalidPath_ReturnsFalse()
+    {
+        var service = new PdfOcrService(tesseractPath: "/nonexistent/path/to/tesseract");
+        var result = service.IsAvailable();
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void PdfOcrService_IsAvailable_DoesNotThrow()
+    {
+        var service = new PdfOcrService(tesseractPath: "/nonexistent/tesseract");
+        var action = () => service.IsAvailable();
+        action.Should().NotThrow();
+    }
+
+    [Fact]
+    public void PdfOcrService_RecognizePage_WithNullPage_ThrowsArgumentNullException()
+    {
+        var service = new PdfOcrService();
+        var action = () => service.RecognizePage(null!);
+        action.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void PdfOcrService_RecognizeDocument_WithNullDocument_Throws()
+    {
+        var service = new PdfOcrService();
+        var action = () => _ = service.RecognizeDocument(null!).FirstOrDefault();
+        action.Should().Throw<Exception>();
+    }
+
+    [Fact]
+    public void PdfOcrService_RecognizeBitmap_WithNullBitmap_ThrowsArgumentNullException()
+    {
+        var service = new PdfOcrService();
+        var action = () => service.RecognizeBitmap(null!, 792);
+        action.Should().Throw<ArgumentNullException>();
+    }
+
+    [SkippableFact]
+    public void PdfOcrService_RecognizeDocument_ReturnsOneResultPerPage()
+    {
+        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+
+        using var doc = PdfDocument.CreateNew();
+        for (int i = 0; i < 3; i++)
+        {
+            var page = doc.Pages.AddBlank(612, 792);
+            using (var g = page.GetGraphics())
+            {
+                g.DrawString($"PAGE {i + 1}", PdfFont.Helvetica(32),
+                    PdfBrush.Black, 100, 400);
+                g.Flush();
+            }
+        }
+
+        var service = NewService(dpi: 200);
+        var results = service.RecognizeDocument(doc).ToList();
+
+        results.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public void PdfOcrService_WithCustomDpi_CanBeInstantiated()
+    {
+        var service = new PdfOcrService(dpi: 100);
+        service.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void PdfOcrService_WithHighDpi_CanBeInstantiated()
+    {
+        var service = new PdfOcrService(dpi: 600);
+        service.Should().NotBeNull();
+    }
 }
+

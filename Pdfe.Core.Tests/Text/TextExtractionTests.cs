@@ -224,6 +224,318 @@ public class TextExtractionTests
 
     #endregion
 
+    #region Text State Operators (Td, TD, T*, Tm, TL, Tr, Ts, Tc, Tw, Tz)
+
+    [Fact]
+    public void TextExtraction_TdOperator_MovesTextPosition()
+    {
+        // Arrange - Td moves text position relative
+        var content = "BT /F1 12 Tf 100 700 Td (First) Tj 0 -15 Td (Second) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert - Both lines should be extracted
+        page.Text.Should().Contain("First");
+        page.Text.Should().Contain("Second");
+    }
+
+    [Fact]
+    public void TextExtraction_TDOperator_MovesAndResetLeading()
+    {
+        // Arrange - TD is like Td but also sets leading
+        var content = "BT /F1 12 Tf 100 700 TD (Top) Tj 0 -20 TD (Bottom) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Top");
+        page.Text.Should().Contain("Bottom");
+    }
+
+    [Fact]
+    public void TextExtraction_TStarOperator_MoveToNextLine()
+    {
+        // Arrange - T* moves to next line using leading
+        var content = "BT /F1 12 Tf 100 700 Td (Line1) Tj T* (Line2) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Line1");
+        page.Text.Should().Contain("Line2");
+    }
+
+    [Fact]
+    public void TextExtraction_TmOperator_AbsolutePositioning()
+    {
+        // Arrange - Tm sets absolute text matrix (a b c d e f)
+        var content = "BT /F1 12 Tf 1 0 0 1 200 500 Tm (Matrix) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var letter = page.Letters.FirstOrDefault();
+
+        // Assert
+        page.Text.Should().Contain("Matrix");
+        if (letter != null)
+            letter.GlyphRectangle.Left.Should().BeApproximately(200, 10);
+    }
+
+    [Fact]
+    public void TextExtraction_TlOperator_SetsLeading()
+    {
+        // Arrange - TL sets line spacing (leading)
+        var content = "BT /F1 12 Tf 100 700 Td (First) Tj 15 TL T* (Second) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("First");
+        page.Text.Should().Contain("Second");
+    }
+
+    [Fact]
+    public void TextExtraction_TcOperator_CharacterSpacing()
+    {
+        // Arrange - Tc sets extra character spacing
+        var content = "BT /F1 12 Tf 100 700 Td 2 Tc (Spaced) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Spaced");
+    }
+
+    [Fact]
+    public void TextExtraction_TwOperator_WordSpacing()
+    {
+        // Arrange - Tw sets word spacing
+        var content = "BT /F1 12 Tf 100 700 Td 3 Tw (Word Spacing) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Word");
+        page.Text.Should().Contain("Spacing");
+    }
+
+    [Fact]
+    public void TextExtraction_TzOperator_HorizontalScaling()
+    {
+        // Arrange - Tz sets horizontal scaling (%)
+        var content = "BT /F1 12 Tf 100 700 Td 150 Tz (Scaled) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Scaled");
+    }
+
+    [Fact]
+    public void TextExtraction_TrOperator_RenderingMode()
+    {
+        // Arrange - Tr sets text rendering mode (0=fill, 1=stroke, 3=invisible)
+        var content = "BT /F1 12 Tf 100 700 Td 1 Tr (Stroked) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Stroked");
+    }
+
+    [Fact]
+    public void TextExtraction_TsOperator_TextRise()
+    {
+        // Arrange - Ts sets text rise (superscript/subscript offset)
+        var content = "BT /F1 12 Tf 100 700 Td (Normal) Tj 3 Ts (Super) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Normal");
+        page.Text.Should().Contain("Super");
+    }
+
+    #endregion
+
+    #region Word Extraction Tests
+
+    [Fact]
+    public void TextExtraction_ExtractWords_SingleWord()
+    {
+        // Arrange
+        var pdfData = CreatePdfWithText("Hello");
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var words = page.GetWords();
+
+        // Assert
+        words.Should().NotBeEmpty();
+        words.Select(w => w.Text).Should().Contain("Hello");
+    }
+
+    [Fact]
+    public void TextExtraction_ExtractWords_MultipleWords()
+    {
+        // Arrange - Two words with space
+        var pdfData = CreatePdfWithContentStream("BT /F1 12 Tf 100 700 Td (Hello) Tj 50 0 Td (World) Tj ET");
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var words = page.GetWords();
+
+        // Assert - Should have at least 2 words
+        words.Count.Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public void TextExtraction_ExtractWords_WhitespaceSeparated()
+    {
+        // Arrange - Words with explicit space character
+        var pdfData = CreatePdfWithContentStream("BT /F1 12 Tf 100 700 Td (Apple Banana Cherry) Tj ET");
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var words = page.GetWords();
+
+        // Assert
+        words.Count.Should().BeGreaterThanOrEqualTo(3);
+    }
+
+    [Fact]
+    public void TextExtraction_ExtractWords_LargeYGapStartsNewWord()
+    {
+        // Arrange - Large Y offset creates word break
+        var pdfData = CreatePdfWithContentStream("BT /F1 12 Tf 100 700 Td (Top) Tj 0 -50 Td (Bottom) Tj ET");
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var words = page.GetWords();
+
+        // Assert
+        words.Count.Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public void TextExtraction_ExtractWords_EmptyPageReturnsEmptyList()
+    {
+        // Arrange - Empty content stream
+        var pdfData = CreatePdfWithContentStream("BT /F1 12 Tf 100 700 Td ET");
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var words = page.GetWords();
+
+        // Assert
+        words.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region String Format Edge Cases
+
+    [Fact]
+    public void TextExtraction_HexString_ParsesCorrectly()
+    {
+        // Arrange - Hex string: <48656C6C6F> = "Hello"
+        var content = "BT /F1 12 Tf 100 700 Td <48656C6C6F> Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Hello");
+    }
+
+    [Fact]
+    public void TextExtraction_TJOperator_WithInterleavedSpacing()
+    {
+        // Arrange - TJ with number adjustments
+        var content = "BT /F1 12 Tf 100 700 Td [(H) -50 (i)] TJ ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert - Should extract both characters
+        page.Text.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void TextExtraction_MultipleTextBlocks_AllExtracted()
+    {
+        // Arrange - Multiple BT...ET blocks
+        var content = "BT /F1 12 Tf 100 700 Td (Block1) Tj ET BT /F1 12 Tf 100 600 Td (Block2) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert
+        page.Text.Should().Contain("Block1");
+        page.Text.Should().Contain("Block2");
+    }
+
+    #endregion
+
+    #region State Management
+
+    [Fact]
+    public void TextExtraction_SaveRestoreState_TracksIndependently()
+    {
+        // Arrange - q...Q (save/restore) operators
+        var content = "BT /F1 12 Tf 100 700 Td (First) Tj Q (Never) Tj ET";
+        var pdfData = CreatePdfWithContentStream(content);
+
+        // Act
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        // Assert - Should handle mismatched q/Q gracefully
+        page.Letters.Should().NotBeEmpty();
+    }
+
+    #endregion
+
     #region Helper Methods - Create test PDFs
 
     private static byte[] CreatePdfWithText(string text)

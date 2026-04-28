@@ -84,7 +84,8 @@ public static class ObstructionStripper
                     newOps.Add(op);
                     break;
 
-                // Fill (and fill+stroke) — strip if obstructive.
+                // Fill (and fill+stroke) — strip if obstructive AND there is a path to paint.
+                // A fill with no preceding path construction has no visible effect, so keep it.
                 case "f":
                 case "F":
                 case "f*":
@@ -92,7 +93,7 @@ public static class ObstructionStripper
                 case "B*":
                 case "b":
                 case "b*":
-                    if (fillIsObstructive)
+                    if (fillIsObstructive && pendingPath.Count > 0)
                     {
                         // Drop the buffered path ops + this paint op.
                         for (int k = pendingPath.Count - 1; k >= 0; k--)

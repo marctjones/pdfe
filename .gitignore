@@ -78,3 +78,7 @@ screenshots/
 
 # Claude Code runtime state
 .claude/scheduled_tasks.lock
+
+# Coverage reports and results (generated artifacts, not source)
+coverage-report/
+coverage-results/

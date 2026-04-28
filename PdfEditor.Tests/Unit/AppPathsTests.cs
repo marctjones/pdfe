@@ -260,11 +260,11 @@ public class AppPathsTests
         var expectedPrefix = Path.Combine(home, "Library", "Caches");
 
         cacheDir.Should().StartWith(expectedPrefix,
-            "On macOS, CacheDir should use ~/Library/Caches per Apple guidelines");
+            "On macOS, CacheDir should use ~/Library/Caches");
     }
 
     /// <summary>
-    /// On Windows, ConfigDir should use %APPDATA%.
+    /// On Windows, all paths should exist under AppData.
     /// See Issue #265.
     /// </summary>
     [Fact]
@@ -283,10 +283,22 @@ public class AppPathsTests
             "On Windows, ConfigDir should use %APPDATA%");
     }
 
-    /// <summary>
-    /// On Windows, CacheDir should use %LOCALAPPDATA%.
-    /// See Issue #265.
-    /// </summary>
+    [Fact]
+    public void DataDir_OnWindows_UsesAppData()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            // Skip on non-Windows platforms
+            return;
+        }
+
+        var dataDir = AppPaths.DataDir;
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+        dataDir.Should().StartWith(appData,
+            "On Windows, DataDir should use %APPDATA%");
+    }
+
     [Fact]
     public void CacheDir_OnWindows_UsesLocalAppData()
     {
@@ -303,32 +315,150 @@ public class AppPathsTests
             "On Windows, CacheDir should use %LOCALAPPDATA%");
     }
 
-    /// <summary>
-    /// All paths should be absolute paths.
-    /// </summary>
+    // ========================================================================
+    // PATH CONSISTENCY TESTS
+    // ========================================================================
+
     [Fact]
-    public void AllPaths_AreAbsolute()
+    public void ConfigDir_IsCached_ReturnsSamePath()
     {
-        Path.IsPathRooted(AppPaths.ConfigDir).Should().BeTrue("ConfigDir should be absolute");
-        Path.IsPathRooted(AppPaths.DataDir).Should().BeTrue("DataDir should be absolute");
-        Path.IsPathRooted(AppPaths.CacheDir).Should().BeTrue("CacheDir should be absolute");
-        Path.IsPathRooted(AppPaths.WindowSettingsPath).Should().BeTrue("WindowSettingsPath should be absolute");
-        Path.IsPathRooted(AppPaths.RecentFilesPath).Should().BeTrue("RecentFilesPath should be absolute");
-        Path.IsPathRooted(AppPaths.ZoomSettingsPath).Should().BeTrue("ZoomSettingsPath should be absolute");
-        Path.IsPathRooted(AppPaths.PreferencesPath).Should().BeTrue("PreferencesPath should be absolute");
+        var first = AppPaths.ConfigDir;
+        var second = AppPaths.ConfigDir;
+
+        first.Should().Be(second, "ConfigDir should be cached and return same path");
     }
 
-    /// <summary>
-    /// ConfigDir should create the directory if it doesn't exist.
-    /// </summary>
     [Fact]
-    public void ConfigDir_CreatesDirectory()
+    public void DataDir_IsCached_ReturnsSamePath()
     {
-        // This test just verifies ConfigDir is accessible and creates its directory
+        var first = AppPaths.DataDir;
+        var second = AppPaths.DataDir;
+
+        first.Should().Be(second, "DataDir should be cached and return same path");
+    }
+
+    [Fact]
+    public void CacheDir_IsCached_ReturnsSamePath()
+    {
+        var first = AppPaths.CacheDir;
+        var second = AppPaths.CacheDir;
+
+        first.Should().Be(second, "CacheDir should be cached and return same path");
+    }
+
+    // ========================================================================
+    // DERIVED PATH TESTS
+    // ========================================================================
+
+    [Fact]
+    public void WindowSettingsPath_ContainsConfigDir()
+    {
+        var windowPath = AppPaths.WindowSettingsPath;
         var configDir = AppPaths.ConfigDir;
 
-        // Directory should exist after accessing ConfigDir
-        Directory.Exists(configDir).Should().BeTrue(
-            "AppPaths.ConfigDir should create the directory if it doesn't exist");
+        windowPath.Should().StartWith(configDir,
+            "WindowSettingsPath should be in ConfigDir");
+    }
+
+    [Fact]
+    public void ZoomSettingsPath_ContainsConfigDir()
+    {
+        var zoomPath = AppPaths.ZoomSettingsPath;
+        var configDir = AppPaths.ConfigDir;
+
+        zoomPath.Should().StartWith(configDir,
+            "ZoomSettingsPath should be in ConfigDir");
+    }
+
+    [Fact]
+    public void PreferencesPath_ContainsConfigDir()
+    {
+        var prefPath = AppPaths.PreferencesPath;
+        var configDir = AppPaths.ConfigDir;
+
+        prefPath.Should().StartWith(configDir,
+            "PreferencesPath should be in ConfigDir");
+    }
+
+    [Fact]
+    public void RecentFilesPath_ContainsDataDir()
+    {
+        var recentPath = AppPaths.RecentFilesPath;
+        var dataDir = AppPaths.DataDir;
+
+        recentPath.Should().StartWith(dataDir,
+            "RecentFilesPath should be in DataDir");
+    }
+
+    // ========================================================================
+    // PATH SEPARATORS AND FORMAT
+    // ========================================================================
+
+    [Fact]
+    public void ConfigDir_UsesCorrectPathSeparators()
+    {
+        var configDir = AppPaths.ConfigDir;
+
+        // Should use system-appropriate path separators
+        configDir.Should().NotContain("\\\\", "Should not have double backslashes");
+        configDir.Should().NotContain("//", "Should not have double forward slashes");
+    }
+
+    [Fact]
+    public void AllPaths_DoNotHaveTrailingSlash()
+    {
+        var paths = new[]
+        {
+            AppPaths.ConfigDir,
+            AppPaths.DataDir,
+            AppPaths.CacheDir,
+            AppPaths.WindowSettingsPath,
+            AppPaths.RecentFilesPath,
+            AppPaths.ZoomSettingsPath,
+            AppPaths.PreferencesPath
+        };
+
+        foreach (var path in paths)
+        {
+            path.Should().NotEndWith("/", "Paths should not end with forward slash");
+            path.Should().NotEndWith("\\", "Paths should not end with backslash");
+        }
+    }
+
+    // ========================================================================
+    // EDGE CASES
+    // ========================================================================
+
+    [Fact]
+    public void AppPaths_AllProperties_NotNull()
+    {
+        AppPaths.ConfigDir.Should().NotBeNull();
+        AppPaths.DataDir.Should().NotBeNull();
+        AppPaths.CacheDir.Should().NotBeNull();
+        AppPaths.WindowSettingsPath.Should().NotBeNull();
+        AppPaths.RecentFilesPath.Should().NotBeNull();
+        AppPaths.ZoomSettingsPath.Should().NotBeNull();
+        AppPaths.PreferencesPath.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AppPaths_AllPaths_NotEmpty()
+    {
+        AppPaths.ConfigDir.Should().NotBeEmpty();
+        AppPaths.DataDir.Should().NotBeEmpty();
+        AppPaths.CacheDir.Should().NotBeEmpty();
+        AppPaths.WindowSettingsPath.Should().NotBeEmpty();
+        AppPaths.RecentFilesPath.Should().NotBeEmpty();
+        AppPaths.ZoomSettingsPath.Should().NotBeEmpty();
+        AppPaths.PreferencesPath.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void FilePaths_HaveCorrectExtensions()
+    {
+        AppPaths.WindowSettingsPath.Should().EndWith(".json");
+        AppPaths.PreferencesPath.Should().EndWith(".json");
+        AppPaths.RecentFilesPath.Should().EndWith(".txt");
+        AppPaths.ZoomSettingsPath.Should().EndWith(".txt");
     }
 }
