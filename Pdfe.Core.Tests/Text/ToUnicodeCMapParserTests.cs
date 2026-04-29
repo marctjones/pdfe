@@ -154,10 +154,14 @@ public class ToUnicodeCMapParserTests
             <0041> <0041>
             <0042> <0042>
         ";
-        // Missing endbfchar
+        // Missing endbfchar — tokenizer is lenient and returns whatever pairs it
+        // saw before the implicit end-of-stream. Real-world CMaps from broken
+        // producers occasionally truncate; partial results beat dropping
+        // everything we already parsed.
         var result = ToUnicodeCMapParser.Parse(cmap);
-        // Should return empty (regex doesn't match without closing)
-        result.Should().BeEmpty();
+        result.Should().HaveCount(2);
+        result[0x0041].Should().Be("A");
+        result[0x0042].Should().Be("B");
     }
 
     [Fact]
@@ -354,6 +358,9 @@ public class ToUnicodeCMapParserTests
     [Fact]
     public void Parse_BfRangeOverwrittenByBfChar()
     {
+        // Per CMap semantics CMap operators apply in source order; later writes
+        // override earlier ones. The bfrange runs first writing A B C; the
+        // bfchar then overwrites <0042> with U+0099.
         var cmap = @"
             1 beginbfrange
             <0041> <0043> <0041>
@@ -365,7 +372,133 @@ public class ToUnicodeCMapParserTests
         var result = ToUnicodeCMapParser.Parse(cmap);
         result.Should().HaveCount(3);
         result[0x0041].Should().Be("A");
-        result[0x0042].Should().Be("B"); // bfrange overrides bfchar in BuildMapping
+        result[0x0042].Should().Be("");
         result[0x0043].Should().Be("C");
+    }
+
+    [Fact]
+    public void Parse_BfChar_LigatureMapping_ReturnsMultiCharString()
+    {
+        // Real CJK / Latin-extended subsets produce 2+ destination code units
+        // (a single source CID maps to "ﬁ", "Æ", etc.). UTF-16BE encodes the
+        // multi-character destination.
+        var cmap = @"
+            1 beginbfchar
+            <0001> <00660069>
+            endbfchar
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        result[0x0001].Should().Be("fi");
+    }
+
+    [Fact]
+    public void Parse_BfRange_IncrementingDestination_PreservesPrefixAndIncrementsLastCodePoint()
+    {
+        // <0001><0003><0041> → 0x0001=A, 0x0002=B, 0x0003=C
+        var cmap = @"
+            1 beginbfrange
+            <0001> <0003> <0041>
+            endbfrange
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        result[0x0001].Should().Be("A");
+        result[0x0002].Should().Be("B");
+        result[0x0003].Should().Be("C");
+    }
+
+    [Fact]
+    public void Parse_BfRange_ArrayWithMultiCharStrings()
+    {
+        // Each bracketed entry can itself be a multi-code string.
+        var cmap = @"
+            1 beginbfrange
+            <0001> <0002> [<00660069> <00660066>]
+            endbfrange
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        result[0x0001].Should().Be("fi");
+        result[0x0002].Should().Be("ff");
+    }
+
+    [Fact]
+    public void Parse_CodespaceRange_DeclaresMaxByteWidth()
+    {
+        var cmap = @"
+            2 begincodespacerange
+            <00> <80>
+            <8140> <FEFE>
+            endcodespacerange
+        ";
+        var parser = ToUnicodeCMapParser.ParseDetailed(System.Text.Encoding.UTF8.GetBytes(cmap));
+        parser.MaxCodeBytes.Should().Be(2);
+        parser.CodespaceRanges.Should().HaveCount(2);
+        parser.CodespaceRanges[0].Bytes.Should().Be(1);
+        parser.CodespaceRanges[1].Bytes.Should().Be(2);
+    }
+
+    [Fact]
+    public void Parse_CMapWithComments_IgnoresComments()
+    {
+        var cmap = @"
+            % CMapName: TestMap
+            % This is a comment line
+            1 beginbfchar
+            % inline comment about A
+            <0041> <0041>
+            endbfchar
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        result.Should().HaveCount(1);
+        result[0x0041].Should().Be("A");
+    }
+
+    [Fact]
+    public void Parse_BfRange_TwoByteSurrogatePair_HandlesEmojiIncrement()
+    {
+        // Surrogate-pair destination — only the trailing low surrogate increments,
+        // i.e. the high surrogate is part of the prefix.
+        var cmap = @"
+            1 beginbfrange
+            <0001> <0003> <D83DDE00>
+            endbfrange
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        // The last code-point is U+1F600 (😀) — incrementing yields 😁, 😂.
+        result[0x0001].Should().Be("\U0001F600");
+        result[0x0002].Should().Be("\U0001F601");
+        result[0x0003].Should().Be("\U0001F602");
+    }
+
+    [Fact]
+    public void Parse_HexStringWithEmbeddedWhitespace_IsTreatedAsContiguous()
+    {
+        // PDF spec allows whitespace inside hex strings — our tokenizer must skip it.
+        var cmap = @"
+            1 beginbfchar
+            <00 41> <00 42>
+            endbfchar
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        result[0x0041].Should().Be("B");
+    }
+
+    [Fact]
+    public void Parse_AdjacentBlocks_BothApplied()
+    {
+        var cmap = @"
+            1 beginbfchar
+            <0001> <0041>
+            endbfchar
+            1 beginbfchar
+            <0002> <0042>
+            endbfchar
+            1 beginbfrange
+            <0003> <0004> <0043>
+            endbfrange
+        ";
+        var result = ToUnicodeCMapParser.Parse(cmap);
+        result.Should().HaveCount(4);
+        result[0x0001].Should().Be("A");
+        result[0x0004].Should().Be("D");
     }
 }

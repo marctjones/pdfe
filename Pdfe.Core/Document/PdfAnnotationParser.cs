@@ -66,11 +66,135 @@ internal static class PdfAnnotationParser
         if (subtype == PdfAnnotationSubtype.Link)
             (destPage, uri) = ResolveLink(doc, annot, pageRefToNumber, namedDests);
 
+        // Subtype-specific geometry
+        var lineEndpoints = subtype == PdfAnnotationSubtype.Line ? ParseLineEndpoints(doc, annot) : null;
+        var vertices      = (subtype is PdfAnnotationSubtype.Polygon or PdfAnnotationSubtype.PolyLine)
+                            ? ParseVertices(doc, annot) : null;
+        var inkStrokes    = subtype == PdfAnnotationSubtype.Ink ? ParseInkList(doc, annot) : null;
+
+        // FileAttachment specifics
+        string? attachmentFileName = null;
+        byte[]? attachmentBytes = null;
+        string? attachmentMimeType = null;
+        if (subtype == PdfAnnotationSubtype.FileAttachment)
+            (attachmentFileName, attachmentBytes, attachmentMimeType) = ParseFileAttachment(doc, annot);
+
+        // Border / BorderStyle
+        var (borderWidth, borderDash) = ParseBorderArray(doc, annot);
+        string? borderStyle = null;
+        if (annot.GetOptional("BS") is { } bsObj && doc.Resolve(bsObj) is PdfDictionary bs)
+        {
+            borderStyle = bs.GetNameOrNull("S");
+            var bsW = bs.GetOptional("W");
+            if (bsW != null && TryNumber(bsW, out var bsWidth))
+                borderWidth = bsWidth;
+            if (bs.GetOptional("D") is { } bsDObj && doc.Resolve(bsDObj) is PdfArray bsD)
+                borderDash = ToNumberList(bsD);
+        }
+
+        bool hasAppearance = annot.GetOptional("AP") != null;
+
         return new PdfAnnotation(
             subtype, rect, contents, author,
             modDate, creationDate, color, flags, name,
             quadPoints, destPage, uri, isOpen, iconName,
+            lineEndpoints, vertices, inkStrokes,
+            attachmentFileName, attachmentBytes, attachmentMimeType,
+            borderWidth, borderStyle, borderDash,
+            hasAppearance,
             annot);
+    }
+
+    private static bool TryNumber(PdfObject obj, out double v)
+    {
+        switch (obj)
+        {
+            case PdfInteger i: v = i.Value; return true;
+            case PdfReal r:    v = r.Value; return true;
+            default:           v = 0;       return false;
+        }
+    }
+
+    private static IReadOnlyList<double> ToNumberList(PdfArray arr)
+    {
+        var list = new List<double>(arr.Count);
+        for (int k = 0; k < arr.Count; k++)
+            if (TryNumber(arr[k], out var v)) list.Add(v);
+        return list;
+    }
+
+    private static (double X1, double Y1, double X2, double Y2)? ParseLineEndpoints(
+        PdfDocument doc, PdfDictionary annot)
+    {
+        if (annot.GetOptional("L") is not { } lObj) return null;
+        if (doc.Resolve(lObj) is not PdfArray arr || arr.Count < 4) return null;
+        return (arr.GetNumber(0), arr.GetNumber(1), arr.GetNumber(2), arr.GetNumber(3));
+    }
+
+    private static IReadOnlyList<(double, double)>? ParseVertices(
+        PdfDocument doc, PdfDictionary annot)
+    {
+        if (annot.GetOptional("Vertices") is not { } vObj) return null;
+        if (doc.Resolve(vObj) is not PdfArray arr || arr.Count < 2) return null;
+        var list = new List<(double, double)>(arr.Count / 2);
+        for (int k = 0; k + 1 < arr.Count; k += 2)
+            list.Add((arr.GetNumber(k), arr.GetNumber(k + 1)));
+        return list;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<(double, double)>>? ParseInkList(
+        PdfDocument doc, PdfDictionary annot)
+    {
+        if (annot.GetOptional("InkList") is not { } ilObj) return null;
+        if (doc.Resolve(ilObj) is not PdfArray strokes) return null;
+        var result = new List<IReadOnlyList<(double, double)>>(strokes.Count);
+        foreach (var s in strokes)
+        {
+            if (doc.Resolve(s) is not PdfArray pts) continue;
+            var stroke = new List<(double, double)>(pts.Count / 2);
+            for (int k = 0; k + 1 < pts.Count; k += 2)
+                stroke.Add((pts.GetNumber(k), pts.GetNumber(k + 1)));
+            if (stroke.Count > 0) result.Add(stroke);
+        }
+        return result.Count > 0 ? result : null;
+    }
+
+    private static (string? name, byte[]? bytes, string? mime) ParseFileAttachment(
+        PdfDocument doc, PdfDictionary annot)
+    {
+        if (annot.GetOptional("FS") is not { } fsObj) return (null, null, null);
+        if (doc.Resolve(fsObj) is not PdfDictionary fs) return (null, null, null);
+
+        // /UF preferred (Unicode), /F is the legacy 7-bit/PDFDocEncoded name.
+        var fileName = fs.GetStringOrNull("UF") ?? fs.GetStringOrNull("F");
+
+        if (fs.GetOptional("EF") is not { } efObj) return (fileName, null, null);
+        if (doc.Resolve(efObj) is not PdfDictionary ef) return (fileName, null, null);
+
+        // /EF /F (or /UF for PDF 2.0) → embedded-file stream
+        var fileStreamObj = ef.GetOptional("F") ?? ef.GetOptional("UF");
+        if (fileStreamObj == null) return (fileName, null, null);
+        if (doc.Resolve(fileStreamObj) is not PdfStream stream) return (fileName, null, null);
+
+        byte[]? bytes;
+        try { bytes = stream.DecodedData; }
+        catch { bytes = null; }
+
+        var mime = stream.GetNameOrNull("Subtype");
+        return (fileName, bytes, mime);
+    }
+
+    private static (double? width, IReadOnlyList<double>? dash) ParseBorderArray(
+        PdfDocument doc, PdfDictionary annot)
+    {
+        if (annot.GetOptional("Border") is not { } bObj) return (null, null);
+        if (doc.Resolve(bObj) is not PdfArray b || b.Count < 3) return (null, null);
+
+        double width = b.GetNumber(2);
+        IReadOnlyList<double>? dash = null;
+        if (b.Count >= 4 && doc.Resolve(b[3]) is PdfArray dashArr)
+            dash = ToNumberList(dashArr);
+        return (width, dash);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

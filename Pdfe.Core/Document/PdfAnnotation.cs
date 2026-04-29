@@ -111,6 +111,60 @@ public sealed class PdfAnnotation
     /// <summary>Icon name for Text (sticky-note) annotations (/Name), e.g. "Note", "Comment".</summary>
     public string? IconName { get; }
 
+    // ── Line-specific (§12.5.6.7) ────────────────────────────────────────────
+
+    /// <summary>Endpoints (x1, y1, x2, y2) for Line annotations (/L).</summary>
+    public (double X1, double Y1, double X2, double Y2)? LineEndpoints { get; }
+
+    // ── Polygon / PolyLine specific (§12.5.6.9) ──────────────────────────────
+
+    /// <summary>Vertex points for Polygon and PolyLine annotations (/Vertices).</summary>
+    public IReadOnlyList<(double X, double Y)>? Vertices { get; }
+
+    // ── Ink specific (§12.5.6.13) ────────────────────────────────────────────
+
+    /// <summary>
+    /// Ink strokes (/InkList): one inner list per stroke, each a sequence of
+    /// (x,y) coordinates the user drew. Multiple strokes per Ink annot for
+    /// pen-up / pen-down events.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<(double X, double Y)>>? InkStrokes { get; }
+
+    // ── FileAttachment specific (§12.5.6.15) ─────────────────────────────────
+
+    /// <summary>Display filename for the attached file (/FS → /UF or /F).</summary>
+    public string? AttachmentFileName { get; }
+
+    /// <summary>
+    /// Decoded contents of the embedded file. Pulled from /FS → /EF → /F (or
+    /// /UF) → stream's DecodedData. Null if the attachment is unembedded
+    /// (rare) or decoding failed.
+    /// </summary>
+    public byte[]? AttachmentBytes { get; }
+
+    /// <summary>MIME type for the embedded file (/FS → /EF → /F → /Subtype).</summary>
+    public string? AttachmentMimeType { get; }
+
+    // ── Border / Border Style (§12.5.4) ──────────────────────────────────────
+
+    /// <summary>
+    /// Border width from the /Border array's third element. The /Border array
+    /// shape is [HCornerR VCornerR Width DashPattern?]. Defaults to 1pt
+    /// when the array is absent.
+    /// </summary>
+    public double? BorderWidth { get; }
+
+    /// <summary>Border style ("S" Solid, "D" Dashed, "B" Beveled, "I" Inset, "U" Underline) from /BS /S.</summary>
+    public string? BorderStyle { get; }
+
+    /// <summary>Dash pattern (/Border[3] or /BS /D) — null when unset.</summary>
+    public IReadOnlyList<double>? BorderDashPattern { get; }
+
+    // ── Appearance (§12.5.5) ─────────────────────────────────────────────────
+
+    /// <summary>True when an /AP appearance dictionary is present on the annotation.</summary>
+    public bool HasAppearance { get; }
+
     // ── Raw dictionary ────────────────────────────────────────────────────────
 
     /// <summary>The underlying PDF dictionary for properties not exposed above.</summary>
@@ -131,23 +185,43 @@ public sealed class PdfAnnotation
         string? uri,
         bool isOpen,
         string? iconName,
+        (double X1, double Y1, double X2, double Y2)? lineEndpoints,
+        IReadOnlyList<(double X, double Y)>? vertices,
+        IReadOnlyList<IReadOnlyList<(double X, double Y)>>? inkStrokes,
+        string? attachmentFileName,
+        byte[]? attachmentBytes,
+        string? attachmentMimeType,
+        double? borderWidth,
+        string? borderStyle,
+        IReadOnlyList<double>? borderDashPattern,
+        bool hasAppearance,
         PdfDictionary rawDictionary)
     {
-        Subtype         = subtype;
-        Rect            = rect;
-        Contents        = contents;
-        Author          = author;
-        ModDate         = modDate;
-        CreationDate    = creationDate;
-        Color           = color;
-        Flags           = flags;
-        Name            = name;
-        QuadPoints      = quadPoints;
-        DestinationPage = destinationPage;
-        Uri             = uri;
-        IsOpen          = isOpen;
-        IconName        = iconName;
-        RawDictionary   = rawDictionary;
+        Subtype             = subtype;
+        Rect                = rect;
+        Contents            = contents;
+        Author              = author;
+        ModDate             = modDate;
+        CreationDate        = creationDate;
+        Color               = color;
+        Flags               = flags;
+        Name                = name;
+        QuadPoints          = quadPoints;
+        DestinationPage     = destinationPage;
+        Uri                 = uri;
+        IsOpen              = isOpen;
+        IconName            = iconName;
+        LineEndpoints       = lineEndpoints;
+        Vertices            = vertices;
+        InkStrokes          = inkStrokes;
+        AttachmentFileName  = attachmentFileName;
+        AttachmentBytes     = attachmentBytes;
+        AttachmentMimeType  = attachmentMimeType;
+        BorderWidth         = borderWidth;
+        BorderStyle         = borderStyle;
+        BorderDashPattern   = borderDashPattern;
+        HasAppearance       = hasAppearance;
+        RawDictionary       = rawDictionary;
     }
 
     /// <summary>Whether this is a text-markup annotation (Highlight/Underline/Squiggly/StrikeOut).</summary>

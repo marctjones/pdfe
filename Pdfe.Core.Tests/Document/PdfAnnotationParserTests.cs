@@ -878,6 +878,288 @@ public class PdfAnnotationParserTests
         result[0].RawDictionary.GetNameOrNull("Subtype").Should().Be("Text");
     }
 
+    // ─── Phase 10 subtype-specific data ──────────────────────────────────────
+
+    [Fact]
+    public void Parse_LineAnnotation_LEndpoints_Captured()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Line /Rect [0 0 200 200]
+            /L [10 20 110 120]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].LineEndpoints.Should().NotBeNull();
+        var (x1, y1, x2, y2) = result[0].LineEndpoints!.Value;
+        (x1, y1, x2, y2).Should().Be((10.0, 20.0, 110.0, 120.0));
+    }
+
+    [Fact]
+    public void Parse_LineAnnotation_NoLArray_LineEndpointsNull()
+    {
+        var annotsDef = @"[<< /Type /Annot /Subtype /Line /Rect [0 0 200 200] >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].LineEndpoints.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_NonLineAnnotation_LineEndpoints_AreNull()
+    {
+        // /L is set but subtype is Square — only Line populates LineEndpoints.
+        var annotsDef = @"[<< /Type /Annot /Subtype /Square /Rect [0 0 200 200] /L [10 20 110 120] >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].LineEndpoints.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_PolygonAnnotation_VerticesCaptured()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Polygon /Rect [0 0 300 300]
+            /Vertices [10 20 110 30 60 200]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].Vertices.Should().NotBeNull();
+        result[0].Vertices.Should().HaveCount(3);
+        result[0].Vertices![0].Should().Be((10.0, 20.0));
+        result[0].Vertices![2].Should().Be((60.0, 200.0));
+    }
+
+    [Fact]
+    public void Parse_PolyLineAnnotation_VerticesCaptured()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /PolyLine /Rect [0 0 300 300]
+            /Vertices [0 0 50 50 100 0]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].Vertices.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public void Parse_InkAnnotation_StrokesCaptured()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Ink /Rect [0 0 300 300]
+            /InkList [
+                [10 20 30 40 50 60]
+                [70 80 90 100]
+            ]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        var ink = result[0].InkStrokes!;
+        ink.Should().HaveCount(2);
+        ink[0].Should().HaveCount(3);
+        ink[1].Should().HaveCount(2);
+        ink[0][0].Should().Be((10.0, 20.0));
+        ink[1][1].Should().Be((90.0, 100.0));
+    }
+
+    [Fact]
+    public void Parse_InkAnnotation_NoInkList_StrokesNull()
+    {
+        var annotsDef = @"[<< /Type /Annot /Subtype /Ink /Rect [0 0 300 300] >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].InkStrokes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_ReadsName_FromUF()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS << /Type /Filespec /UF (data.csv) /F (data.csv) >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().Be("data.csv");
+        // No /EF embedded stream → bytes null
+        result[0].AttachmentBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_FallsBackTo_F_WhenNoUF()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS << /Type /Filespec /F (legacy.txt) >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().Be("legacy.txt");
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_NoFS_AllAttachmentFieldsNull()
+    {
+        var annotsDef = @"[<< /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20] >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().BeNull();
+        result[0].AttachmentBytes.Should().BeNull();
+        result[0].AttachmentMimeType.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_BorderArray_WidthAndDashExtracted()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Square /Rect [0 0 100 100]
+            /Border [0 0 2.5 [3 1]]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().Be(2.5);
+        result[0].BorderDashPattern.Should().NotBeNull();
+        result[0].BorderDashPattern.Should().Equal(3.0, 1.0);
+    }
+
+    [Fact]
+    public void Parse_BSDictionary_OverridesBorderArrayWidth()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Square /Rect [0 0 100 100]
+            /Border [0 0 1]
+            /BS << /Type /Border /W 4 /S /D /D [5 2] >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().Be(4.0);
+        result[0].BorderStyle.Should().Be("D");
+        result[0].BorderDashPattern.Should().Equal(5.0, 2.0);
+    }
+
+    [Fact]
+    public void Parse_NoBorder_BorderFieldsNull()
+    {
+        var annotsDef = @"[<< /Type /Annot /Subtype /Square /Rect [0 0 100 100] >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().BeNull();
+        result[0].BorderStyle.Should().BeNull();
+        result[0].BorderDashPattern.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_AppearancePresent_HasAppearanceTrue()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Stamp /Rect [0 0 100 100]
+            /AP << /N << >> >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].HasAppearance.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_NoAppearance_HasAppearanceFalse()
+    {
+        var annotsDef = @"[<< /Type /Annot /Subtype /Stamp /Rect [0 0 100 100] >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].HasAppearance.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Parse_VerticesArray_OddNumberOfCoords_TruncatesUnpaired()
+    {
+        // 5 numbers — last one has no Y partner; should yield 2 complete points.
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Polygon /Rect [0 0 100 100]
+            /Vertices [0 0 50 50 100]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].Vertices.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Parse_LineEndpoints_TooFewElements_LineEndpointsNull()
+    {
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Line /Rect [0 0 100 100]
+            /L [10 20 110]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].LineEndpoints.Should().BeNull();
+    }
+
     // ─── Helper methods ─────────────────────────────────────────────────────
 
     private static byte[] MakePdfWithMultiPageAnnot()
