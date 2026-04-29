@@ -86,6 +86,20 @@ public class PdfPage
     }
 
     /// <summary>
+    /// AcroForm fields whose Widget annotation lives on this page (§12.7).
+    /// Returns the document-wide AcroForm filtered to this page; returns an
+    /// empty list when the document has no /AcroForm dictionary or none of
+    /// its widgets reference this page.
+    /// </summary>
+    public IReadOnlyList<PdfField> GetFormFields()
+    {
+        var form = _document.GetAcroForm();
+        if (form == null) return Array.Empty<PdfField>();
+        var pageNum = PageNumber;
+        return form.Fields.Where(f => f.PageNumber == pageNum).ToList();
+    }
+
+    /// <summary>
     /// Internal-document link annotations on this page (PDF spec §12.5.6.5).
     /// External / URI links are filtered out; what's returned is only the
     /// kind of link a clickable table-of-contents or back-of-book index

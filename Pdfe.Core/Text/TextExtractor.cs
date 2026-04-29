@@ -46,13 +46,88 @@ public class TextExtractor
     }
 
     /// <summary>
+    /// When true, AcroForm field values whose widget is on this page are
+    /// emitted as synthetic Letters in addition to the content-stream text.
+    /// This makes form-fill values visible to search, text extraction, and
+    /// — critically — redaction. Defaults to true; the only reason to turn
+    /// it off is to inspect raw content-stream output for diagnostics.
+    /// </summary>
+    public bool IncludeFormFieldValues { get; set; } = true;
+
+    /// <summary>
     /// Extract all letters from the page.
     /// </summary>
     public IReadOnlyList<Letter> ExtractLetters()
     {
         _letters.Clear();
         ParseContentStream();
+        if (IncludeFormFieldValues)
+            EmitFormFieldLetters();
         return _letters.AsReadOnly();
+    }
+
+    /// <summary>
+    /// Walk the page's AcroForm fields and emit synthetic Letters for any with
+    /// a string value (/V) and a widget rectangle. Positions are an estimate
+    /// based on the widget rect — the real glyph layout would require parsing
+    /// the field's appearance stream, which the read-only AcroForm slice
+    /// deliberately defers. For search and redaction the rect-based positions
+    /// are precise enough: the redaction rectangle still encloses the value,
+    /// and search just needs the text content present.
+    /// </summary>
+    private void EmitFormFieldLetters()
+    {
+        IReadOnlyList<PdfField> fields;
+        try { fields = _page.GetFormFields(); }
+        catch { return; }
+
+        foreach (var field in fields)
+        {
+            if (field.Rect == null) continue;
+            var value = field.Value ?? field.DefaultValue;
+            if (string.IsNullOrEmpty(value)) continue;
+            // Buttons are off/on/checked/unchecked names — not human-readable text.
+            if (field.FieldType == PdfFieldType.Button) continue;
+            // Signatures don't render text in the field; skip.
+            if (field.FieldType == PdfFieldType.Signature) continue;
+
+            EmitLettersInRect(value, field.Rect.Value, $"AcroForm:{field.FieldType}");
+        }
+    }
+
+    private void EmitLettersInRect(string text, PdfRectangle rect, string fontName)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0) return;
+        var fontSize = Math.Min(rect.Height * 0.85, 12.0);
+        if (fontSize <= 0) return;
+
+        // Approximation: assume average glyph advance of 0.55em. Real PDFs
+        // vary, but for search/redaction we just need to land letters within
+        // the widget's rect.
+        var advance = fontSize * 0.55;
+        var maxChars = (int)Math.Floor(rect.Width / advance);
+        if (maxChars <= 0) return;
+
+        // Truncate so we never paint outside the widget rect.
+        if (text.Length > maxChars) text = text.Substring(0, maxChars);
+
+        var x = rect.Left;
+        var baselineY = rect.Bottom + (rect.Height - fontSize) * 0.5;
+
+        foreach (var ch in text)
+        {
+            var bbox = new PdfRectangle(x, baselineY, x + advance, baselineY + fontSize);
+            _letters.Add(new Letter(
+                ch.ToString(),
+                bbox,
+                fontSize,
+                fontName,
+                x,
+                baselineY,
+                advance,
+                ch));
+            x += advance;
+        }
     }
 
     /// <summary>
