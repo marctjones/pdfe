@@ -21,6 +21,11 @@ public class TextExtractor
     private double _charSpacing = 0;
     private double _wordSpacing = 0;
     private double _horizontalScaling = 100;
+    // Type 0 / CID font state (§9.7)
+    private bool _is2ByteFont;
+    private bool _isVerticalWriting;
+    private Dictionary<int, double>? _cidWidths;
+    private double _cidDefaultWidth = 1000;
 
     // Text matrix (position + transformation)
     private double _tm_a = 1, _tm_b = 0, _tm_c = 0, _tm_d = 1, _tm_e = 0, _tm_f = 0;
@@ -502,6 +507,7 @@ public class TextExtractor
                     _fontSize = ToDouble(operands[1]);
                     _currentFont = _page.GetFont(_fontName);
                     _toUnicodeMap = LoadToUnicodeMap(_currentFont);
+                    LoadFontGeometry();
                 }
                 break;
 
@@ -676,9 +682,20 @@ public class TextExtractor
 
     private void ShowText(byte[] bytes)
     {
-        foreach (var b in bytes)
+        // Type 0 / composite fonts use multi-byte source codes. The descendant
+        // CIDFont's encoding (or the outer ToUnicode CMap) tells us how many
+        // bytes per code; in practice every modern producer uses 2 bytes for
+        // Identity-H/V, so we treat the font as 2-byte if the Tf-loaded font
+        // has Subtype /Type0. Simple fonts (Type1/TrueType not wrapped in a
+        // Type 0 / CIDFont) stay 1-byte.
+        int stride = _is2ByteFont ? 2 : 1;
+
+        for (int i = 0; i + stride <= bytes.Length; i += stride)
         {
-            var charCode = (int)b;
+            int charCode = stride == 2
+                ? (bytes[i] << 8) | bytes[i + 1]
+                : bytes[i];
+
             var unicode = DecodeCharacter(charCode);
             var charWidth = GetCharWidth(charCode);
 
@@ -704,14 +721,107 @@ public class TextExtractor
             );
             _letters.Add(letter);
 
-            // Advance text position
-            var tx = (charWidth / 1000.0) * _fontSize * (_horizontalScaling / 100.0);
-            tx += _charSpacing;
-            if (charCode == 32) // Space
-                tx += _wordSpacing;
+            // Advance text position. For vertical writing (WMode 1) the
+            // displacement is along the y-axis; horizontal is along x. We don't
+            // model glyph-specific vertical metrics yet, so vertical advance
+            // uses the same width-as-displacement assumption.
+            var displacement = (charWidth / 1000.0) * _fontSize * (_horizontalScaling / 100.0);
+            displacement += _charSpacing;
+            if (charCode == 32) // Space — also fire wordSpacing per §9.3.3
+                displacement += _wordSpacing;
 
-            _tm_e += tx * _tm_a;
-            _tm_f += tx * _tm_b;
+            if (_isVerticalWriting)
+            {
+                _tm_e += displacement * _tm_c;
+                _tm_f += displacement * _tm_d;
+            }
+            else
+            {
+                _tm_e += displacement * _tm_a;
+                _tm_f += displacement * _tm_b;
+            }
+        }
+    }
+
+    /// <summary>
+    /// After Tf loads a font, update Type 0 / CID-specific state: 2-byte stride,
+    /// vertical writing mode, default CID width, and per-CID width table.
+    /// </summary>
+    private void LoadFontGeometry()
+    {
+        _is2ByteFont = false;
+        _isVerticalWriting = false;
+        _cidWidths = null;
+        _cidDefaultWidth = 1000;
+
+        if (_currentFont == null) return;
+
+        var subtype = _currentFont.GetNameOrNull("Subtype");
+        if (subtype != "Type0") return;
+
+        _is2ByteFont = true;
+
+        // /Encoding can be a name (Identity-H/V) or a CMap stream. Identity-V
+        // and any /WMode 1 in a custom CMap means vertical writing.
+        var encObj = _currentFont.GetOptional("Encoding");
+        if (encObj is PdfName encName && encName.Value == "Identity-V")
+            _isVerticalWriting = true;
+
+        // Resolve descendant CIDFont (always exactly one entry, per §9.7.6.1).
+        var descendantsObj = _currentFont.GetOptional("DescendantFonts");
+        if (descendantsObj == null) return;
+        var descendantsResolved = _page.Document.Resolve(descendantsObj);
+        if (descendantsResolved is not PdfArray descendants || descendants.Count == 0) return;
+
+        var firstResolved = _page.Document.Resolve(descendants[0]);
+        if (firstResolved is not PdfDictionary cidFont) return;
+
+        // Default width (DW) — applied to any CID not in the W table (§9.7.4.3).
+        if (cidFont.GetOptional("DW") is { } dwObj && TryNumber(dwObj, out var dwVal))
+            _cidDefaultWidth = dwVal;
+
+        // /W = [c [w1 w2 …]] | [c1 c2 w] mixed array
+        if (cidFont.GetOptional("W") is { } wObj &&
+            _page.Document.Resolve(wObj) is PdfArray w)
+        {
+            _cidWidths = new Dictionary<int, double>();
+            int idx = 0;
+            while (idx < w.Count)
+            {
+                if (!TryNumber(w[idx], out var firstNum)) { idx++; continue; }
+                int firstCid = (int)firstNum;
+
+                if (idx + 1 < w.Count && _page.Document.Resolve(w[idx + 1]) is PdfArray inner)
+                {
+                    for (int k = 0; k < inner.Count; k++)
+                        if (TryNumber(inner[k], out var width))
+                            _cidWidths[firstCid + k] = width;
+                    idx += 2;
+                }
+                else if (idx + 2 < w.Count
+                         && TryNumber(w[idx + 1], out var lastNum)
+                         && TryNumber(w[idx + 2], out var widthAll))
+                {
+                    int lastCid = (int)lastNum;
+                    for (int c = firstCid; c <= lastCid; c++)
+                        _cidWidths[c] = widthAll;
+                    idx += 3;
+                }
+                else
+                {
+                    idx++;
+                }
+            }
+        }
+    }
+
+    private static bool TryNumber(PdfObject? obj, out double v)
+    {
+        switch (obj)
+        {
+            case PdfInteger i: v = i.Value; return true;
+            case PdfReal r:    v = r.Value; return true;
+            default:           v = 0; return false;
         }
     }
 
@@ -867,6 +977,15 @@ public class TextExtractor
 
     private double GetCharWidth(int charCode)
     {
+        // Type 0 / CIDFont: width comes from the /W table on the descendant font,
+        // falling back to /DW when the CID is unlisted (§9.7.4.3).
+        if (_is2ByteFont)
+        {
+            if (_cidWidths != null && _cidWidths.TryGetValue(charCode, out var w))
+                return w;
+            return _cidDefaultWidth;
+        }
+
         // Try to get width from font dictionary
         if (_currentFont != null)
         {
