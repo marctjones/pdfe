@@ -608,6 +608,67 @@ public class PdfDocument : IDisposable
         return PdfAcroFormParser.Parse(this, acroFormDict);
     }
 
+    /// <summary>
+    /// Get the raw XMP metadata stream bytes, or null if the document has no
+    /// /Metadata entry on the catalog. The bytes are the decoded XMP RDF/XML
+    /// body. PDF spec §14.3.2 / XMP spec part 1 §7.6.
+    /// </summary>
+    public byte[]? GetXmpMetadata()
+    {
+        var metaObj = Catalog.GetOptional("Metadata");
+        if (metaObj == null) return null;
+        if (Resolve(metaObj) is not PdfStream stream) return null;
+        try { return stream.DecodedData; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Remove all document-level metadata. Clears the Info dictionary keys
+    /// (/Title /Author /Subject /Keywords /Creator /Producer /CreationDate
+    /// /ModDate) and removes the Catalog's /Metadata stream.
+    ///
+    /// This is critical for redaction: even after content-level redaction
+    /// removes glyphs from the page body, the title and author of the
+    /// document still surface the redacted phrase to anyone viewing the
+    /// file's properties or running pdfinfo.
+    ///
+    /// The change is applied to the in-memory document; call Save afterwards
+    /// to persist.
+    /// </summary>
+    public void ScrubMetadata()
+    {
+        // Wipe the legacy Info dictionary in place — keep the dict so xref
+        // structure is preserved, just empty it.
+        if (Info != null)
+        {
+            foreach (var key in InfoKeysToScrub)
+                Info.Remove(key);
+        }
+
+        // Drop the XMP metadata stream from the catalog. The stream object
+        // remains in the file until the next save rewrites the xref; the
+        // catalog no longer points at it.
+        Catalog.Remove("Metadata");
+    }
+
+    /// <summary>
+    /// Selectively scrub Info-dict keys without touching XMP. Useful when
+    /// the caller wants finer control (e.g. preserve /CreationDate but
+    /// drop /Title).
+    /// </summary>
+    public void ScrubInfoKeys(params string[] keys)
+    {
+        if (Info == null || keys == null) return;
+        foreach (var k in keys) Info.Remove(k);
+    }
+
+    private static readonly string[] InfoKeysToScrub = new[]
+    {
+        "Title", "Author", "Subject", "Keywords",
+        "Creator", "Producer", "CreationDate", "ModDate",
+        "Trapped"
+    };
+
     #region Save Methods
 
     /// <summary>
