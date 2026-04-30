@@ -16,6 +16,29 @@ namespace PdfEditor.Tests.Unit;
 public class StatePersistenceTests
 {
     [Fact]
+    public void WindowSettings_Load_DropsDocumentStatesPointingAtMissingFiles()
+    {
+        // Reproduce the v2.1.0-rc4 manual-test bug: a saved DocumentState
+        // pointing at /tmp/PdfEditorGoldenPath/.../foo.pdf would survive
+        // across launches even after the file was deleted, then get
+        // resurfaced by the next restore attempt. Load() must filter.
+        var settings = new WindowSettings();
+        settings.DocumentStates.Add(new WindowSettings.DocumentState
+        {
+            FilePath = "/tmp/this-path-definitely-does-not-exist-" + System.Guid.NewGuid().ToString("N") + ".pdf",
+            ZoomLevel = 1.0,
+            LastPageIndex = 0
+        });
+
+        // Save it, then reload — the reload should drop the missing entry.
+        settings.Save();
+        var reloaded = WindowSettings.Load();
+
+        reloaded.DocumentStates.Should().BeEmpty(
+            "Load() must filter out DocumentStates whose file no longer exists");
+    }
+
+    [Fact]
     public void WindowSettings_Default_HasExpectedInitialValues()
     {
         // Arrange — construct a fresh WindowSettings (defaults inline-initialized).

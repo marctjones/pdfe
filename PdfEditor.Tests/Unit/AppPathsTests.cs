@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using FluentAssertions;
 using PdfEditor.Services;
 using System.Runtime.InteropServices;
@@ -8,6 +10,11 @@ namespace PdfEditor.Tests.Unit;
 /// <summary>
 /// Tests for AppPaths cross-platform storage paths.
 /// Verifies platform-specific best practices (Issues #265, #266, #267).
+///
+/// Calls the Resolve*Fresh internal helpers so the assembly-wide test
+/// override (which redirects ConfigDir/DataDir/CacheDir into a temp
+/// dir for the rest of the suite) doesn't have to be disabled — that
+/// would race with persistence tests running in parallel.
 /// </summary>
 public class AppPathsTests
 {
@@ -17,7 +24,7 @@ public class AppPathsTests
     [Fact]
     public void ConfigDir_ReturnsNonEmptyPath()
     {
-        var configDir = AppPaths.ConfigDir;
+        var configDir = AppPaths.ResolveConfigDirFresh();
 
         configDir.Should().NotBeNullOrEmpty();
     }
@@ -28,7 +35,7 @@ public class AppPathsTests
     [Fact]
     public void ConfigDir_EndsWithAppName()
     {
-        var configDir = AppPaths.ConfigDir;
+        var configDir = AppPaths.ResolveConfigDirFresh();
 
         configDir.Should().EndWith("PdfEditor");
     }
@@ -39,7 +46,7 @@ public class AppPathsTests
     [Fact]
     public void DataDir_ReturnsNonEmptyPath()
     {
-        var dataDir = AppPaths.DataDir;
+        var dataDir = AppPaths.ResolveDataDirFresh();
 
         dataDir.Should().NotBeNullOrEmpty();
     }
@@ -50,7 +57,7 @@ public class AppPathsTests
     [Fact]
     public void DataDir_EndsWithAppName()
     {
-        var dataDir = AppPaths.DataDir;
+        var dataDir = AppPaths.ResolveDataDirFresh();
 
         dataDir.Should().EndWith("PdfEditor");
     }
@@ -61,7 +68,7 @@ public class AppPathsTests
     [Fact]
     public void CacheDir_ReturnsNonEmptyPath()
     {
-        var cacheDir = AppPaths.CacheDir;
+        var cacheDir = AppPaths.ResolveCacheDirFresh();
 
         cacheDir.Should().NotBeNullOrEmpty();
     }
@@ -73,7 +80,7 @@ public class AppPathsTests
     [Fact]
     public void CacheDir_EndsWithAppNameOrCache()
     {
-        var cacheDir = AppPaths.CacheDir;
+        var cacheDir = AppPaths.ResolveCacheDirFresh();
 
         // Windows: ends with Cache, others: ends with PdfEditor
         var endOk = cacheDir.EndsWith("PdfEditor") || cacheDir.EndsWith("Cache");
@@ -142,7 +149,7 @@ public class AppPathsTests
             return;
         }
 
-        var configDir = AppPaths.ConfigDir;
+        var configDir = AppPaths.ResolveConfigDirFresh();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         // Should contain .config (XDG default) or XDG_CONFIG_HOME path
@@ -173,7 +180,7 @@ public class AppPathsTests
             return;
         }
 
-        var dataDir = AppPaths.DataDir;
+        var dataDir = AppPaths.ResolveDataDirFresh();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         // Should contain .local/share (XDG default) or XDG_DATA_HOME path
@@ -204,7 +211,7 @@ public class AppPathsTests
             return;
         }
 
-        var cacheDir = AppPaths.CacheDir;
+        var cacheDir = AppPaths.ResolveCacheDirFresh();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         // Should contain .cache (XDG default) or XDG_CACHE_HOME path
@@ -234,7 +241,7 @@ public class AppPathsTests
             return;
         }
 
-        var configDir = AppPaths.ConfigDir;
+        var configDir = AppPaths.ResolveConfigDirFresh();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var expectedPrefix = Path.Combine(home, "Library", "Application Support");
 
@@ -255,7 +262,7 @@ public class AppPathsTests
             return;
         }
 
-        var cacheDir = AppPaths.CacheDir;
+        var cacheDir = AppPaths.ResolveCacheDirFresh();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var expectedPrefix = Path.Combine(home, "Library", "Caches");
 
@@ -276,7 +283,7 @@ public class AppPathsTests
             return;
         }
 
-        var configDir = AppPaths.ConfigDir;
+        var configDir = AppPaths.ResolveConfigDirFresh();
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
         configDir.Should().StartWith(appData,
@@ -292,7 +299,7 @@ public class AppPathsTests
             return;
         }
 
-        var dataDir = AppPaths.DataDir;
+        var dataDir = AppPaths.ResolveDataDirFresh();
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
         dataDir.Should().StartWith(appData,
@@ -308,7 +315,7 @@ public class AppPathsTests
             return;
         }
 
-        var cacheDir = AppPaths.CacheDir;
+        var cacheDir = AppPaths.ResolveCacheDirFresh();
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
         cacheDir.Should().StartWith(localAppData,
@@ -322,8 +329,8 @@ public class AppPathsTests
     [Fact]
     public void ConfigDir_IsCached_ReturnsSamePath()
     {
-        var first = AppPaths.ConfigDir;
-        var second = AppPaths.ConfigDir;
+        var first = AppPaths.ResolveConfigDirFresh();
+        var second = AppPaths.ResolveConfigDirFresh();
 
         first.Should().Be(second, "ConfigDir should be cached and return same path");
     }
@@ -331,8 +338,8 @@ public class AppPathsTests
     [Fact]
     public void DataDir_IsCached_ReturnsSamePath()
     {
-        var first = AppPaths.DataDir;
-        var second = AppPaths.DataDir;
+        var first = AppPaths.ResolveDataDirFresh();
+        var second = AppPaths.ResolveDataDirFresh();
 
         first.Should().Be(second, "DataDir should be cached and return same path");
     }
@@ -340,8 +347,8 @@ public class AppPathsTests
     [Fact]
     public void CacheDir_IsCached_ReturnsSamePath()
     {
-        var first = AppPaths.CacheDir;
-        var second = AppPaths.CacheDir;
+        var first = AppPaths.ResolveCacheDirFresh();
+        var second = AppPaths.ResolveCacheDirFresh();
 
         first.Should().Be(second, "CacheDir should be cached and return same path");
     }
@@ -349,6 +356,13 @@ public class AppPathsTests
     // ========================================================================
     // DERIVED PATH TESTS
     // ========================================================================
+
+    // The Path/Dir relationship tests below intentionally compare against
+    // AppPaths.ConfigDir / AppPaths.DataDir (the live cached values, which
+    // may be overridden during tests) rather than the *Fresh resolvers,
+    // because the contract being tested is "WindowSettingsPath lives under
+    // whatever ConfigDir the app is currently using" — that contract holds
+    // identically in real and overridden modes.
 
     [Fact]
     public void WindowSettingsPath_ContainsConfigDir()
@@ -397,7 +411,7 @@ public class AppPathsTests
     [Fact]
     public void ConfigDir_UsesCorrectPathSeparators()
     {
-        var configDir = AppPaths.ConfigDir;
+        var configDir = AppPaths.ResolveConfigDirFresh();
 
         // Should use system-appropriate path separators
         configDir.Should().NotContain("\\\\", "Should not have double backslashes");
@@ -409,9 +423,9 @@ public class AppPathsTests
     {
         var paths = new[]
         {
-            AppPaths.ConfigDir,
-            AppPaths.DataDir,
-            AppPaths.CacheDir,
+            AppPaths.ResolveConfigDirFresh(),
+            AppPaths.ResolveDataDirFresh(),
+            AppPaths.ResolveCacheDirFresh(),
             AppPaths.WindowSettingsPath,
             AppPaths.RecentFilesPath,
             AppPaths.ZoomSettingsPath,
@@ -432,9 +446,9 @@ public class AppPathsTests
     [Fact]
     public void AppPaths_AllProperties_NotNull()
     {
-        AppPaths.ConfigDir.Should().NotBeNull();
-        AppPaths.DataDir.Should().NotBeNull();
-        AppPaths.CacheDir.Should().NotBeNull();
+        AppPaths.ResolveConfigDirFresh().Should().NotBeNull();
+        AppPaths.ResolveDataDirFresh().Should().NotBeNull();
+        AppPaths.ResolveCacheDirFresh().Should().NotBeNull();
         AppPaths.WindowSettingsPath.Should().NotBeNull();
         AppPaths.RecentFilesPath.Should().NotBeNull();
         AppPaths.ZoomSettingsPath.Should().NotBeNull();
@@ -444,9 +458,9 @@ public class AppPathsTests
     [Fact]
     public void AppPaths_AllPaths_NotEmpty()
     {
-        AppPaths.ConfigDir.Should().NotBeEmpty();
-        AppPaths.DataDir.Should().NotBeEmpty();
-        AppPaths.CacheDir.Should().NotBeEmpty();
+        AppPaths.ResolveConfigDirFresh().Should().NotBeEmpty();
+        AppPaths.ResolveDataDirFresh().Should().NotBeEmpty();
+        AppPaths.ResolveCacheDirFresh().Should().NotBeEmpty();
         AppPaths.WindowSettingsPath.Should().NotBeEmpty();
         AppPaths.RecentFilesPath.Should().NotBeEmpty();
         AppPaths.ZoomSettingsPath.Should().NotBeEmpty();
