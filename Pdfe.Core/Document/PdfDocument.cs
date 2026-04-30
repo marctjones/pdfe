@@ -1,6 +1,7 @@
 using Pdfe.Core.Parsing;
 using Pdfe.Core.Primitives;
 using Pdfe.Core.Writing;
+using System.Linq;
 
 namespace Pdfe.Core.Document;
 
@@ -767,6 +768,156 @@ public class PdfDocument : IDisposable
     }
 
     #endregion
+
+    /// <summary>
+    /// Get the page label for a given page number (1-based).
+    /// Returns the formatted label string (e.g., "i", "1", "A-1"), or null if no labels defined.
+    /// </summary>
+    public string? GetPageLabel(int pageNumber)
+    {
+        if (pageNumber < 1 || pageNumber > PageCount)
+            return null;
+
+        _pageLabelCache ??= PdfPageLabelParser.ParsePageLabels(this);
+
+        if (_pageLabelCache.Count == 0)
+            return null;
+
+        // Find the label definition that applies to this page (0-based index)
+        int pageIndex = pageNumber - 1;
+        int applicableIndex = -1;
+
+        // Find the highest index <= pageIndex that has a label definition
+        foreach (var key in _pageLabelCache.Keys.OrderBy(k => k))
+        {
+            if (key <= pageIndex)
+                applicableIndex = key;
+            else
+                break;
+        }
+
+        if (applicableIndex < 0)
+            return null;
+
+        var label = _pageLabelCache[applicableIndex];
+        int offset = pageIndex - applicableIndex;
+        return label.Format(offset);
+    }
+
+    /// <summary>
+    /// Get all named destinations in the document.
+    /// Returns an empty dictionary if no named destinations defined.
+    /// </summary>
+    public IReadOnlyDictionary<string, NamedDestination> GetNamedDestinations()
+    {
+        _namedDestinationsCache ??= BuildNamedDestinations();
+        return _namedDestinationsCache;
+    }
+
+    /// <summary>
+    /// Build the named destinations from the catalog.
+    /// </summary>
+    private Dictionary<string, NamedDestination> BuildNamedDestinations()
+    {
+        var result = new Dictionary<string, NamedDestination>();
+
+        // Build page ref → page number map
+        var pageRefToNumber = PdfOutlineParser.BuildPageRefMap(this);
+
+        // Get the raw named destination objects (name → destination array or dict)
+        var rawDests = PdfOutlineParser.BuildNamedDestinations(this);
+        if (rawDests == null)
+            return result;
+
+        foreach (var kvp in rawDests)
+        {
+            var name = kvp.Key;
+            var destObj = Resolve(kvp.Value) as PdfArray;
+            if (destObj == null || destObj.Count == 0)
+                continue;
+
+            // First element is the page reference
+            int? pageNumber = null;
+            if (destObj[0] is PdfReference pageRef &&
+                pageRefToNumber.TryGetValue((pageRef.ObjectNum, pageRef.Generation), out var pageNum))
+            {
+                pageNumber = pageNum;
+            }
+
+            // Parse the destination array: [page /Fit|/FitH|etc params...]
+            var (fitMode, x, y, zoom) = ParseDestinationArray(destObj);
+
+            var dest = new NamedDestination(
+                Name: name,
+                PageNumber: pageNumber,
+                X: x,
+                Y: y,
+                Zoom: zoom,
+                FitMode: fitMode);
+
+            result[name] = dest;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Parse a destination array to extract fit mode and coordinates.
+    /// Format: [page /FitMode param1 param2 ...]
+    /// </summary>
+    private static (string FitMode, double? X, double? Y, double? Zoom) ParseDestinationArray(PdfArray arr)
+    {
+        if (arr.Count < 2)
+            return ("XYZ", null, null, null);
+
+        var fitModeObj = arr[1];
+        string fitMode = fitModeObj is PdfName name ? name.Value : "XYZ";
+
+        // Parse parameters based on fit mode (ISO 32000-2 §12.3.2.2)
+        // Note: PdfName.Value does not include the "/" prefix
+        return fitMode switch
+        {
+            "Fit" => ("Fit", null, null, null),
+            "FitH" => ("FitH", null, arr.Count > 2 ? GetNumber(arr[2]) : null, null),
+            "FitV" => ("FitV", arr.Count > 2 ? GetNumber(arr[2]) : null, null, null),
+            "FitB" => ("FitB", null, null, null),
+            "FitBH" => ("FitBH", null, arr.Count > 2 ? GetNumber(arr[2]) : null, null),
+            "FitBV" => ("FitBV", arr.Count > 2 ? GetNumber(arr[2]) : null, null, null),
+            "FitR" => ("FitR",
+                arr.Count > 2 ? GetNumber(arr[2]) : null,
+                arr.Count > 3 ? GetNumber(arr[3]) : null,
+                null),  // FitR has left, bottom, right, top but we simplify
+            "XYZ" => ("XYZ",
+                arr.Count > 2 ? GetNumber(arr[2]) : null,
+                arr.Count > 3 ? GetNumber(arr[3]) : null,
+                arr.Count > 4 ? GetNumber(arr[4]) : null),
+            _ => ("XYZ", null, null, null)
+        };
+    }
+
+    /// <summary>
+    /// Extract a numeric value from a PDF object.
+    /// </summary>
+    private static double? GetNumber(PdfObject obj)
+    {
+        return obj switch
+        {
+            PdfInteger i => i.Value,
+            PdfReal r => r.Value,
+            PdfNull => null,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Cache for page labels (parsed on first access).
+    /// </summary>
+    private Dictionary<int, PdfPageLabel>? _pageLabelCache;
+
+    /// <summary>
+    /// Cache for named destinations (parsed on first access).
+    /// </summary>
+    private Dictionary<string, NamedDestination>? _namedDestinationsCache;
 
     /// <inheritdoc />
     public void Dispose()
