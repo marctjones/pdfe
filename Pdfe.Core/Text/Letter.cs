@@ -50,6 +50,16 @@ public class Letter
     public int CharacterCode { get; }
 
     /// <summary>
+    /// Whether this letter was rendered inside an Optional Content Group (OCG)
+    /// that is OFF by default (hidden). This is a security concern: while invisible
+    /// in the default viewer, the text is fully extractable via the structure tree
+    /// or by toggling the OCG on in other tools. When true, redaction operations
+    /// should include this letter to prevent recovery of "hidden" content.
+    /// Defaults to false (not in a hidden OCG).
+    /// </summary>
+    public bool IsInHiddenOptionalContent { get; set; }
+
+    /// <summary>
     /// The baseline start point of the glyph.
     /// </summary>
     public PdfPoint StartBaseLine => new(StartX, StartY);

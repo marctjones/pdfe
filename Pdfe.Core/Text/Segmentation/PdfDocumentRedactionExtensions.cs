@@ -37,6 +37,15 @@ public static class PdfDocumentRedactionExtensions
     /// <paramref name="document"/>. The document is mutated in place;
     /// call <see cref="PdfDocument.Save(string)"/> to persist.
     /// </summary>
+    /// <param name="document">The PDF document to redact.</param>
+    /// <param name="text">The text to redact.</param>
+    /// <param name="caseSensitive">Whether matching is case-sensitive.</param>
+    /// <param name="strategy">Strategy for selecting glyphs to remove when bounding boxes overlap.</param>
+    /// <param name="drawBlackRect">Whether to append a visual black rectangle overlay.</param>
+    /// <param name="includeHiddenLayers">Whether to include text in Optional Content Groups
+    /// (OCGs) that are OFF by default. When true, this closes a security gap where content
+    /// on hidden layers is invisible in the default view but fully extractable via other tools.
+    /// Defaults to true for security (redact even hidden content).</param>
     /// <returns>
     /// Total number of matches removed across all pages.
     /// </returns>
@@ -45,7 +54,8 @@ public static class PdfDocumentRedactionExtensions
         string text,
         bool caseSensitive = false,
         GlyphRemovalStrategy strategy = GlyphRemovalStrategy.AnyOverlap,
-        bool drawBlackRect = true)
+        bool drawBlackRect = true,
+        bool includeHiddenLayers = true)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrEmpty(text)) return 0;
@@ -58,7 +68,14 @@ public static class PdfDocumentRedactionExtensions
             var letters = page.Letters;
             if (letters.Count == 0) continue;
 
-            var matches = FindTextMatches(letters, text, caseSensitive);
+            // Filter letters based on includeHiddenLayers setting
+            var searchLetters = includeHiddenLayers
+                ? letters
+                : letters.Where(l => !l.IsInHiddenOptionalContent).ToList();
+
+            if (searchLetters.Count == 0) continue;
+
+            var matches = FindTextMatches(searchLetters, text, caseSensitive);
             if (matches.Count == 0) continue;
 
             foreach (var matchLetters in matches)
