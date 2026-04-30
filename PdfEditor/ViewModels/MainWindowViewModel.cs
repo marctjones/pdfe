@@ -32,10 +32,16 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly PdfTextExtractionService _textExtractionService;
     private readonly SignatureVerificationService _signatureService;
     private readonly FilenameSuggestionService _filenameSuggestionService;
+    private readonly ToastService _toastService;
 
     // State managers
     public DocumentStateManager FileState { get; }
     public RedactionWorkflowManager RedactionWorkflow { get; }
+
+    /// <summary>
+    /// Toast notification service for displaying error/info messages.
+    /// </summary>
+    public ToastService ToastService => _toastService;
 
     private string _currentFilePath = string.Empty;
     private Bitmap? _currentPageImage;
@@ -93,6 +99,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _searchService = new PdfSearchService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfSearchService>.Instance);
         _signatureService = new SignatureVerificationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<SignatureVerificationService>.Instance);
         _filenameSuggestionService = new FilenameSuggestionService();
+        _toastService = new ToastService();
 
         // Initialize state managers
         FileState = new DocumentStateManager();
@@ -167,7 +174,8 @@ public partial class MainWindowViewModel : ViewModelBase
         PdfTextExtractionService textExtractionService,
         PdfSearchService searchService,
         SignatureVerificationService signatureService,
-        FilenameSuggestionService filenameSuggestionService)
+        FilenameSuggestionService filenameSuggestionService,
+        ToastService toastService)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -178,6 +186,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _searchService = searchService;
         _signatureService = signatureService;
         _filenameSuggestionService = filenameSuggestionService;
+        _toastService = toastService;
 
         // Initialize state managers
         FileState = new DocumentStateManager();
@@ -972,6 +981,9 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation(">>> STEP 12: Adding to recent files");
             AddToRecentFiles(filePath);
 
+            _logger.LogInformation(">>> STEP 12b: Restoring document state (zoom, page index)");
+            await RestoreDocumentStateAsync(filePath);
+
             _logger.LogInformation(">>> STEP 13: LoadDocumentAsync COMPLETE. Total pages: {PageCount}", TotalPages);
         }
         catch (Exception ex)
@@ -989,15 +1001,18 @@ public partial class MainWindowViewModel : ViewModelBase
             string userMessage;
             if (ex.Message.Contains("owner password") || ex.Message.Contains("password is required"))
             {
-                userMessage = "This PDF is password-protected and cannot be opened for editing.\n\nPlease use the original application to remove password protection, or open a different file.";
+                userMessage = "This PDF is password-protected and cannot be opened for editing.";
+                _toastService.ShowError("Cannot Open PDF", "Password-protected file. Please remove protection and try again.");
             }
             else if (ex.Message.Contains("encrypted"))
             {
-                userMessage = "This PDF is encrypted and cannot be opened.\n\nPlease provide an unencrypted version of the file.";
+                userMessage = "This PDF is encrypted and cannot be opened.";
+                _toastService.ShowError("Cannot Open PDF", "File is encrypted. Please provide an unencrypted version.");
             }
             else
             {
                 userMessage = $"Failed to open PDF:\n\n{ex.Message}";
+                _toastService.ShowError("Cannot Open PDF", ex.Message);
             }
 
             // Show error dialog to user (StatusBarText will show "Ready" from FileState.Reset())
@@ -1088,10 +1103,12 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _documentService.SaveDocument();
             _logger.LogInformation("Document saved successfully");
+            _toastService.ShowSuccess("Document saved");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error saving document");
+            _toastService.ShowError("Failed to save document", ex.Message);
         }
 
         await Task.CompletedTask;
@@ -1262,6 +1279,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error copying text");
+            _toastService.ShowError("Failed to copy text", ex.Message);
         }
     }
 
@@ -1628,6 +1646,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error applying redaction");
+            _toastService.ShowError("Redaction failed", ex.Message);
         }
         finally
         {
@@ -2169,6 +2188,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
+            // Save document state before closing
+            SaveDocumentState();
+
             // Close the PDF document
             _documentService.CloseDocument();
 
@@ -2863,6 +2885,71 @@ public partial class MainWindowViewModel : ViewModelBase
         else
         {
             _logger.LogWarning("Could not show message dialog: Main window not found. Message was: {Message}", message);
+        }
+    }
+
+    /// <summary>
+    /// Restore document state (zoom level and last page index) from persisted settings.
+    /// Called after a document is successfully loaded.
+    /// </summary>
+    private async Task RestoreDocumentStateAsync(string filePath)
+    {
+        try
+        {
+            var settings = Models.WindowSettings.Load();
+            var docState = settings.DocumentStates.FirstOrDefault(d =>
+                System.IO.Path.GetFullPath(d.FilePath) == System.IO.Path.GetFullPath(filePath));
+
+            if (docState != null)
+            {
+                _logger.LogInformation("Restoring document state: ZoomLevel={Zoom}, LastPageIndex={Page}",
+                    docState.ZoomLevel, docState.LastPageIndex);
+
+                // Restore zoom level
+                if (docState.ZoomLevel > 0 && docState.ZoomLevel <= 5.0) // Reasonable bounds
+                {
+                    _skipZoomSave = true;
+                    ZoomLevel = docState.ZoomLevel;
+                    _zoomFitMode = ZoomFitMode.Manual;
+                    _skipZoomSave = false;
+                    _logger.LogDebug("Zoom restored: {Zoom}", docState.ZoomLevel);
+                }
+
+                // Restore last page index
+                if (docState.LastPageIndex >= 0 && docState.LastPageIndex < TotalPages)
+                {
+                    await GoToPageAsync(docState.LastPageIndex);
+                    _logger.LogDebug("Page restored: {Page}", docState.LastPageIndex);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to restore document state for {FilePath}", filePath);
+            // Don't fail document load if state restoration fails
+        }
+    }
+
+    /// <summary>
+    /// Save document state (zoom level and current page) to persistent settings.
+    /// Called when the document is being closed.
+    /// </summary>
+    private void SaveDocumentState()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_currentFilePath) || !_documentService.IsDocumentLoaded)
+                return;
+
+            var settings = Models.WindowSettings.Load();
+            settings.UpdateDocumentState(_currentFilePath, ZoomLevel, CurrentPageIndex);
+            settings.Save();
+            _logger.LogDebug("Document state saved for {FilePath}: Zoom={Zoom}, Page={Page}",
+                _currentFilePath, ZoomLevel, CurrentPageIndex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save document state");
         }
     }
 

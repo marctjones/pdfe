@@ -20,6 +20,7 @@ public partial class MainWindowViewModel
     private string _searchText = string.Empty;
     private bool _searchCaseSensitive = false;
     private bool _searchWholeWords = false;
+    private bool _searchUseRegex = false;
     private int _currentSearchMatchIndex = -1;
     private ObservableCollection<PdfSearchService.SearchMatch> _searchMatches = new();
     private bool _isSearchVisible = false;
@@ -87,6 +88,16 @@ public partial class MainWindowViewModel
         }
     }
 
+    public bool SearchUseRegex
+    {
+        get => _searchUseRegex;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _searchUseRegex, value);
+            ScheduleSearchDebounced();
+        }
+    }
+
     /// <summary>
     /// Cancel any pending/in-flight search, then schedule a new one
     /// after a short debounce delay. If the user keeps typing, the
@@ -111,6 +122,7 @@ public partial class MainWindowViewModel
         var query = _searchText;
         var caseSensitive = _searchCaseSensitive;
         var wholeWords = _searchWholeWords;
+        var useRegex = _searchUseRegex;
 
         Task.Run(async () =>
         {
@@ -118,7 +130,7 @@ public partial class MainWindowViewModel
             {
                 await Task.Delay(SearchDebounceMs, token).ConfigureAwait(false);
                 if (token.IsCancellationRequested) return;
-                PerformSearch(query, caseSensitive, wholeWords, token);
+                PerformSearch(query, caseSensitive, wholeWords, useRegex, token);
             }
             catch (OperationCanceledException) { /* superseded */ }
         });
@@ -221,7 +233,8 @@ public partial class MainWindowViewModel
         var query = _searchText;
         var caseSensitive = _searchCaseSensitive;
         var wholeWords = _searchWholeWords;
-        Task.Run(() => PerformSearch(query, caseSensitive, wholeWords, token));
+        var useRegex = _searchUseRegex;
+        Task.Run(() => PerformSearch(query, caseSensitive, wholeWords, useRegex, token));
     }
 
     /// <summary>
@@ -257,7 +270,7 @@ public partial class MainWindowViewModel
     /// ~30 s parse cost per keystroke. The token lets a debounce-
     /// superseding query abort us mid-walk.
     /// </summary>
-    private void PerformSearch(string query, bool caseSensitive, bool wholeWords,
+    private void PerformSearch(string query, bool caseSensitive, bool wholeWords, bool useRegex,
         CancellationToken token)
     {
         if (_searchService == null) return;
@@ -268,8 +281,8 @@ public partial class MainWindowViewModel
         try
         {
             _logger.LogInformation(
-                "Searching for '{Query}' (CaseSensitive={CaseSensitive}, WholeWords={WholeWords})",
-                query, caseSensitive, wholeWords);
+                "Searching for '{Query}' (CaseSensitive={CaseSensitive}, WholeWords={WholeWords}, UseRegex={UseRegex})",
+                query, caseSensitive, wholeWords, useRegex);
 
             // Show the spinner + progress text immediately. Both run on
             // the UI thread to avoid cross-thread RaisePropertyChanged.
@@ -301,17 +314,17 @@ public partial class MainWindowViewModel
             if (idx != null && idx.IsReady)
             {
                 matches = _searchService.Search(idx, query, caseSensitive, wholeWords,
-                    useRegex: false, cancellationToken: token, progress: progress);
+                    useRegex: useRegex, cancellationToken: token, progress: progress);
             }
             else if (doc != null)
             {
                 matches = _searchService.Search(doc, query, caseSensitive, wholeWords,
-                    useRegex: false, cancellationToken: token, progress: progress);
+                    useRegex: useRegex, cancellationToken: token, progress: progress);
             }
             else if (!string.IsNullOrEmpty(_currentFilePath))
             {
                 matches = _searchService.Search(_currentFilePath, query,
-                    caseSensitive, wholeWords, useRegex: false, progress: progress);
+                    caseSensitive, wholeWords, useRegex: useRegex, progress: progress);
             }
             else return;
 

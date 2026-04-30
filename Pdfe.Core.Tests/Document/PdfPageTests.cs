@@ -685,6 +685,54 @@ public class PdfPageTests
         text.Should().NotBeEmpty();
     }
 
+    [Fact]
+    public void Text_CacheReturnsSameStringOnSubsequentCalls()
+    {
+        var content = "BT /F1 12 Tf 100 700 Td (Hello World) Tj ET";
+        var pdfData = CreateMinimalPdf(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        var text1 = page.Text;
+        var text2 = page.Text;
+
+        text1.Should().Be(text2);
+        // Both should return the same cached string object (reference equality)
+        text1.Should().BeSameAs(text2);
+    }
+
+    [Fact]
+    public void Letters_CacheReturnsSameListOnSubsequentCalls()
+    {
+        var content = "BT /F1 12 Tf 100 700 Td (Test) Tj ET";
+        var pdfData = CreateMinimalPdf(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        var letters1 = page.Letters;
+        var letters2 = page.Letters;
+
+        letters1.Should().HaveSameCount(letters2);
+        // Both should return the same cached list object
+        letters1.Should().BeSameAs(letters2);
+    }
+
+    [Fact]
+    public void GetWords_CacheReturnsSameListOnSubsequentCalls()
+    {
+        var content = "BT /F1 12 Tf 100 700 Td (Hello World) Tj ET";
+        var pdfData = CreateMinimalPdf(content);
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        var words1 = page.GetWords();
+        var words2 = page.GetWords();
+
+        words1.Should().HaveSameCount(words2);
+        // Both should return the same cached list object
+        words1.Should().BeSameAs(words2);
+    }
+
     /* Disabled - Letter and Word types not yet implemented
     [Fact]
     public void Letters_ReturnsLetterList()

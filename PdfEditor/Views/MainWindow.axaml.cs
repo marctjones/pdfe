@@ -49,6 +49,9 @@ public partial class MainWindow : Window
 
         if (DataContext is MainWindowViewModel viewModel)
         {
+            // Subscribe to toast notifications
+            viewModel.ToastService.ToastRequested += OnToastRequested;
+
             // Subscribe to search highlights collection changes
             viewModel.CurrentPageSearchHighlights.CollectionChanged += OnSearchHighlightsChanged;
 
@@ -307,6 +310,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        // R (unmodified): Toggle redaction mode (B2 keyboard shortcut)
+        if (e.Key == Key.R && !e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
+            !e.KeyModifiers.HasFlag(KeyModifiers.Shift) && !e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            viewModel.ToggleRedactionModeCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+R: Rotate page right
         if (e.Key == Key.R && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
@@ -457,5 +469,54 @@ public partial class MainWindow : Window
 
         // Update ViewModel page index (convert from 1-based to 0-based)
         viewModel.CurrentPageIndex = e.PageNumber - 1;
+    }
+
+    /// <summary>
+    /// Handle toast notifications from the ViewModel.
+    /// Shows an InfoBar notification for 5 seconds, then auto-dismisses.
+    /// </summary>
+    private void OnToastRequested(object? sender, PdfEditor.Services.ToastService.ToastEventArgs e)
+    {
+        try
+        {
+            var infoBar = this.FindControl<FluentAvalonia.UI.Controls.InfoBar>("ToastInfoBar");
+            if (infoBar == null)
+                return;
+
+            // Set severity based on toast severity level
+            infoBar.Severity = e.Severity switch
+            {
+                PdfEditor.Services.ToastService.ToastSeverity.Error => FluentAvalonia.UI.Controls.InfoBarSeverity.Error,
+                PdfEditor.Services.ToastService.ToastSeverity.Warning => FluentAvalonia.UI.Controls.InfoBarSeverity.Warning,
+                PdfEditor.Services.ToastService.ToastSeverity.Success => FluentAvalonia.UI.Controls.InfoBarSeverity.Success,
+                _ => FluentAvalonia.UI.Controls.InfoBarSeverity.Informational
+            };
+
+            // Set message and optional details
+            infoBar.Title = e.Message;
+            infoBar.Message = e.Details ?? string.Empty;
+
+            // Show the InfoBar
+            infoBar.IsOpen = true;
+
+            // Auto-dismiss after 5 seconds
+            var timer = new System.Timers.Timer(5000)
+            {
+                AutoReset = false
+            };
+            timer.Elapsed += (s, args) =>
+            {
+                Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    infoBar.IsOpen = false;
+                    timer.Dispose();
+                });
+            };
+            timer.Start();
+        }
+        catch (Exception ex)
+        {
+            System.Console.WriteLine($"Error displaying toast: {ex.Message}");
+        }
     }
 }

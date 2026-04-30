@@ -22,7 +22,7 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
 
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}">
@@ -155,8 +155,11 @@
             </MenuItem>
         </Menu>
 
+        <!-- Toast Notification InfoBar -->
+        <ui:InfoBar x:Name="ToastInfoBar" Grid.Row="1" IsOpen="False" IsClosable="True" Margin="0"/>
+
         <!-- Modern Title Bar Area -->
-        <Grid Grid.Row="1" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
+        <Grid Grid.Row="2" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
               ColumnDefinitions="Auto,*,Auto">
             <!-- App Icon and Title -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="10,0">
@@ -177,7 +180,7 @@
         </Grid>
 
         <!-- Simplified Toolbar with Grouped Actions -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="3"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1"
@@ -282,14 +285,14 @@
         </Border>
 
         <!-- Search Bar -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,6"
                 IsVisible="{Binding IsSearchVisible}">
           <StackPanel Orientation="Vertical" Spacing="4">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <!-- Search Label -->
                 <TextBlock Grid.Column="0" Text="Find:"
                            VerticalAlignment="Center"
@@ -333,8 +336,15 @@
                           Content="Whole words"
                           Margin="0,0,8,0"/>
 
+                <!-- Regex Checkbox -->
+                <CheckBox Grid.Column="5"
+                          IsChecked="{Binding SearchUseRegex}"
+                          Content="Regex"
+                          Margin="0,0,8,0"
+                          ToolTip.Tip="Use regular expression pattern matching"/>
+
                 <!-- Previous Button -->
-                <Button Grid.Column="5"
+                <Button Grid.Column="6"
                         Content="◀"
                         Command="{Binding FindPreviousCommand}"
                         Classes="modern-button compact"
@@ -344,7 +354,7 @@
                         AutomationProperties.HelpText="Navigate to previous search result"/>
 
                 <!-- Next Button -->
-                <Button Grid.Column="6"
+                <Button Grid.Column="7"
                         Content="▶"
                         Command="{Binding FindNextCommand}"
                         Classes="modern-button compact"
@@ -354,7 +364,7 @@
                         AutomationProperties.HelpText="Navigate to next search result"/>
 
                 <!-- Result Counter -->
-                <TextBlock Grid.Column="7"
+                <TextBlock Grid.Column="8"
                            Text="{Binding SearchResultText}"
                            VerticalAlignment="Center"
                            FontSize="12"
@@ -363,7 +373,7 @@
                            MinWidth="80"/>
 
                 <!-- Close Button -->
-                <Button Grid.Column="8"
+                <Button Grid.Column="9"
                         Content="✕"
                         Command="{Binding CloseSearchCommand}"
                         Classes="modern-button compact"
@@ -400,7 +410,7 @@
              so toggling Show Thumbnails / Show Clipboard History gives the
              central pane the freed space rather than just blanking the
              column. -->
-        <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto">
+        <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto">
 
             <!-- Thumbnail Sidebar — split into Outline (top) + Thumbnails (bottom).
                  The outline pane only takes screen space when the document
@@ -827,7 +837,7 @@
         </Grid>
 
         <!-- Status Bar -->
-        <Border Grid.Row="5"
+        <Border Grid.Row="6"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0"
