@@ -19,6 +19,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="PdfEditor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Avalonia UI Framework (MIT License) -->
     <PackageReference Include="Avalonia" Version="11.2.5" />
     <PackageReference Include="Avalonia.Desktop" Version="11.2.5" />

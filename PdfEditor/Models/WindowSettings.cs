@@ -58,6 +58,17 @@ public class WindowSettings
                 var settings = JsonSerializer.Deserialize<WindowSettings>(json);
                 if (settings != null)
                 {
+                    // Drop document states whose file is gone. A stale entry
+                    // pointing at a deleted /tmp/... fixture from an earlier
+                    // test run could otherwise drive the GUI's
+                    // restore/recent-file logic into a hot loop the next time
+                    // the user launches.
+                    if (settings.DocumentStates.Count > 0)
+                    {
+                        settings.DocumentStates.RemoveAll(d =>
+                            string.IsNullOrEmpty(d.FilePath) ||
+                            !File.Exists(d.FilePath));
+                    }
                     return settings;
                 }
             }

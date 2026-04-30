@@ -105,6 +105,16 @@ public static class AppPaths
     /// </summary>
     public static string PreferencesPath => Path.Combine(ConfigDir, "preferences.json");
 
+    /// <summary>
+    /// Test-only: resolve each storage directory ignoring both the cache and
+    /// the OverrideForTests redirection. Lets AppPathsTests verify the real
+    /// XDG / platform-specific resolution logic without disturbing the
+    /// assembly-wide test isolation (which other tests need).
+    /// </summary>
+    internal static string ResolveConfigDirFresh() => GetConfigDirectory();
+    internal static string ResolveDataDirFresh()   => GetDataDirectory();
+    internal static string ResolveCacheDirFresh()  => GetCacheDirectory();
+
     private static string GetConfigDirectory()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -213,5 +223,30 @@ public static class AppPaths
         _configDir = null;
         _dataDir = null;
         _cacheDir = null;
+        _overrideRoot = null;
+    }
+
+    private static string? _overrideRoot;
+
+    /// <summary>
+    /// Test-only: redirect every directory under a single root.
+    /// Subsequent ConfigDir/DataDir/CacheDir reads return
+    /// {root}/Config/PdfEditor, {root}/Data/PdfEditor, {root}/Cache/PdfEditor
+    /// respectively. The trailing "PdfEditor" segment matches the production
+    /// path shape so existing AppPaths tests that assert EndWith("PdfEditor")
+    /// continue to pass under isolation.
+    /// </summary>
+    internal static void OverrideForTests(string? root)
+    {
+        _overrideRoot = root;
+        _configDir = root != null ? EnsureExists(Path.Combine(root, "Config", AppName)) : null;
+        _dataDir   = root != null ? EnsureExists(Path.Combine(root, "Data",   AppName)) : null;
+        _cacheDir  = root != null ? EnsureExists(Path.Combine(root, "Cache",  AppName)) : null;
+    }
+
+    private static string EnsureExists(string dir)
+    {
+        EnsureDirectoryExists(dir);
+        return dir;
     }
 }
