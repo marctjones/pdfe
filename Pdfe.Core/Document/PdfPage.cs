@@ -233,6 +233,14 @@ public class PdfPage
     /// </summary>
     public void SetContentStreamBytes(byte[] data)
     {
+        // Any cached extraction (Letters/Text/Words from A4) is now stale —
+        // the content has changed underneath it. Multi-match redaction relies
+        // on the second RedactArea call seeing freshly-extracted letters that
+        // reflect the first redaction's deletions.
+        _cachedLetters = null;
+        _cachedText = null;
+        _cachedWords = null;
+
         var contentsObj = _pageDict.GetOptional("Contents");
 
         if (contentsObj == null)

@@ -26,11 +26,13 @@ public class SearchPerformanceTests
     public SearchPerformanceTests(ITestOutputHelper o) { _out = o; }
 
     /// <summary>
-    /// Perf test for parallel search using a synthetic multi-page PDF.
-    /// Creates a 50-page PDF with common terms to verify parallel search works.
+    /// Perf test for sequential search using a synthetic multi-page PDF.
+    /// Creates a 50-page PDF with common terms to verify search completes in reasonable time.
+    /// Note: synthetic PDF generator creates content without proper positioning info,
+    /// so bounding boxes may not be ordered; this test focuses on performance and match counts.
     /// </summary>
-    [Fact(Skip = "Synthetic PDF generator interaction with parallel search needs reconciliation; isolated issue post-A1.")]
-    public void ParallelSearch_OnSyntheticDoc_CompletesInReasonableTime()
+    [Fact(Skip = "Synthetic PDF generator doesn't provide proper positioning; bounding boxes aren't ordered. Real PDFs tested via RealWorldSearchTests.")]
+    public void Search_OnSyntheticDoc_CompletesInReasonableTime()
     {
         // Create a synthetic multi-page PDF for testing
         var syntheticPdf = CreateSyntheticMultiPagePdf(50);
@@ -51,8 +53,8 @@ public class SearchPerformanceTests
             var results = service.Search(tempPath, searchTerm);
             sw.Stop();
 
-            var parallelMs = sw.ElapsedMilliseconds;
-            _out.WriteLine($"Parallel search (50 pages): {parallelMs}ms, found {results.Count} matches");
+            var searchMs = sw.ElapsedMilliseconds;
+            _out.WriteLine($"Sequential search (50 pages): {searchMs}ms, found {results.Count} matches");
 
             // Verify deterministic ordering (critical for UI consistency)
             // Results must be sorted by (PageIndex, Y, X) for consistent UI display
@@ -63,9 +65,9 @@ public class SearchPerformanceTests
             orderedCorrectly.Should().BeTrue(
                 "search results must be sorted by (PageIndex, Y, X) for UI consistency");
 
-            // Performance assertion: parallel search should complete in reasonable time
+            // Performance assertion: sequential search should complete in reasonable time
             // (loose threshold to avoid flakiness on slow test agents)
-            parallelMs.Should().BeLessThan(30000,
+            searchMs.Should().BeLessThan(60000,
                 "50-page synthetic search should complete in reasonable time");
 
             // Should find multiple matches across pages

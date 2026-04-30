@@ -557,6 +557,33 @@ public partial class MainWindowViewModel : ViewModelBase
         ? "No document open"
         : System.IO.Path.GetFileName(_currentFilePath);
 
+    /// <summary>
+    /// Gets the text content of the currently displayed page via the text extraction service.
+    /// Returns empty string if no document is loaded or extraction fails.
+    /// Used for testing: verifies that redacted text has been removed from the PDF structure.
+    /// </summary>
+    public string CurrentPageText
+    {
+        get
+        {
+            if (_pdfCoreDocument == null || _currentPageIndex < 0 || _currentPageIndex >= TotalPages)
+                return string.Empty;
+
+            try
+            {
+                // Use the current page from the Pdfe.Core document to extract text
+                var page = _pdfCoreDocument.GetPage(_currentPageIndex + 1);
+                var text = _textExtractionService.ExtractTextFromPage(_currentFilePath, _currentPageIndex);
+                return text ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract text from page {PageIndex}", _currentPageIndex);
+                return string.Empty;
+            }
+        }
+    }
+
     public bool IsRedactionMode
     {
         get => _isRedactionMode;

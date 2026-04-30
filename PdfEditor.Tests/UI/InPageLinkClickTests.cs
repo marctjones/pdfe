@@ -35,7 +35,7 @@ public class InPageLinkClickTests
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
     private const double RenderDpi = 120.0;
 
-    [AvaloniaFact(Skip = "Pre-existing flake under parallel test load; passes in isolation. Tracked separately.")]
+    [AvaloniaFact]
     public async Task ClickOnTocLink_NavigatesToDestinationPage()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -52,7 +52,8 @@ public class InPageLinkClickTests
         // concurrent GetLinks() call here would race the lexer.
         // OperationStatus carries an "Indexing for search…" label while
         // the build runs and clears once done.
-        var indexDeadline = DateTime.UtcNow.AddSeconds(60);
+        // Under parallel test load, indexing can take longer, so use a generous timeout.
+        var indexDeadline = DateTime.UtcNow.AddSeconds(120);
         while (DateTime.UtcNow < indexDeadline &&
                (vm.OperationStatus?.StartsWith("Indexing") ?? false))
             await Task.Delay(200);
