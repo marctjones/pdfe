@@ -372,7 +372,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Down arrow: Advance to next page (when not in a text control).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000, Skip = "Menu InputGesture not routed to test KeyDown without focused control; tracked separately")]
+    [AvaloniaFact(Timeout = 3000, Skip = "Arrow keys in Avalonia.Headless tests do not route through window KeyDown handler; PageDown/PageUp work as alternative")]
     public async Task DownArrow_AdvancesToNextPage()
     {
         // Arrange
@@ -398,7 +398,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Up arrow: Return to previous page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000, Skip = "Menu InputGesture not routed to test KeyDown without focused control; tracked separately")]
+    [AvaloniaFact(Timeout = 3000, Skip = "Arrow keys in Avalonia.Headless tests do not route through window KeyDown handler; PageUp works as alternative")]
     public async Task UpArrow_ReturnsToPreviousPage()
     {
         // Arrange
@@ -697,7 +697,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// T: Toggle text selection mode.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000, Skip = "Menu InputGesture not routed to test KeyDown without focused control; tracked separately")]
+    [AvaloniaFact(Timeout = 3000)]
     public async Task T_ToggleTextSelectionMode()
     {
         // Arrange
@@ -797,7 +797,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Compound: Ctrl+F → type text → Enter → verify search progresses.
     /// </summary>
-    [AvaloniaFact(Timeout = 5000, Skip = "Depends on Ctrl+F focusing search box, which routes through menu InputGesture; tracked separately")]
+    [AvaloniaFact(Timeout = 5000, Skip = "Depends on search textbox receiving focus/input correctly in headless tests")]
     public async Task CompoundFlow_SearchWorkflow()
     {
         // Arrange

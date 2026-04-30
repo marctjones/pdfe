@@ -59,7 +59,7 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
             "page 3 contains 'Open Source' multiple times");
     }
 
-    [Fact(Skip = "Match count regressed after A1 parallelization; tracked alongside other A1 follow-ups.")]
+    [Fact]
     public void PragmaticBook_Search_FindsCommonWord()
     {
         if (!_pragmaticFixture.IsAvailable) return;
@@ -83,7 +83,7 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
             "every match needs a real bounding box for highlight rendering");
     }
 
-    [Fact(Skip = "Case-sensitive search counts differ between live and parallel paths post-A1; tracked.")]
+    [Fact]
     public void PragmaticBook_Search_CaseSensitiveDistinguishesCases()
     {
         if (!_pragmaticFixture.IsAvailable) return;
@@ -119,7 +119,7 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
             "so the count should exceed the whole-word count");
     }
 
-    [Fact(Skip = "Parallel search (A1) changed page-coverage semantics; matches concentrate on later pages of the corpus instead of being uniformly distributed. Tracked for follow-up — likely a chunk-ordering issue.")]
+    [Fact]
     public void PragmaticBook_Search_BoundingBoxesAreInPdfPoints()
     {
         // The match coordinates should be plausible PDF-point values for the

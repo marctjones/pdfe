@@ -367,6 +367,20 @@ public partial class MainWindow : Window
             return;
         }
 
+        // T (unmodified): Toggle text selection mode
+        if (e.Key == Key.T && !e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
+            !e.KeyModifiers.HasFlag(KeyModifiers.Shift) && !e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            // Skip if TextBox is focused (e.g., search box)
+            var focusedElement = FocusManager.GetFocusedElement();
+            if (focusedElement is TextBox)
+                return;
+
+            viewModel.ToggleTextSelectionModeCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
         // Page Down / Down Arrow: Next page
         if (e.Key == Key.PageDown || (e.Key == Key.Down && !e.KeyModifiers.HasFlag(KeyModifiers.Control)))
         {
