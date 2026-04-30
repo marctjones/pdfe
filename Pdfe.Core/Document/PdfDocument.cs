@@ -19,6 +19,11 @@ public class PdfDocument : IDisposable
     private readonly StreamDecompressor _decompressor;
     private readonly Pdfe.Core.Security.PdfStandardSecurityHandler? _securityHandler;
     private PageCollection? _pages;
+    private IReadOnlyList<PdfOcg>? _ocgs;
+    private PdfOcgConfig? _ocgConfig;
+    private PdfStructElement? _structureTree;
+    private bool? _isTaggedPdf;
+    private IReadOnlyList<PdfEmbeddedFile>? _embeddedFiles;
 
     /// <summary>
     /// The trailer dictionary.
@@ -85,6 +90,62 @@ public class PdfDocument : IDisposable
         {
             _pages ??= new PageCollection(this);
             return _pages;
+        }
+    }
+
+    /// <summary>
+    /// Get the list of Optional Content Groups (OCGs/layers) in this document.
+    /// Returns an empty list if the document has no optional content.
+    /// Cached after first call.
+    /// </summary>
+    public IReadOnlyList<PdfOcg> GetOptionalContentGroups()
+    {
+        _ocgs ??= PdfOcgParser.ParseOptionalContentGroups(this).ocgs;
+        return _ocgs;
+    }
+
+    /// <summary>
+    /// Get the Optional Content Groups configuration (visibility defaults, intent, etc).
+    /// Returns a config with empty OCG list if the document has no optional content.
+    /// Cached after first call.
+    /// </summary>
+    public PdfOcgConfig GetOptionalContentGroupConfig()
+    {
+        if (_ocgConfig == null)
+        {
+            (_ocgs, _ocgConfig) = PdfOcgParser.ParseOptionalContentGroups(this);
+        }
+        return _ocgConfig!;
+    }
+
+    /// <summary>
+    /// Get the root element of the document's structure tree (tagged PDF).
+    /// Returns null if the document has no /StructTreeRoot.
+    /// Cached after first call.
+    /// </summary>
+    public PdfStructElement? GetStructureTree()
+    {
+        _structureTree ??= PdfStructTreeParser.ParseStructureTree(this) ?? null;
+        return _structureTree;
+    }
+
+    /// <summary>
+    /// Check if this is a tagged PDF (has /MarkInfo/Marked = true).
+    /// Tagged PDFs have a structure tree that associates content with semantic roles.
+    /// </summary>
+    public bool IsTaggedPdf
+    {
+        get
+        {
+            if (!_isTaggedPdf.HasValue)
+            {
+                var markInfo = Catalog.GetOptional("MarkInfo");
+                var markInfoDict = markInfo != null ? (Resolve(markInfo) as PdfDictionary) : null;
+                var markedObj = markInfoDict?.GetOptional("Marked");
+                _isTaggedPdf = (markedObj is PdfName name && name.Value == "true") ||
+                               (markedObj is PdfBoolean bool_ && bool_.Value);
+            }
+            return _isTaggedPdf.Value;
         }
     }
 
@@ -610,6 +671,67 @@ public class PdfDocument : IDisposable
     }
 
     /// <summary>
+    /// Check whether this document has embedded files (PDF 2.0 portfolios / associated files).
+    /// Returns true if /Catalog/Names/EmbeddedFiles or legacy /Catalog/AF are present.
+    /// </summary>
+    public bool HasEmbeddedFiles
+    {
+        get
+        {
+            var namesObj = Catalog.GetOptional("Names");
+            if (namesObj != null && Resolve(namesObj) is PdfDictionary namesDict)
+                if (namesDict.GetOptional("EmbeddedFiles") != null)
+                    return true;
+
+            if (Catalog.GetOptional("AF") != null)
+                return true;
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get the list of embedded files in this document.
+    /// Returns an empty list if the document has no embedded files.
+    /// Walks /Catalog/Names/EmbeddedFiles (PDF 2.0 name tree) and falls back to
+    /// legacy /Catalog/Names/AF and /Catalog/AF arrays per PDF 2.0 §7.7.4.
+    /// Cached after first call.
+    /// </summary>
+    public IReadOnlyList<PdfEmbeddedFile> GetEmbeddedFiles()
+    {
+        _embeddedFiles ??= PdfEmbeddedFileParser.ParseEmbeddedFiles(this);
+        return _embeddedFiles;
+    }
+
+    /// <summary>
+    /// Remove all embedded files from this document.
+    /// Removes the /Catalog/Names/EmbeddedFiles entry and /Catalog/AF arrays if present.
+    /// The embedded-file stream objects remain in the file until the next save rewrites
+    /// the xref; they become unreferenced and the writer drops them.
+    /// This operation is idempotent (safe to call multiple times).
+    ///
+    /// This is critical for redaction security when dealing with hybrid documents like
+    /// ZUGFeRD e-invoices (bundled XML) or legal exhibit packages (source documents).
+    /// After content-level redaction removes glyphs from the visible pages, ScrubEmbeddedFiles
+    /// ensures the data is not also present in the attachment tree.
+    ///
+    /// The change is applied to the in-memory document; call Save afterwards to persist.
+    /// </summary>
+    public void ScrubEmbeddedFiles()
+    {
+        // Clear the cache so subsequent calls will see the updated state
+        _embeddedFiles = null;
+
+        // Remove modern PDF 2.0: /Catalog/Names/EmbeddedFiles
+        var namesObj = Catalog.GetOptional("Names");
+        if (namesObj != null && Resolve(namesObj) is PdfDictionary namesDict)
+            namesDict.Remove("EmbeddedFiles");
+
+        // Remove legacy: /Catalog/AF
+        Catalog.Remove("AF");
+    }
+
+    /// <summary>
     /// Get the raw XMP metadata stream bytes, or null if the document has no
     /// /Metadata entry on the catalog. The bytes are the decoded XMP RDF/XML
     /// body. PDF spec §14.3.2 / XMP spec part 1 §7.6.
@@ -624,19 +746,23 @@ public class PdfDocument : IDisposable
     }
 
     /// <summary>
-    /// Remove all document-level metadata. Clears the Info dictionary keys
-    /// (/Title /Author /Subject /Keywords /Creator /Producer /CreationDate
-    /// /ModDate) and removes the Catalog's /Metadata stream.
+    /// Remove all document-level metadata and optionally embedded files.
+    /// Clears the Info dictionary keys (/Title /Author /Subject /Keywords /Creator
+    /// /Producer /CreationDate /ModDate), removes the Catalog's /Metadata stream,
+    /// and optionally scrubs embedded files (portfolios, associated files).
     ///
     /// This is critical for redaction: even after content-level redaction
-    /// removes glyphs from the page body, the title and author of the
-    /// document still surface the redacted phrase to anyone viewing the
-    /// file's properties or running pdfinfo.
+    /// removes glyphs from the page body, the title, author, and attachments
+    /// of the document still surface the redacted data to anyone viewing the
+    /// file's properties, running pdfinfo, or extracting attachments.
     ///
     /// The change is applied to the in-memory document; call Save afterwards
     /// to persist.
+    ///
+    /// <param name="scrubAttachments">If true (default), also calls ScrubEmbeddedFiles
+    /// to remove embedded files. For backwards compatibility, defaults to true.</param>
     /// </summary>
-    public void ScrubMetadata()
+    public void ScrubMetadata(bool scrubAttachments = true)
     {
         // Wipe the legacy Info dictionary in place — keep the dict so xref
         // structure is preserved, just empty it.
@@ -650,6 +776,10 @@ public class PdfDocument : IDisposable
         // remains in the file until the next save rewrites the xref; the
         // catalog no longer points at it.
         Catalog.Remove("Metadata");
+
+        // Optionally scrub embedded files (portfolios, associated files).
+        if (scrubAttachments)
+            ScrubEmbeddedFiles();
     }
 
     /// <summary>

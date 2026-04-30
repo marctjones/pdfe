@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Pdfe.Core.Tests" />
+    <InternalsVisibleTo Include="Pdfe.Rendering" />
   </ItemGroup>
 
 </Project>
