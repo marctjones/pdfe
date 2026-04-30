@@ -13,6 +13,9 @@ public class PdfPage
     private readonly PdfDocument _document;
     private readonly PdfDictionary _pageDict;
     private PdfGraphics? _graphics;
+    private IReadOnlyList<Letter>? _cachedLetters;
+    private string? _cachedText;
+    private IReadOnlyList<Word>? _cachedWords;
 
     /// <summary>
     /// The 1-based page number.
@@ -41,37 +44,93 @@ public class PdfPage
 
     /// <summary>
     /// Get the extracted text content from the page.
+    /// Cached on first access; subsequent calls return the cached result.
     /// </summary>
     public string Text
     {
         get
         {
+            if (_cachedText != null)
+                return _cachedText;
+
             var extractor = new TextExtractor(this);
-            return extractor.ExtractText();
+            _cachedText = extractor.ExtractText();
+            return _cachedText;
         }
     }
 
     /// <summary>
     /// Get all letters extracted from the page with position information.
+    /// Cached on first access; subsequent calls return the cached result.
     /// </summary>
     public IReadOnlyList<Letter> Letters
     {
         get
         {
+            if (_cachedLetters != null)
+                return _cachedLetters;
+
             var extractor = new TextExtractor(this);
-            return extractor.ExtractLetters();
+            _cachedLetters = extractor.ExtractLetters();
+            return _cachedLetters;
         }
     }
 
     /// <summary>
     /// Get all words extracted from the page.
     /// A word is a sequence of letters separated by whitespace.
+    /// Cached on first access; subsequent calls return the cached result.
     /// </summary>
     /// <returns>List of words with their letters and bounding boxes.</returns>
     public IReadOnlyList<Word> GetWords()
     {
+        if (_cachedWords != null)
+            return _cachedWords;
+
         var extractor = new TextExtractor(this);
-        return extractor.ExtractWords();
+        _cachedWords = extractor.ExtractWords();
+        return _cachedWords;
+    }
+
+    /// <summary>
+    /// All annotations on this page (§12.5).
+    /// Covers every subtype: Text, Link, Highlight, Widget, Stamp, Ink, etc.
+    /// </summary>
+    public IReadOnlyList<PdfAnnotation> GetAnnotations()
+    {
+        var pageMap    = PdfOutlineParser.BuildPageRefMap(_document);
+        var namedDests = PdfOutlineParser.BuildNamedDestinations(_document);
+        return PdfAnnotationParser.Parse(_document, _pageDict, pageMap, namedDests);
+    }
+
+    /// <summary>
+    /// AcroForm fields whose Widget annotation lives on this page (§12.7).
+    /// Returns the document-wide AcroForm filtered to this page; returns an
+    /// empty list when the document has no /AcroForm dictionary or none of
+    /// its widgets reference this page.
+    /// </summary>
+    public IReadOnlyList<PdfField> GetFormFields()
+    {
+        var form = _document.GetAcroForm();
+        if (form == null) return Array.Empty<PdfField>();
+        var pageNum = PageNumber;
+        return form.Fields.Where(f => f.PageNumber == pageNum).ToList();
+    }
+
+    /// <summary>
+    /// Internal-document link annotations on this page (PDF spec §12.5.6.5).
+    /// External / URI links are filtered out; what's returned is only the
+    /// kind of link a clickable table-of-contents or back-of-book index
+    /// produces — pointers to other pages in this document.
+    /// </summary>
+    public IReadOnlyList<PdfLink> GetLinks()
+    {
+        // Build the page-ref map and named-dest map fresh per call.
+        // Callers that want them across many pages should use the static
+        // PdfLinkParser.Parse with shared maps to avoid the redundant work.
+        var pageMap = PdfOutlineParser.BuildPageRefMap(_document);
+        var namedDests = PdfOutlineParser.BuildNamedDestinations(_document);
+        return PdfLinkParser.Parse(_document, _pageDict, pageMap, namedDests);
     }
 
     /// <summary>
@@ -174,6 +233,14 @@ public class PdfPage
     /// </summary>
     public void SetContentStreamBytes(byte[] data)
     {
+        // Any cached extraction (Letters/Text/Words from A4) is now stale —
+        // the content has changed underneath it. Multi-match redaction relies
+        // on the second RedactArea call seeing freshly-extracted letters that
+        // reflect the first redaction's deletions.
+        _cachedLetters = null;
+        _cachedText = null;
+        _cachedWords = null;
+
         var contentsObj = _pageDict.GetOptional("Contents");
 
         if (contentsObj == null)
@@ -379,6 +446,20 @@ public class PdfPage
 
         var obj = shadings.GetOptional(name);
         return obj != null ? _document.Resolve(obj) as PdfDictionary : null;
+    }
+
+    /// <summary>
+    /// Get a color space object from the page resources.
+    /// Returns the raw PdfObject (name or array) for parsing into PdfColorSpace.
+    /// </summary>
+    public PdfObject? GetColorSpaceObject(string name)
+    {
+        var colorSpaces = Resources?.GetDictionaryOrNull("ColorSpace");
+        if (colorSpaces == null)
+            return null;
+
+        var obj = colorSpaces.GetOptional(name);
+        return obj != null ? _document.Resolve(obj) : null;
     }
 
     #region Inherited Properties

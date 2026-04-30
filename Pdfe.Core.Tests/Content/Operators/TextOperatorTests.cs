@@ -236,6 +236,20 @@ public class TextOperatorTests
         trOp.GetNumber(0).Should().Be(mode, because: description);
     }
 
+    [Fact]
+    public void Parse_Tr_InvisibleMode3_BoundingBoxStillGenerated()
+    {
+        // Render mode 3 = invisible text, but bounding boxes must still be
+        // computed — text extraction and redaction need glyph positions
+        // regardless of whether the text is visually rendered.
+        var content = "BT /F1 12 Tf 100 100 Td 3 Tr (hidden) Tj ET";
+        var result = new ContentStreamParser(Encoding.UTF8.GetBytes(content)).Parse();
+
+        var tj = result.Operators.Single(op => op.Name == "Tj");
+        tj.BoundingBox.Should().NotBeNull(
+            "invisible text (Tr=3) still requires a bounding box for extraction/redaction");
+    }
+
     #endregion
 
     #region Ts - Text Rise
@@ -264,6 +278,28 @@ public class TextOperatorTests
 
         var tsOp = result.Operators.First(op => op.Name == "Ts");
         tsOp.GetNumber(0).Should().Be(-3);
+    }
+
+    [Fact]
+    public void Parse_Ts_PositiveRise_OffsetsBoundingBoxUp()
+    {
+        // Baseline text at (100, 100); superscript with Ts=5 should have
+        // a higher Y-origin than the baseline text.
+        var baseline  = "BT /F1 12 Tf 100 100 Td (A) Tj ET";
+        var risen     = "BT /F1 12 Tf 100 100 Td 5 Ts (A) Tj ET";
+
+        var baseResult  = new ContentStreamParser(Encoding.UTF8.GetBytes(baseline)).Parse();
+        var risenResult = new ContentStreamParser(Encoding.UTF8.GetBytes(risen)).Parse();
+
+        var baseTj  = baseResult.Operators.First(op => op.Name == "Tj");
+        var risenTj = risenResult.Operators.First(op => op.Name == "Tj");
+
+        baseTj.BoundingBox.Should().NotBeNull();
+        risenTj.BoundingBox.Should().NotBeNull();
+
+        risenTj.BoundingBox!.Value.Bottom.Should()
+            .BeGreaterThan(baseTj.BoundingBox!.Value.Bottom,
+                "text rise of +5 should shift the glyph baseline upward");
     }
 
     #endregion

@@ -22,7 +22,7 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
 
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}">
@@ -97,7 +97,9 @@
                     <MenuItem.Icon><TextBlock Text="⬛" Foreground="Red"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="_View Clipboard History">
+                <MenuItem Header="_View Clipboard History"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsClipboardSidebarVisible, Mode=TwoWay}">
                     <MenuItem.Icon><TextBlock Text="📋"/></MenuItem.Icon>
                 </MenuItem>
             </MenuItem>
@@ -133,16 +135,15 @@
                 <MenuItem Header="Fit _Width" Command="{Binding ZoomFitWidthCommand}" InputGesture="Ctrl+1"/>
                 <MenuItem Header="Fit _Page" Command="{Binding ZoomFitPageCommand}" InputGesture="Ctrl+2"/>
                 <Separator/>
-                <MenuItem Header="Show _Thumbnails">
-                    <MenuItem.Icon>
-                        <TextBlock Text="✓"/>
-                    </MenuItem.Icon>
-                </MenuItem>
-                <MenuItem Header="Show _Clipboard History">
-                    <MenuItem.Icon>
-                        <TextBlock Text="✓"/>
-                    </MenuItem.Icon>
-                </MenuItem>
+                <MenuItem Header="Show _Outline"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsOutlineSidebarVisible, Mode=TwoWay}"/>
+                <MenuItem Header="Show _Thumbnails"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsThumbnailsSidebarVisible, Mode=TwoWay}"/>
+                <MenuItem Header="Show _Clipboard History"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsClipboardSidebarVisible, Mode=TwoWay}"/>
             </MenuItem>
 
             <!-- HELP MENU -->
@@ -154,8 +155,11 @@
             </MenuItem>
         </Menu>
 
+        <!-- Toast Notification InfoBar -->
+        <ui:InfoBar x:Name="ToastInfoBar" Grid.Row="1" IsOpen="False" IsClosable="True" Margin="0"/>
+
         <!-- Modern Title Bar Area -->
-        <Grid Grid.Row="1" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
+        <Grid Grid.Row="2" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
               ColumnDefinitions="Auto,*,Auto">
             <!-- App Icon and Title -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="10,0">
@@ -176,7 +180,7 @@
         </Grid>
 
         <!-- Simplified Toolbar with Grouped Actions -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="3"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1"
@@ -224,6 +228,34 @@
                             ToolTip.Tip="Apply Redaction (Enter)"
                             AutomationProperties.Name="Apply Redaction"
                             AutomationProperties.HelpText="Apply the current redaction selection"/>
+
+                    <Border Width="1" Height="24" Margin="6,0"
+                            Background="{DynamicResource DividerBrush}"/>
+
+                    <!-- Form Authoring -->
+                    <Button Content="📋 Add Field" Command="{Binding ToggleFormAuthoringModeCommand}"
+                            Classes="modern-button toggle"
+                            Classes.active="{Binding IsFormAuthoringMode}"
+                            Padding="12,6"
+                            ToolTip.Tip="Form Authoring Mode — drag to define a new field"
+                            AutomationProperties.Name="Form Authoring Mode"/>
+
+                    <ComboBox SelectedIndex="0"
+                              IsVisible="{Binding IsFormAuthoringMode}"
+                              SelectionChanged="OnFormFieldTypeChanged"
+                              ToolTip.Tip="Field type for the next drag"
+                              MinWidth="100" Margin="4,0">
+                        <ComboBoxItem Content="Text"/>
+                        <ComboBoxItem Content="Checkbox"/>
+                        <ComboBoxItem Content="Choice"/>
+                        <ComboBoxItem Content="Signature"/>
+                    </ComboBox>
+
+                    <Button Content="🪄 Auto-detect" Command="{Binding AutoDetectFieldsCommand}"
+                            Classes="modern-button"
+                            Padding="12,6"
+                            ToolTip.Tip="Heuristically add form fields where the page has underline placeholders or empty squares"
+                            AutomationProperties.Name="Auto-detect Form Fields"/>
 
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
@@ -281,13 +313,14 @@
         </Border>
 
         <!-- Search Bar -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,6"
                 IsVisible="{Binding IsSearchVisible}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
+          <StackPanel Orientation="Vertical" Spacing="4">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <!-- Search Label -->
                 <TextBlock Grid.Column="0" Text="Find:"
                            VerticalAlignment="Center"
@@ -295,51 +328,71 @@
                            FontSize="12"
                            Foreground="{DynamicResource TextSecondaryBrush}"/>
 
-                <!-- Search TextBox -->
-                <TextBox Grid.Column="1"
-                         Text="{Binding SearchText}"
-                         Watermark="Search text..."
+                <!-- Search TextBox. KeyDown is wired in code-behind so
+                     Enter triggers search immediately (in addition to
+                     the type-and-pause debounce). -->
+                <TextBox x:Name="SearchTextBox"
+                         Grid.Column="1"
+                         Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Watermark="Search text… (auto-searches as you type, or press Enter)"
                          MinWidth="300"
                          Margin="0,0,8,0"
+                         KeyDown="OnSearchTextBoxKeyDown"
                          AutomationProperties.Name="Search Text"
                          AutomationProperties.HelpText="Enter text to search for in the document"/>
 
+                <!-- Find button — manual fallback if auto-search isn't
+                     obvious to the user. -->
+                <Button Grid.Column="2"
+                        Content="Find"
+                        Command="{Binding FindCommand}"
+                        Classes="modern-button compact"
+                        Padding="12,4"
+                        Margin="0,0,8,0"
+                        AutomationProperties.Name="Find"
+                        AutomationProperties.HelpText="Search the document for the entered text"/>
+
                 <!-- Case Sensitive Checkbox -->
-                <CheckBox Grid.Column="2"
+                <CheckBox Grid.Column="3"
                           IsChecked="{Binding SearchCaseSensitive}"
                           Content="Case sensitive"
                           Margin="0,0,8,0"/>
 
                 <!-- Whole Words Checkbox -->
-                <CheckBox Grid.Column="3"
+                <CheckBox Grid.Column="4"
                           IsChecked="{Binding SearchWholeWords}"
                           Content="Whole words"
                           Margin="0,0,8,0"/>
 
+                <!-- Regex Checkbox -->
+                <CheckBox Grid.Column="5"
+                          IsChecked="{Binding SearchUseRegex}"
+                          Content="Regex"
+                          Margin="0,0,8,0"
+                          ToolTip.Tip="Use regular expression pattern matching"/>
+
                 <!-- Previous Button -->
-                <Button Grid.Column="4"
+                <Button Grid.Column="6"
                         Content="◀"
                         Command="{Binding FindPreviousCommand}"
                         Classes="modern-button compact"
                         Padding="8,4"
                         Margin="0,0,4,0"
-                        ToolTip.Tip="Previous (Shift+F3)"
                         AutomationProperties.Name="Find Previous"
                         AutomationProperties.HelpText="Navigate to previous search result"/>
 
                 <!-- Next Button -->
-                <Button Grid.Column="5"
+                <Button Grid.Column="7"
                         Content="▶"
                         Command="{Binding FindNextCommand}"
                         Classes="modern-button compact"
                         Padding="8,4"
                         Margin="0,0,8,0"
-                        ToolTip.Tip="Next (F3)"
                         AutomationProperties.Name="Find Next"
                         AutomationProperties.HelpText="Navigate to next search result"/>
 
                 <!-- Result Counter -->
-                <TextBlock Grid.Column="6"
+                <TextBlock Grid.Column="8"
                            Text="{Binding SearchResultText}"
                            VerticalAlignment="Center"
                            FontSize="12"
@@ -348,24 +401,123 @@
                            MinWidth="80"/>
 
                 <!-- Close Button -->
-                <Button Grid.Column="7"
+                <Button Grid.Column="9"
                         Content="✕"
                         Command="{Binding CloseSearchCommand}"
                         Classes="modern-button compact"
                         Padding="8,4"
-                        ToolTip.Tip="Close (Esc)"/>
+                        AutomationProperties.Name="Close Search"
+                        AutomationProperties.HelpText="Close the find bar"/>
             </Grid>
+
+            <!-- Inline search progress: indeterminate bar + page-progress
+                 text. Both visible only while a search is actively running.
+                 The "X of Y matches" final-state count stays in
+                 SearchResultText so this row vanishes when the search
+                 completes. -->
+            <Grid ColumnDefinitions="*,Auto"
+                  IsVisible="{Binding IsSearching}"
+                  Margin="0,2,0,0">
+                <ProgressBar Grid.Column="0"
+                             IsIndeterminate="True"
+                             Height="2"
+                             Margin="0,0,8,0"
+                             VerticalAlignment="Center"
+                             ShowProgressText="False" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding SearchProgressText}"
+                           VerticalAlignment="Center"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Grid>
+          </StackPanel>
         </Border>
 
-        <!-- Main Content Area -->
-        <Grid Grid.Row="4" ColumnDefinitions="200,*,250">
+        <!-- Main Content Area. Auto/Auto on the sidebar columns lets them
+             collapse to 0 width when their Border's IsVisible flips false,
+             so toggling Show Thumbnails / Show Clipboard History gives the
+             central pane the freed space rather than just blanking the
+             column. -->
+        <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto">
 
-            <!-- Thumbnail Sidebar -->
+            <!-- Thumbnail Sidebar — split into Outline (top) + Thumbnails (bottom).
+                 The outline pane only takes screen space when the document
+                 actually has a table of contents (HasOutline) AND the user
+                 hasn't toggled it off via View → Show Outline. -->
             <Border Grid.Column="0"
+                    Width="220"
+                    IsVisible="{Binding IsThumbnailsSidebarVisible}"
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
-                <ScrollViewer>
+              <Grid RowDefinitions="*,Auto,*">
+
+                <!-- Outline / Table of Contents -->
+                <Grid Grid.Row="0" RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsOutlineSidebarVisible}">
+                    <Border Grid.Row="0"
+                            Background="{DynamicResource SecondaryBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="10,6">
+                        <TextBlock Text="Outline"
+                                   FontWeight="SemiBold" FontSize="12"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    </Border>
+                    <!-- Bind SelectedItem to VM. The setter on
+                         SelectedOutlineNode jumps the viewer; this is the
+                         simplest cross-platform pattern that works inside
+                         TreeView's container chain (a per-row Button.Command
+                         binding does NOT reliably resolve $parent[Window]
+                         through the templated ItemContainer hierarchy). -->
+                    <!-- PointerPressed at the TreeView level + a manual
+                         walk to the clicked TreeViewItem. The SelectedItem
+                         TwoWay binding works in tests under FluentTheme but
+                         FluentAvalonia's TreeViewItem theme can swallow
+                         clicks on the chevron/content boundary, so the
+                         straightforward selection path silently no-ops in
+                         the real app. The pointer handler is theme-
+                         independent. -->
+                    <ScrollViewer Grid.Row="1">
+                        <TreeView Name="OutlineTree"
+                                  ItemsSource="{Binding OutlineNodes}"
+                                  SelectedItem="{Binding SelectedOutlineNode, Mode=TwoWay}"
+                                  PointerPressed="OnOutlineTreePointerPressed"
+                                  Background="Transparent"
+                                  BorderThickness="0">
+                            <TreeView.ItemTemplate>
+                                <TreeDataTemplate ItemsSource="{Binding Children}">
+                                    <TextBlock Text="{Binding DisplayText}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Cursor="Hand"/>
+                                </TreeDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- Splitter between outline and thumbnails (only when both visible). -->
+                <GridSplitter Grid.Row="1"
+                              Height="2"
+                              Background="{DynamicResource BorderBrush}"
+                              HorizontalAlignment="Stretch"
+                              ResizeDirection="Rows"
+                              IsVisible="{Binding IsOutlineSidebarVisible}"/>
+
+                <!-- Thumbnails -->
+                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                    <Border Grid.Row="0"
+                            Background="{DynamicResource SecondaryBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="10,6">
+                        <TextBlock Text="Thumbnails"
+                                   FontWeight="SemiBold" FontSize="12"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    </Border>
+                    <ScrollViewer Grid.Row="1">
                     <ItemsControl ItemsSource="{Binding PageThumbnails}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -387,9 +539,17 @@
                                                        FontSize="11"
                                                        FontWeight="Medium"
                                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <!-- EffectiveViewportChanged fires whenever this Image's
+                                                 visible area changes. We use it to lazy-load the
+                                                 thumbnail bitmap only for pages the user actually
+                                                 scrolls to — combined with the on-disk cache
+                                                 (ThumbnailCacheService) reopens are sub-millisecond
+                                                 and first opens skip rendering pages they never look at. -->
                                             <Image Source="{Binding ThumbnailImage}"
                                                    Width="150" Height="200"
-                                                   Stretch="Uniform"/>
+                                                   Stretch="Uniform"
+                                                   EffectiveViewportChanged="OnThumbnailViewportChanged"
+                                                   Tag="{Binding PageIndex}"/>
                                         </StackPanel>
                                     </Border>
                                     <Button.Styles>
@@ -407,6 +567,8 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+                </Grid>
+              </Grid>
             </Border>
 
             <!-- PDF Viewer -->
@@ -448,49 +610,110 @@
                                                ZoomLevel="{Binding ZoomLevel}"
                                                InteractionMode="{Binding InteractionMode}"
                                                HiddenTextHighlights="{Binding HiddenTextHighlights}"
+                                               FormFields="{Binding CurrentPageFormFields}"
                                                RedactionDrawn="OnRedactionDrawn"
                                                TextSelected="OnTextSelected"
+                                               LinkClicked="OnLinkClicked"
+                                               FormFieldEdited="OnFormFieldEdited"
+                                               FormFieldRectDrawn="OnFormFieldRectDrawn"
                                                PageChanged="OnPageChanged" />
                 </Grid>
             </Border>
 
             <!-- Clipboard History Sidebar -->
             <Border Grid.Column="2"
+                    Width="250"
+                    IsVisible="{Binding IsClipboardSidebarVisible}"
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1,0,0,0">
                 <Grid RowDefinitions="Auto,*,Auto">
-                    <!-- Header - Shows "Pending Redactions" in redaction mode, "Clipboard History" otherwise -->
+                    <!-- Header — title swaps with the right-sidebar mode. -->
                     <Border Grid.Row="0" Background="{DynamicResource SecondaryBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="12,10">
                         <Grid ColumnDefinitions="*,Auto">
-                            <!-- Title changes based on mode -->
+                            <TextBlock Grid.Column="0"
+                                       Text="Search Results"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                       IsVisible="{Binding ShowSearchResultsPanel}"/>
                             <TextBlock Grid.Column="0"
                                        Text="Pending Redactions"
                                        FontWeight="SemiBold"
                                        FontSize="13"
                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                       IsVisible="{Binding IsRedactionMode}"/>
+                                       IsVisible="{Binding ShowPendingRedactionsPanel}"/>
                             <TextBlock Grid.Column="0"
                                        Text="Clipboard History"
                                        FontWeight="SemiBold"
                                        FontSize="13"
                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                       IsVisible="{Binding !IsRedactionMode}"/>
-                            <!-- Count badge (only in redaction mode) -->
+                                       IsVisible="{Binding ShowClipboardHistoryPanel}"/>
+                            <!-- Count badge for active mode. -->
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SearchMatches.Count, StringFormat='({0})'}"
+                                       FontWeight="SemiBold"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource BrandPrimaryBrush}"
+                                       IsVisible="{Binding ShowSearchResultsPanel}"/>
                             <TextBlock Grid.Column="1"
                                        Text="{Binding RedactionWorkflow.PendingCount, StringFormat='({0})'}"
                                        FontWeight="SemiBold"
                                        FontSize="13"
                                        Foreground="{DynamicResource BrandPrimaryBrush}"
-                                       IsVisible="{Binding IsRedactionMode}"/>
+                                       IsVisible="{Binding ShowPendingRedactionsPanel}"/>
                         </Grid>
                     </Border>
 
-                    <!-- Pending Redactions List (visible in redaction mode) -->
-                    <ScrollViewer Grid.Row="1" IsVisible="{Binding IsRedactionMode}">
+                    <!-- Search results list — visible whenever the find bar
+                         is open. Each row jumps to its match on click. -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowSearchResultsPanel}">
+                        <ItemsControl ItemsSource="{Binding SearchMatches}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            Margin="6,4"
+                                            Padding="10"
+                                            Background="{DynamicResource CardBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Cursor="Hand"
+                                            Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).JumpToSearchMatchCommand}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel Spacing="4">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding MatchedText}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="12"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding PageIndex, StringFormat='p.{0}'}"
+                                                           FontSize="11"
+                                                           Margin="6,0,0,0"
+                                                           Foreground="{DynamicResource BrandPrimaryBrush}"/>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Context}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       MaxLines="2"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- Pending Redactions List (visible in redaction mode, search bar closed). -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowPendingRedactionsPanel}">
                         <ItemsControl ItemsSource="{Binding RedactionWorkflow.PendingRedactions}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -535,9 +758,9 @@
                         </ItemsControl>
                     </ScrollViewer>
 
-                    <!-- Action Buttons (visible in redaction mode) -->
+                    <!-- Redaction action buttons (visible in redaction mode, search bar closed). -->
                     <Border Grid.Row="2"
-                            IsVisible="{Binding IsRedactionMode}"
+                            IsVisible="{Binding ShowPendingRedactionsPanel}"
                             Padding="12"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="0,1,0,0">
@@ -580,8 +803,8 @@
                         </Grid>
                     </Border>
 
-                    <!-- Clipboard History List (visible when NOT in redaction mode) -->
-                    <ScrollViewer Grid.Row="1" IsVisible="{Binding !IsRedactionMode}">
+                    <!-- Clipboard History List (visible when neither redaction nor search active). -->
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowClipboardHistoryPanel}">
                         <ItemsControl ItemsSource="{Binding ClipboardHistory}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="models:ClipboardEntry">
@@ -645,7 +868,7 @@
         </Grid>
 
         <!-- Status Bar -->
-        <Border Grid.Row="5"
+        <Border Grid.Row="6"
                 Background="{DynamicResource SecondaryBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0"
@@ -703,11 +926,18 @@
                                IsVisible="{Binding OperationStatus, Converter={x:Static StringConverters.IsNullOrEmpty}}"/>
                 </StackPanel>
 
-                <!-- Page Navigation -->
+                <!-- Page Navigation. No tooltips on the arrow buttons —
+                     the "Page N" label between them already explains
+                     them, and the flickering tooltip popup on hover (the
+                     adjacent OperationStatus / StatusBarText cell flips
+                     visibility while thumbnails load, re-measuring the
+                     status-bar StackPanel and yanking the tooltip's
+                     anchor out from under it on every tick) made the
+                     buttons hard to click. AutomationProperties stay
+                     for screen readers. -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Content="◀" Command="{Binding PreviousPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
-                            ToolTip.Tip="Previous Page"
                             AutomationProperties.Name="Previous Page"
                             AutomationProperties.HelpText="Navigate to the previous page"/>
                     <TextBlock Text="{Binding DisplayPageNumber, StringFormat='Page {0}'}"
@@ -720,7 +950,6 @@
                                AutomationProperties.Name="Current Page Number"/>
                     <Button Content="▶" Command="{Binding NextPageCommand}"
                             Classes="modern-button compact" Padding="8,4"
-                            ToolTip.Tip="Next Page"
                             AutomationProperties.Name="Next Page"
                             AutomationProperties.HelpText="Navigate to the next page"/>
                 </StackPanel>

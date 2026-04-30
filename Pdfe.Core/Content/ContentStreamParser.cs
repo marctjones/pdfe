@@ -17,16 +17,22 @@ public class ContentStreamParser
     // Graphics state tracking
     private readonly Stack<GraphicsState> _stateStack = new();
     private GraphicsState _state = new();
+    private bool _inCompatibilitySection;
 
     // Text state tracking
     private double _fontSize = 12;
     private string _fontName = "";
     private PdfDictionary? _currentFont;
     private Dictionary<int, string>? _toUnicodeMap;
+    private bool _is2ByteFont = false;
+    private PdfDictionary? _cidFontDict;
+    private Dictionary<int, double>? _cidWidths;
     private double _textLeading;
     private double _charSpacing;
     private double _wordSpacing;
     private double _horizontalScaling = 100;
+    private double _textRise;
+    private int _textRenderMode;
 
     // Text matrix
     private double _tm_a = 1, _tm_b, _tm_c, _tm_d = 1, _tm_e, _tm_f;
@@ -67,12 +73,27 @@ public class ContentStreamParser
 
             if (token is string op && IsOperator(op))
             {
-                var contentOp = CreateOperator(op, operands);
-                if (contentOp != null)
+                if (op == "BI")
                 {
-                    operators.Add(contentOp);
+                    // Inline image — parse the image dict + binary data in one shot
+                    // so that the raw pixel bytes never enter the general token stream
+                    var contentOp = ParseInlineImage();
+                    if (contentOp != null)
+                        operators.Add(contentOp);
+                    operands.Clear();
                 }
-                operands.Clear();
+                else if (op is "ID" or "EI")
+                {
+                    // Should only appear inside BI handling above; skip if stray
+                    operands.Clear();
+                }
+                else
+                {
+                    var contentOp = CreateOperator(op, operands);
+                    if (contentOp != null)
+                        operators.Add(contentOp);
+                    operands.Clear();
+                }
             }
             else if (token is PdfObject pdfObj)
             {
@@ -124,6 +145,39 @@ public class ContentStreamParser
                     var f = GetNumber(operands[5]);
                     _state.MultiplyCtm(a, b, c, d, e, f);
                 }
+                break;
+
+            // Line state operators (§8.4.3 table 57)
+            case "w":
+                if (operands.Count >= 1)
+                    _state.LineWidth = GetNumber(operands[0]);
+                break;
+
+            case "J":
+                if (operands.Count >= 1)
+                    _state.LineCap = (int)GetNumber(operands[0]);
+                break;
+
+            case "j":
+                if (operands.Count >= 1)
+                    _state.LineJoin = (int)GetNumber(operands[0]);
+                break;
+
+            case "M":
+                if (operands.Count >= 1)
+                    _state.MiterLimit = GetNumber(operands[0]);
+                break;
+
+            case "d":
+            case "ri":
+            case "i":
+                // Dash pattern, rendering intent, flatness — stored in operands, no bounds effect
+                break;
+
+            case "gs":
+                // Apply named ExtGState dictionary
+                if (operands.Count >= 1 && operands[0] is PdfName gsName && _page != null)
+                    ApplyExtGState(gsName.Value);
                 break;
 
             // Path construction
@@ -202,10 +256,12 @@ public class ContentStreamParser
                 {
                     op.BoundingBox = TransformBounds(_pathMinX, _pathMinY, _pathMaxX, _pathMaxY);
                 }
+                _state.PendingClip = null; // §8.5.4: clip applied at painting op, then consumed
                 EndPath();
                 break;
 
             case "n":
+                _state.PendingClip = null;
                 EndPath();
                 break;
 
@@ -247,6 +303,16 @@ public class ContentStreamParser
             case "Tz":
                 if (operands.Count >= 1)
                     _horizontalScaling = GetNumber(operands[0]);
+                break;
+
+            case "Tr":
+                if (operands.Count >= 1)
+                    _textRenderMode = (int)GetNumber(operands[0]);
+                break;
+
+            case "Ts":
+                if (operands.Count >= 1)
+                    _textRise = GetNumber(operands[0]);
                 break;
 
             // Text positioning
@@ -345,6 +411,81 @@ public class ContentStreamParser
                 // XObject bounds depend on the object type and CTM
                 // For now, we don't calculate bounds for XObjects
                 break;
+
+            // Clipping (§8.5.4) — applies to the current path, takes effect at the next painting op.
+            case "W":
+                _state.PendingClip = "W";
+                break;
+            case "W*":
+                _state.PendingClip = "W*";
+                break;
+
+            // Shading (§8.7.4)
+            case "sh":
+                // No bounds tracked; the shading dictionary controls the painted region.
+                break;
+
+            // Type 3 font glyph metrics (§9.6.5)
+            case "d0":
+                // Width-only: wx wy d0 (wy is always 0 per spec)
+                break;
+            case "d1":
+                // Width + bounding box: wx wy llx lly urx ury d1
+                if (operands.Count >= 6)
+                {
+                    op.BoundingBox = new PdfRectangle(
+                        GetNumber(operands[2]),
+                        GetNumber(operands[3]),
+                        GetNumber(operands[4]),
+                        GetNumber(operands[5]));
+                }
+                break;
+
+            // Color space selection (§8.6.5)
+            case "CS":
+                if (operands.Count >= 1 && operands[0] is PdfName csNameStroke)
+                    _state.StrokeColorSpace = csNameStroke.Value;
+                break;
+            case "cs":
+                if (operands.Count >= 1 && operands[0] is PdfName csNameFill)
+                    _state.FillColorSpace = csNameFill.Value;
+                break;
+
+            // Color operators — track only nominal space for now; values are operand-only.
+            case "G":
+                _state.StrokeColorSpace = "DeviceGray"; break;
+            case "g":
+                _state.FillColorSpace = "DeviceGray"; break;
+            case "RG":
+                _state.StrokeColorSpace = "DeviceRGB"; break;
+            case "rg":
+                _state.FillColorSpace = "DeviceRGB"; break;
+            case "K":
+                _state.StrokeColorSpace = "DeviceCMYK"; break;
+            case "k":
+                _state.FillColorSpace = "DeviceCMYK"; break;
+            case "SC":
+            case "SCN":
+            case "sc":
+            case "scn":
+                // Operands carry the color values; no state change beyond what CS/cs already set.
+                break;
+
+            // Marked content (§14.6) — informational, no state effects on geometry.
+            case "MP":
+            case "DP":
+            case "BMC":
+            case "BDC":
+            case "EMC":
+                break;
+
+            // Compatibility operators
+            case "BX":
+                _inCompatibilitySection = true;
+                break;
+            case "EX":
+                _inCompatibilitySection = false;
+                break;
         }
     }
 
@@ -409,14 +550,18 @@ public class ContentStreamParser
         double minX = double.MaxValue, minY = double.MaxValue;
         double maxX = double.MinValue, maxY = double.MinValue;
 
-        foreach (var b in bytes)
+        int stride = _is2ByteFont ? 2 : 1;
+        for (int i = 0; i + stride <= bytes.Length; i += stride)
         {
-            var charCode = (int)b;
+            int charCode = _is2ByteFont
+                ? (bytes[i] << 8) | bytes[i + 1]
+                : bytes[i];
+
             var unicode = DecodeCharacter(charCode);
             var charWidth = GetCharWidth(charCode);
 
-            // Transform position
-            var (x, y) = TransformTextPoint(_tm_e, _tm_f);
+            // Transform position — text rise shifts the baseline vertically (§9.3.7)
+            var (x, y) = TransformTextPoint(_tm_e, _tm_f + _textRise);
 
             // Calculate glyph dimensions
             var glyphWidth = charWidth * _fontSize * (_horizontalScaling / 100.0) / 1000.0;
@@ -453,15 +598,146 @@ public class ContentStreamParser
         return (x, y);
     }
 
+    /// <summary>
+    /// Parse an inline image (§8.9.7).
+    /// Called immediately after the BI token is consumed.
+    /// Reads the image-parameter key-value pairs, skips past ID, and
+    /// consumes the binary image data up to (and including) EI.
+    /// Returns a BI operator whose first operand is the image-parameter dict.
+    /// </summary>
+    private ContentOperator? ParseInlineImage()
+    {
+        // --- 1. Parse abbreviated image parameters until 'ID' ---
+        var imageParams = new PdfDictionary();
+        while (_pos < _content.Length)
+        {
+            SkipWhitespaceAndComments();
+            if (_pos >= _content.Length) break;
+
+            // Peek: is this 'ID'?
+            if (_content[_pos] == 'I' && _pos + 1 < _content.Length && _content[_pos + 1] == 'D' &&
+                (_pos + 2 >= _content.Length || IsWhitespaceByte(_content[_pos + 2])))
+            {
+                _pos += 2; // consume 'ID'
+                // Consume exactly one whitespace char that separates ID from data (per spec)
+                if (_pos < _content.Length && IsWhitespaceByte(_content[_pos]))
+                    _pos++;
+                break;
+            }
+
+            var keyToken = ParseToken();
+            if (keyToken is not PdfName keyName) continue;
+
+            SkipWhitespaceAndComments();
+            var valToken = ParseToken();
+            if (valToken is PdfObject valObj)
+                imageParams[keyName.Value] = valObj;
+        }
+
+        // --- 2. Scan for 'EI' at a word boundary, consuming raw image data ---
+        var dataStart = _pos;
+        while (_pos < _content.Length)
+        {
+            if (IsWhitespaceByte(_content[_pos]) || _pos == dataStart)
+            {
+                // Consume the whitespace, then check for 'EI'
+                int wsPos = _pos;
+                if (_pos != dataStart) _pos++; // skip whitespace byte
+
+                if (_pos + 1 < _content.Length &&
+                    _content[_pos] == 'E' && _content[_pos + 1] == 'I' &&
+                    (_pos + 2 >= _content.Length || IsWordBoundaryByte(_content[_pos + 2])))
+                {
+                    _pos += 2; // consume 'EI'
+                    break;
+                }
+                // Not EI — roll back to whitespace position and advance one
+                _pos = wsPos + 1;
+            }
+            else
+            {
+                _pos++;
+            }
+        }
+
+        // Compute operator bounds from current CTM (inline image fills the unit square
+        // mapped through the CTM, i.e. the four corners (0,0),(1,0),(1,1),(0,1))
+        var b = TransformBounds(0, 0, 1, 1);
+        var op = new ContentOperator("BI", new PdfObject[] { imageParams });
+        op.BoundingBox = b;
+        return op;
+    }
+
+    private static bool IsWhitespaceByte(byte b) =>
+        b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D || b == 0x0C || b == 0x00;
+
+    private static bool IsWordBoundaryByte(byte b) =>
+        IsWhitespaceByte(b) || b == '/' || b == '(' || b == ')' || b == '[' || b == ']';
+
+    private void ApplyExtGState(string gsName)
+    {
+        var gsDict = _page?.GetExtGState(gsName);
+        if (gsDict == null) return;
+
+        if (gsDict.ContainsKey("LW")) _state.LineWidth = gsDict.GetNumber("LW", _state.LineWidth);
+        if (gsDict.ContainsKey("LC")) _state.LineCap   = gsDict.GetInt("LC", _state.LineCap);
+        if (gsDict.ContainsKey("LJ")) _state.LineJoin  = gsDict.GetInt("LJ", _state.LineJoin);
+        if (gsDict.ContainsKey("ML")) _state.MiterLimit = gsDict.GetNumber("ML", _state.MiterLimit);
+        if (gsDict.ContainsKey("Tr") && gsDict.GetOptional("Tr") is { } trObj)
+            _textRenderMode = (int)GetNumber(trObj);
+
+        // Transparency parameters (§11.6.4)
+        if (gsDict.ContainsKey("ca")) _state.FillAlpha   = gsDict.GetNumber("ca", _state.FillAlpha);
+        if (gsDict.ContainsKey("CA")) _state.StrokeAlpha = gsDict.GetNumber("CA", _state.StrokeAlpha);
+        if (gsDict.ContainsKey("BM"))
+        {
+            var bmObj = gsDict.GetOptional("BM");
+            if (bmObj is PdfName bmName) _state.BlendMode = bmName.Value;
+            else if (bmObj is PdfArray bmArr && bmArr.Count > 0 && bmArr[0] is PdfName firstBm)
+                _state.BlendMode = firstBm.Value;
+        }
+        if (gsDict.ContainsKey("SMask"))
+        {
+            // SMask=/None disables; otherwise a soft mask dictionary is referenced.
+            var smaskObj = gsDict.GetOptional("SMask");
+            _state.HasSoftMask = !(smaskObj is PdfName smaskName && smaskName.Value == "None");
+        }
+        if (gsDict.ContainsKey("AIS")) _state.AlphaIsShape = gsDict.GetBool("AIS", _state.AlphaIsShape);
+        if (gsDict.ContainsKey("SA"))  _state.StrokeAdjustment = gsDict.GetBool("SA", _state.StrokeAdjustment);
+    }
+
     private void LoadFont()
     {
         if (_page == null) return;
 
         _currentFont = _page.GetFont(_fontName);
         _toUnicodeMap = null;
+        _is2ByteFont = false;
+        _cidFontDict = null;
+        _cidWidths = null;
 
         if (_currentFont != null)
         {
+            // Detect Type0 (composite) fonts
+            var subtype = _currentFont.GetNameOrNull("Subtype");
+            _is2ByteFont = subtype == "Type0";
+
+            if (_is2ByteFont)
+            {
+                // Type0 font: load descendant CID font
+                var descendantFontsObj = _currentFont.GetOptional("DescendantFonts");
+                if (descendantFontsObj is PdfArray descendantFonts && descendantFonts.Count > 0)
+                {
+                    var descendantRef = descendantFonts[0];
+                    var descendantResolved = _page.Document.Resolve(descendantRef);
+                    if (descendantResolved is PdfDictionary cidFont)
+                    {
+                        _cidFontDict = cidFont;
+                        ParseCidWidths();
+                    }
+                }
+            }
+
             var toUnicodeObj = _currentFont.GetOptional("ToUnicode");
             if (toUnicodeObj != null)
             {
@@ -476,6 +752,60 @@ public class ContentStreamParser
                     {
                         // Ignore CMap parsing errors
                     }
+                }
+            }
+        }
+    }
+
+    private void ParseCidWidths()
+    {
+        if (_cidFontDict == null) return;
+
+        _cidWidths = new Dictionary<int, double>();
+        var widthsObj = _cidFontDict.GetOptional("W");
+
+        if (widthsObj is PdfArray widths)
+        {
+            int i = 0;
+            while (i < widths.Count)
+            {
+                var first = widths[i];
+                if (first is not (PdfInteger or PdfReal)) { i++; continue; }
+
+                var firstCid = (int)GetNumber(first);
+                i++;
+
+                if (i >= widths.Count) break;
+
+                var second = widths[i];
+
+                if (second is PdfArray cidWidthArray)
+                {
+                    // Format: c [w1 w2 w3 ...]
+                    for (int j = 0; j < cidWidthArray.Count; j++)
+                    {
+                        _cidWidths[firstCid + j] = GetNumber(cidWidthArray[j]);
+                    }
+                    i++;
+                }
+                else if (second is PdfInteger or PdfReal)
+                {
+                    // Format: c1 c2 w
+                    var lastCid = (int)GetNumber(second);
+                    i++;
+
+                    if (i >= widths.Count) break;
+
+                    var width = GetNumber(widths[i]);
+                    for (int cid = firstCid; cid <= lastCid; cid++)
+                    {
+                        _cidWidths[cid] = width;
+                    }
+                    i++;
+                }
+                else
+                {
+                    i++;
                 }
             }
         }
@@ -505,6 +835,13 @@ public class ContentStreamParser
 
     private double GetCharWidth(int charCode)
     {
+        // Check CID width table for Type0 fonts first
+        if (_cidWidths != null && _cidWidths.TryGetValue(charCode, out var cidWidth))
+            return cidWidth;
+
+        if (_cidFontDict != null)
+            return _cidFontDict.GetNumber("DW", 1000);
+
         if (_currentFont != null)
         {
             var widthsObj = _currentFont.GetOptional("Widths");
@@ -907,7 +1244,9 @@ public class ContentStreamParser
         "sh",
         // XObject/Images
         "Do", "BI", "ID", "EI",
-        // Marked content
+        // Type 3 font character widths
+        "d0", "d1",
+        // Marked content + compatibility
         "MP", "DP", "BMC", "BDC", "EMC", "BX", "EX"
     };
 
@@ -921,6 +1260,27 @@ public class ContentStreamParser
     private class GraphicsState
     {
         public double Ctm_a = 1, Ctm_b, Ctm_c, Ctm_d = 1, Ctm_e, Ctm_f;
+
+        // Line state (§8.4.3 table 57)
+        public double LineWidth = 1;
+        public int    LineCap;
+        public int    LineJoin;
+        public double MiterLimit = 10;
+
+        // Transparency (§11.3 table 128)
+        public double FillAlpha = 1.0;
+        public double StrokeAlpha = 1.0;
+        public string BlendMode = "Normal";
+        public bool   HasSoftMask;
+        public bool   AlphaIsShape;
+        public bool   StrokeAdjustment;
+
+        // Color state — name only; fully resolving colors requires the resource dict.
+        public string FillColorSpace = "DeviceGray";
+        public string StrokeColorSpace = "DeviceGray";
+
+        // Pending clipping operator queued by W / W*; consumed at the next path-painting op.
+        public string? PendingClip;
 
         public void MultiplyCtm(double a, double b, double c, double d, double e, double f)
         {
@@ -938,7 +1298,15 @@ public class ContentStreamParser
         public GraphicsState Clone() => new()
         {
             Ctm_a = Ctm_a, Ctm_b = Ctm_b, Ctm_c = Ctm_c,
-            Ctm_d = Ctm_d, Ctm_e = Ctm_e, Ctm_f = Ctm_f
+            Ctm_d = Ctm_d, Ctm_e = Ctm_e, Ctm_f = Ctm_f,
+            LineWidth = LineWidth, LineCap = LineCap,
+            LineJoin  = LineJoin,  MiterLimit = MiterLimit,
+            FillAlpha = FillAlpha, StrokeAlpha = StrokeAlpha,
+            BlendMode = BlendMode, HasSoftMask = HasSoftMask,
+            AlphaIsShape = AlphaIsShape, StrokeAdjustment = StrokeAdjustment,
+            FillColorSpace = FillColorSpace,
+            StrokeColorSpace = StrokeColorSpace,
+            PendingClip = PendingClip
         };
     }
 }

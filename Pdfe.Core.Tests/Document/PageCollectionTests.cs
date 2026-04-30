@@ -142,6 +142,244 @@ public class PageCollectionTests
         page.Rotation.Should().Be(270);
     }
 
+    [Fact]
+    public void AddBlank_ToNewDocument_CreatesPage()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+
+        // Act
+        var page = doc.Pages.AddBlank();
+
+        // Assert
+        page.Should().NotBeNull();
+        doc.PageCount.Should().Be(1);
+        page.Width.Should().Be(612);
+        page.Height.Should().Be(792);
+    }
+
+    [Fact]
+    public void AddBlank_WithCustomSize_CreatesPageWithCorrectSize()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+
+        // Act
+        var page = doc.Pages.AddBlank(400, 500);
+
+        // Assert
+        page.Width.Should().Be(400);
+        page.Height.Should().Be(500);
+    }
+
+    [Fact]
+    public void Add_FromAnotherDocument_CopiesPage()
+    {
+        // Arrange
+        using var doc1 = PdfDocument.CreateNew();
+        using var doc2 = PdfDocument.CreateNew();
+
+        var page1 = doc1.Pages.AddBlank();
+        var originalCount = doc2.PageCount;
+
+        // Act
+        doc2.Pages.Add(page1);
+
+        // Assert
+        doc2.PageCount.Should().Be(originalCount + 1);
+    }
+
+    [Fact]
+    public void Insert_AtValidIndex_InsertsPageAtCorrectPosition()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        var page1 = doc.Pages.AddBlank(100, 100);
+        var page2 = doc.Pages.AddBlank(200, 200);
+        var pageToInsert = doc.Pages.AddBlank(150, 150);
+
+        // Act - insert between page1 and page2 (Insert clones the page, so count increases)
+        doc.Pages.Insert(1, pageToInsert);
+
+        // Assert
+        doc.Pages.Count.Should().Be(4);
+    }
+
+    [Fact]
+    public void Insert_AtBeginning_InsertsAtZeroIndex()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        var page1 = doc.Pages.AddBlank();
+        var pageToInsert = doc.Pages.AddBlank();
+
+        // Act - Insert clones the page, so count increases by 1
+        doc.Pages.Insert(0, pageToInsert);
+
+        // Assert
+        doc.Pages.Count.Should().Be(3);
+    }
+
+    [Fact]
+    public void Insert_AtInvalidIndex_ThrowsException()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        var page1 = doc.Pages.AddBlank();
+        var pageToInsert = doc.Pages.AddBlank();
+
+        // Act & Assert
+        var act = () => doc.Pages.Insert(-1, pageToInsert);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+
+        var act2 = () => doc.Pages.Insert(10, pageToInsert);
+        act2.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void RemoveAt_WithMultiplePages_RemovesPage()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+
+        // Act
+        doc.Pages.RemoveAt(1);
+
+        // Assert
+        doc.Pages.Count.Should().Be(2);
+    }
+
+    [Fact]
+    public void RemoveAt_LastPageInDocument_ThrowsException()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+
+        // Act & Assert
+        var act = () => doc.Pages.RemoveAt(0);
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("Cannot remove the last page from a document");
+    }
+
+    [Fact]
+    public void RemoveAt_InvalidIndex_ThrowsException()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+
+        // Act & Assert
+        var act1 = () => doc.Pages.RemoveAt(-1);
+        act1.Should().Throw<ArgumentOutOfRangeException>();
+
+        var act2 = () => doc.Pages.RemoveAt(10);
+        act2.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Move_ToNewPosition_ReordersPages()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        var page1 = doc.Pages.AddBlank(100, 100);
+        var page2 = doc.Pages.AddBlank(200, 200);
+        var page3 = doc.Pages.AddBlank(300, 300);
+
+        // Act - move page 0 to position 2
+        doc.Pages.Move(0, 2);
+
+        // Assert
+        doc.Pages.Count.Should().Be(3);
+    }
+
+    [Fact]
+    public void Move_SamePosition_NoChange()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+
+        // Act - move page 0 to position 0 (no change)
+        doc.Pages.Move(0, 0);
+
+        // Assert
+        doc.Pages.Count.Should().Be(2);
+    }
+
+    [Fact]
+    public void Move_InvalidFromIndex_ThrowsException()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+
+        // Act & Assert
+        var act = () => doc.Pages.Move(-1, 1);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+
+        var act2 = () => doc.Pages.Move(10, 1);
+        act2.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Move_InvalidToIndex_ThrowsException()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+
+        // Act & Assert
+        var act = () => doc.Pages.Move(0, -1);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+
+        var act2 = () => doc.Pages.Move(0, 10);
+        act2.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void GetEnumerator_IteratesAllPages()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+        doc.Pages.AddBlank();
+
+        // Act
+        var pages = doc.Pages.ToList();
+
+        // Assert
+        pages.Count.Should().Be(3);
+        foreach (var page in pages)
+        {
+            page.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public void Count_ReturnsCorrectPageCount()
+    {
+        // Arrange
+        using var doc = PdfDocument.CreateNew();
+
+        // Act & Assert - initially 0
+        doc.Pages.Count.Should().Be(0);
+
+        doc.Pages.AddBlank();
+        doc.Pages.Count.Should().Be(1);
+
+        doc.Pages.AddBlank();
+        doc.Pages.Count.Should().Be(2);
+    }
+
     private static string? GetTestPdfPath()
     {
         // Try to find a test PDF

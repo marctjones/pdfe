@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <NoWarn>CA1416</NoWarn>
@@ -12,7 +12,10 @@
 
   <ItemGroup>
     <!-- Testing Framework -->
-    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="coverlet.collector" Version="10.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="coverlet.msbuild" Version="6.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -53,9 +56,7 @@
     <!-- Visual regression baselines: copy committed PNGs alongside the test DLL -->
     <Content Include="UI\baselines\*.png" CopyToOutputDirectory="PreserveNewest" />
     <!-- Real-world test PDFs -->
-    <Content Include="Resources\sample-pdfs\birth-certificate-request-scrambled.pdf"
-             Link="UI\test-pdfs\birth-certificate-request-scrambled.pdf"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Resources\sample-pdfs\birth-certificate-request-scrambled.pdf" Link="UI\test-pdfs\birth-certificate-request-scrambled.pdf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

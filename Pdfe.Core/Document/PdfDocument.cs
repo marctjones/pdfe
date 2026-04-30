@@ -1,6 +1,7 @@
 using Pdfe.Core.Parsing;
 using Pdfe.Core.Primitives;
 using Pdfe.Core.Writing;
+using System.Linq;
 
 namespace Pdfe.Core.Document;
 
@@ -16,7 +17,13 @@ public class PdfDocument : IDisposable
     private readonly Dictionary<int, PdfObject> _objectCache;
     private readonly PdfParser _parser;
     private readonly StreamDecompressor _decompressor;
+    private readonly Pdfe.Core.Security.PdfStandardSecurityHandler? _securityHandler;
     private PageCollection? _pages;
+    private IReadOnlyList<PdfOcg>? _ocgs;
+    private PdfOcgConfig? _ocgConfig;
+    private PdfStructElement? _structureTree;
+    private bool? _isTaggedPdf;
+    private IReadOnlyList<PdfEmbeddedFile>? _embeddedFiles;
 
     /// <summary>
     /// The trailer dictionary.
@@ -86,12 +93,69 @@ public class PdfDocument : IDisposable
         }
     }
 
+    /// <summary>
+    /// Get the list of Optional Content Groups (OCGs/layers) in this document.
+    /// Returns an empty list if the document has no optional content.
+    /// Cached after first call.
+    /// </summary>
+    public IReadOnlyList<PdfOcg> GetOptionalContentGroups()
+    {
+        _ocgs ??= PdfOcgParser.ParseOptionalContentGroups(this).ocgs;
+        return _ocgs;
+    }
+
+    /// <summary>
+    /// Get the Optional Content Groups configuration (visibility defaults, intent, etc).
+    /// Returns a config with empty OCG list if the document has no optional content.
+    /// Cached after first call.
+    /// </summary>
+    public PdfOcgConfig GetOptionalContentGroupConfig()
+    {
+        if (_ocgConfig == null)
+        {
+            (_ocgs, _ocgConfig) = PdfOcgParser.ParseOptionalContentGroups(this);
+        }
+        return _ocgConfig!;
+    }
+
+    /// <summary>
+    /// Get the root element of the document's structure tree (tagged PDF).
+    /// Returns null if the document has no /StructTreeRoot.
+    /// Cached after first call.
+    /// </summary>
+    public PdfStructElement? GetStructureTree()
+    {
+        _structureTree ??= PdfStructTreeParser.ParseStructureTree(this) ?? null;
+        return _structureTree;
+    }
+
+    /// <summary>
+    /// Check if this is a tagged PDF (has /MarkInfo/Marked = true).
+    /// Tagged PDFs have a structure tree that associates content with semantic roles.
+    /// </summary>
+    public bool IsTaggedPdf
+    {
+        get
+        {
+            if (!_isTaggedPdf.HasValue)
+            {
+                var markInfo = Catalog.GetOptional("MarkInfo");
+                var markInfoDict = markInfo != null ? (Resolve(markInfo) as PdfDictionary) : null;
+                var markedObj = markInfoDict?.GetOptional("Marked");
+                _isTaggedPdf = (markedObj is PdfName name && name.Value == "true") ||
+                               (markedObj is PdfBoolean bool_ && bool_.Value);
+            }
+            return _isTaggedPdf.Value;
+        }
+    }
+
     private PdfDocument(
         Stream stream,
         bool ownsStream,
         Dictionary<int, XRefEntry> xref,
         PdfDictionary trailer,
-        string version)
+        string version,
+        Pdfe.Core.Security.PdfStandardSecurityHandler? securityHandler = null)
     {
         _stream = stream;
         _ownsStream = ownsStream;
@@ -99,6 +163,7 @@ public class PdfDocument : IDisposable
         _objectCache = new Dictionary<int, PdfObject>();
         _parser = new PdfParser(new PdfLexer(stream, ownsStream: false));
         _decompressor = new StreamDecompressor();
+        _securityHandler = securityHandler;
 
         // Let the parser resolve indirect /Length refs on stream dicts by
         // calling back into our object cache — needed for PDFs (notably
@@ -124,12 +189,12 @@ public class PdfDocument : IDisposable
     /// <summary>
     /// Open a PDF document from a file.
     /// </summary>
-    public static PdfDocument Open(string path)
+    public static PdfDocument Open(string path, bool allowEncrypted = false)
     {
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            return Open(stream, ownsStream: true);
+            return Open(stream, ownsStream: true, allowEncrypted: allowEncrypted);
         }
         catch
         {
@@ -141,7 +206,16 @@ public class PdfDocument : IDisposable
     /// <summary>
     /// Open a PDF document from a stream.
     /// </summary>
-    public static PdfDocument Open(Stream stream, bool ownsStream = false)
+    /// <param name="stream">Stream to read.</param>
+    /// <param name="ownsStream">Whether the document should dispose the stream on close.</param>
+    /// <param name="allowEncrypted">When false (default), opening an encrypted
+    /// PDF throws <see cref="Pdfe.Core.Parsing.PdfEncryptionNotSupportedException"/>.
+    /// pdfe cannot yet decrypt encrypted streams (tracked: GitHub #324).
+    /// Without this guard, encrypted streams return ciphertext bytes — features
+    /// like text extraction and redaction would silently produce wrong output.
+    /// Pass true to bypass the guard for unencrypted-dict / encrypted-stream
+    /// inspection at the caller's own risk.</param>
+    public static PdfDocument Open(Stream stream, bool ownsStream = false, bool allowEncrypted = false)
     {
         // Read PDF version from header
         string version = ReadVersion(stream);
@@ -173,16 +247,75 @@ public class PdfDocument : IDisposable
             currentTrailer = prevTrailer;
         }
 
+        // Encrypted PDFs: try to build a security handler that decrypts
+        // streams + strings as they're read. If /Encrypt is present and
+        // we can verify the empty user password (the common case), we
+        // continue with full decryption. If we can't (unsupported V/R,
+        // wrong password), we honour `allowEncrypted` — true keeps
+        // returning ciphertext for inspection; false (default) throws.
+        Pdfe.Core.Security.PdfStandardSecurityHandler? handler = null;
+        if (trailer.ContainsKey("Encrypt"))
+        {
+            try
+            {
+                // Resolve the /Encrypt dict (it can be an indirect ref).
+                var encryptObj = trailer.GetOptional("Encrypt");
+                if (encryptObj is PdfReference encryptRef)
+                {
+                    // Need to read the object directly from xref since
+                    // we don't have a document yet.
+                    encryptObj = ReadIndirectObjectAt(stream, fullXRef[encryptRef.ObjectNum].Offset);
+                }
+                if (encryptObj is not PdfDictionary encryptDict)
+                    throw new Pdfe.Core.Parsing.PdfParseException("/Encrypt is not a dictionary");
+
+                // /ID is required; first element is what the security handler hashes.
+                var idArr = trailer.GetArray("ID");
+                if (idArr.Count == 0 || idArr[0] is not PdfString idStr)
+                    throw new Pdfe.Core.Parsing.PdfParseException("/ID array missing or empty");
+                var firstId = idStr.Bytes;
+
+                // Try the empty user password first — by far the most common case.
+                handler = Pdfe.Core.Security.PdfStandardSecurityHandler.Build(
+                    encryptDict, firstId, Array.Empty<byte>());
+            }
+            catch (Pdfe.Core.Parsing.PdfEncryptionNotSupportedException)
+            {
+                if (!allowEncrypted)
+                {
+                    if (ownsStream) stream.Dispose();
+                    throw;
+                }
+                // allowEncrypted=true: caller wants the doc anyway, accept
+                // that streams will be ciphertext.
+                handler = null;
+            }
+        }
+
         // Create document (loads catalog internally)
-        return new PdfDocument(stream, ownsStream, fullXRef, trailer, version);
+        return new PdfDocument(stream, ownsStream, fullXRef, trailer, version, handler);
+    }
+
+    /// <summary>
+    /// One-shot reader used by <see cref="Open(Stream, bool, bool)"/> to
+    /// resolve an indirect /Encrypt reference *before* the PdfDocument
+    /// (and therefore the parser's resolver) exists. Seeks to the given
+    /// offset, parses an indirect object, returns its value.
+    /// </summary>
+    private static PdfObject ReadIndirectObjectAt(Stream stream, long offset)
+    {
+        var lexer = new Pdfe.Core.Parsing.PdfLexer(stream, ownsStream: false);
+        lexer.Seek(offset);
+        var parser = new Pdfe.Core.Parsing.PdfParser(lexer);
+        return parser.ParseIndirectObject().Value;
     }
 
     /// <summary>
     /// Open a PDF document from a byte array.
     /// </summary>
-    public static PdfDocument Open(byte[] data)
+    public static PdfDocument Open(byte[] data, bool allowEncrypted = false)
     {
-        return Open(new MemoryStream(data, writable: false), ownsStream: true);
+        return Open(new MemoryStream(data, writable: false), ownsStream: true, allowEncrypted: allowEncrypted);
     }
 
     /// <summary>
@@ -368,7 +501,10 @@ public class PdfDocument : IDisposable
 
         if (entry.IsCompressed)
         {
-            // Object is in an object stream
+            // Object is in an object stream. The parent /ObjStm itself is
+            // decrypted by this same code path when GetObjectFromStream
+            // calls back into GetObject(streamNumber); the contained
+            // objects are then plaintext and need no further decryption.
             obj = GetObjectFromStream(entry.ObjectStreamNumber!.Value, entry.IndexInStream!.Value);
         }
         else
@@ -378,12 +514,33 @@ public class PdfDocument : IDisposable
             var indirectObj = _parser.ParseIndirectObject();
             obj = indirectObj.Value;
 
+            // Apply the security handler before any /Filter pipeline.
+            // For RC4: ciphertext is stream's encoded bytes (post-compression
+            // on encrypt, so we decrypt FIRST and then run FlateDecode etc.).
+            // Strings inside the parsed object are also encrypted with the
+            // same per-object key — walk the dict and decrypt them in place.
+            // The /Encrypt dict itself is exempt (its strings are read with
+            // a one-shot lexer in Open() before we have a handler).
+            if (_securityHandler != null)
+            {
+                int objNum = indirectObj.ObjectNumber;
+                int gen = indirectObj.Generation;
+
+                if (obj is PdfStream stream)
+                {
+                    var encrypted = stream.EncodedData;
+                    var decrypted = _securityHandler.DecryptStream(objNum, gen, encrypted);
+                    stream.SetEncodedData(decrypted);
+                }
+                DecryptStringsInPlace(obj, objNum, gen);
+            }
+
             // Decompress streams
-            if (obj is PdfStream stream && stream.IsFiltered)
+            if (obj is PdfStream s && s.IsFiltered)
             {
                 try
                 {
-                    _decompressor.Decompress(stream);
+                    _decompressor.Decompress(s);
                 }
                 catch
                 {
@@ -496,6 +653,196 @@ public class PdfDocument : IDisposable
     /// </summary>
     public string? Producer => Info?.GetStringOrNull("Producer");
 
+    /// <summary>
+    /// Get the document's interactive form (AcroForm), if present.
+    /// Returns null if the document has no AcroForm.
+    /// PDF spec §12.7.
+    /// </summary>
+    public PdfAcroForm? GetAcroForm()
+    {
+        var acroFormObj = Catalog.GetOptional("AcroForm");
+        if (acroFormObj == null)
+            return null;
+
+        if (Resolve(acroFormObj) is not PdfDictionary acroFormDict)
+            return null;
+
+        return PdfAcroFormParser.Parse(this, acroFormDict);
+    }
+
+    /// <summary>
+    /// Mark the AcroForm dictionary as requiring appearance stream regeneration
+    /// (sets /NeedAppearances true). Called automatically by
+    /// <see cref="PdfField.SetValue(string?)"/>; expose for callers that mutate
+    /// field dictionaries directly.
+    /// No-op if the document has no AcroForm.
+    /// </summary>
+    public void SetAcroFormNeedAppearances()
+    {
+        var acroFormObj = Catalog.GetOptional("AcroForm");
+        if (acroFormObj == null) return;
+        if (Resolve(acroFormObj) is not PdfDictionary acroFormDict) return;
+        acroFormDict.SetBool("NeedAppearances", true);
+    }
+
+    /// <summary>
+    /// Bake all current AcroForm field values into static page content and
+    /// remove the interactive form. After flattening:
+    ///   • Each text/choice field's /V is rendered as page content at the
+    ///     widget's /Rect (using /DA appearance string when available, else
+    ///     a default Helvetica 10 pt black);
+    ///   • Each widget annotation is removed from its host page's /Annots
+    ///     array;
+    ///   • The /AcroForm catalog entry is removed;
+    ///   • Any cached page state (letters, text) is invalidated so subsequent
+    ///     reads see the baked content.
+    ///
+    /// Call <see cref="Save(Stream)"/> afterwards to persist.
+    ///
+    /// Signature fields are skipped (their visual representation comes from
+    /// the signature appearance, not /V) and their widget annotations are
+    /// preserved.
+    /// </summary>
+    public void FlattenAcroForm()
+    {
+        var form = GetAcroForm();
+        if (form == null) return;
+
+        AcroFormFlattener.Flatten(this, form);
+
+        Catalog.Remove("AcroForm");
+    }
+
+    /// <summary>
+    /// Check whether this document has embedded files (PDF 2.0 portfolios / associated files).
+    /// Returns true if /Catalog/Names/EmbeddedFiles or legacy /Catalog/AF are present.
+    /// </summary>
+    public bool HasEmbeddedFiles
+    {
+        get
+        {
+            var namesObj = Catalog.GetOptional("Names");
+            if (namesObj != null && Resolve(namesObj) is PdfDictionary namesDict)
+                if (namesDict.GetOptional("EmbeddedFiles") != null)
+                    return true;
+
+            if (Catalog.GetOptional("AF") != null)
+                return true;
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get the list of embedded files in this document.
+    /// Returns an empty list if the document has no embedded files.
+    /// Walks /Catalog/Names/EmbeddedFiles (PDF 2.0 name tree) and falls back to
+    /// legacy /Catalog/Names/AF and /Catalog/AF arrays per PDF 2.0 §7.7.4.
+    /// Cached after first call.
+    /// </summary>
+    public IReadOnlyList<PdfEmbeddedFile> GetEmbeddedFiles()
+    {
+        _embeddedFiles ??= PdfEmbeddedFileParser.ParseEmbeddedFiles(this);
+        return _embeddedFiles;
+    }
+
+    /// <summary>
+    /// Remove all embedded files from this document.
+    /// Removes the /Catalog/Names/EmbeddedFiles entry and /Catalog/AF arrays if present.
+    /// The embedded-file stream objects remain in the file until the next save rewrites
+    /// the xref; they become unreferenced and the writer drops them.
+    /// This operation is idempotent (safe to call multiple times).
+    ///
+    /// This is critical for redaction security when dealing with hybrid documents like
+    /// ZUGFeRD e-invoices (bundled XML) or legal exhibit packages (source documents).
+    /// After content-level redaction removes glyphs from the visible pages, ScrubEmbeddedFiles
+    /// ensures the data is not also present in the attachment tree.
+    ///
+    /// The change is applied to the in-memory document; call Save afterwards to persist.
+    /// </summary>
+    public void ScrubEmbeddedFiles()
+    {
+        // Clear the cache so subsequent calls will see the updated state
+        _embeddedFiles = null;
+
+        // Remove modern PDF 2.0: /Catalog/Names/EmbeddedFiles
+        var namesObj = Catalog.GetOptional("Names");
+        if (namesObj != null && Resolve(namesObj) is PdfDictionary namesDict)
+            namesDict.Remove("EmbeddedFiles");
+
+        // Remove legacy: /Catalog/AF
+        Catalog.Remove("AF");
+    }
+
+    /// <summary>
+    /// Get the raw XMP metadata stream bytes, or null if the document has no
+    /// /Metadata entry on the catalog. The bytes are the decoded XMP RDF/XML
+    /// body. PDF spec §14.3.2 / XMP spec part 1 §7.6.
+    /// </summary>
+    public byte[]? GetXmpMetadata()
+    {
+        var metaObj = Catalog.GetOptional("Metadata");
+        if (metaObj == null) return null;
+        if (Resolve(metaObj) is not PdfStream stream) return null;
+        try { return stream.DecodedData; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Remove all document-level metadata and optionally embedded files.
+    /// Clears the Info dictionary keys (/Title /Author /Subject /Keywords /Creator
+    /// /Producer /CreationDate /ModDate), removes the Catalog's /Metadata stream,
+    /// and optionally scrubs embedded files (portfolios, associated files).
+    ///
+    /// This is critical for redaction: even after content-level redaction
+    /// removes glyphs from the page body, the title, author, and attachments
+    /// of the document still surface the redacted data to anyone viewing the
+    /// file's properties, running pdfinfo, or extracting attachments.
+    ///
+    /// The change is applied to the in-memory document; call Save afterwards
+    /// to persist.
+    ///
+    /// <param name="scrubAttachments">If true (default), also calls ScrubEmbeddedFiles
+    /// to remove embedded files. For backwards compatibility, defaults to true.</param>
+    /// </summary>
+    public void ScrubMetadata(bool scrubAttachments = true)
+    {
+        // Wipe the legacy Info dictionary in place — keep the dict so xref
+        // structure is preserved, just empty it.
+        if (Info != null)
+        {
+            foreach (var key in InfoKeysToScrub)
+                Info.Remove(key);
+        }
+
+        // Drop the XMP metadata stream from the catalog. The stream object
+        // remains in the file until the next save rewrites the xref; the
+        // catalog no longer points at it.
+        Catalog.Remove("Metadata");
+
+        // Optionally scrub embedded files (portfolios, associated files).
+        if (scrubAttachments)
+            ScrubEmbeddedFiles();
+    }
+
+    /// <summary>
+    /// Selectively scrub Info-dict keys without touching XMP. Useful when
+    /// the caller wants finer control (e.g. preserve /CreationDate but
+    /// drop /Title).
+    /// </summary>
+    public void ScrubInfoKeys(params string[] keys)
+    {
+        if (Info == null || keys == null) return;
+        foreach (var k in keys) Info.Remove(k);
+    }
+
+    private static readonly string[] InfoKeysToScrub = new[]
+    {
+        "Title", "Author", "Subject", "Keywords",
+        "Creator", "Producer", "CreationDate", "ModDate",
+        "Trapped"
+    };
+
     #region Save Methods
 
     /// <summary>
@@ -527,6 +874,50 @@ public class PdfDocument : IDisposable
     }
 
     /// <summary>
+    /// Walk the parsed object tree and decrypt every <see cref="PdfString"/>
+    /// in place. Each indirect object has its own RC4 keystream derived
+    /// from (objNum, gen) — strings inside the same indirect object share
+    /// that keystream regardless of how deeply they're nested in dicts
+    /// or arrays.
+    /// </summary>
+    private void DecryptStringsInPlace(PdfObject root, int objNum, int gen)
+    {
+        if (_securityHandler == null) return;
+
+        // BFS via stack to avoid recursion depth on pathological PDFs.
+        var stack = new Stack<PdfObject>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            switch (node)
+            {
+                case PdfString str:
+                    str.ReplaceBytes(_securityHandler.DecryptString(objNum, gen, str.Bytes));
+                    break;
+                case PdfDictionary dict:
+                    foreach (var kv in dict)
+                        stack.Push(kv.Value);
+                    break;
+                case PdfArray arr:
+                    foreach (var item in arr) stack.Push(item);
+                    break;
+                // Streams: their dict's strings still need decryption,
+                // so recurse into the dict portion. The encoded data is
+                // handled separately by the caller.
+                // (PdfStream inherits from PdfDictionary so the dict
+                // case above already covers it — guard just in case.)
+            }
+        }
+    }
+
+    /// <summary>
+    /// True if this document was opened with a working security handler
+    /// (i.e. encryption is being decrypted transparently).
+    /// </summary>
+    public bool IsDecrypting => _securityHandler != null;
+
+    /// <summary>
     /// Get all objects in the document (for writing).
     /// </summary>
     internal IEnumerable<(int ObjectNumber, int Generation, PdfObject Object)> GetAllObjects()
@@ -550,6 +941,156 @@ public class PdfDocument : IDisposable
     }
 
     #endregion
+
+    /// <summary>
+    /// Get the page label for a given page number (1-based).
+    /// Returns the formatted label string (e.g., "i", "1", "A-1"), or null if no labels defined.
+    /// </summary>
+    public string? GetPageLabel(int pageNumber)
+    {
+        if (pageNumber < 1 || pageNumber > PageCount)
+            return null;
+
+        _pageLabelCache ??= PdfPageLabelParser.ParsePageLabels(this);
+
+        if (_pageLabelCache.Count == 0)
+            return null;
+
+        // Find the label definition that applies to this page (0-based index)
+        int pageIndex = pageNumber - 1;
+        int applicableIndex = -1;
+
+        // Find the highest index <= pageIndex that has a label definition
+        foreach (var key in _pageLabelCache.Keys.OrderBy(k => k))
+        {
+            if (key <= pageIndex)
+                applicableIndex = key;
+            else
+                break;
+        }
+
+        if (applicableIndex < 0)
+            return null;
+
+        var label = _pageLabelCache[applicableIndex];
+        int offset = pageIndex - applicableIndex;
+        return label.Format(offset);
+    }
+
+    /// <summary>
+    /// Get all named destinations in the document.
+    /// Returns an empty dictionary if no named destinations defined.
+    /// </summary>
+    public IReadOnlyDictionary<string, NamedDestination> GetNamedDestinations()
+    {
+        _namedDestinationsCache ??= BuildNamedDestinations();
+        return _namedDestinationsCache;
+    }
+
+    /// <summary>
+    /// Build the named destinations from the catalog.
+    /// </summary>
+    private Dictionary<string, NamedDestination> BuildNamedDestinations()
+    {
+        var result = new Dictionary<string, NamedDestination>();
+
+        // Build page ref → page number map
+        var pageRefToNumber = PdfOutlineParser.BuildPageRefMap(this);
+
+        // Get the raw named destination objects (name → destination array or dict)
+        var rawDests = PdfOutlineParser.BuildNamedDestinations(this);
+        if (rawDests == null)
+            return result;
+
+        foreach (var kvp in rawDests)
+        {
+            var name = kvp.Key;
+            var destObj = Resolve(kvp.Value) as PdfArray;
+            if (destObj == null || destObj.Count == 0)
+                continue;
+
+            // First element is the page reference
+            int? pageNumber = null;
+            if (destObj[0] is PdfReference pageRef &&
+                pageRefToNumber.TryGetValue((pageRef.ObjectNum, pageRef.Generation), out var pageNum))
+            {
+                pageNumber = pageNum;
+            }
+
+            // Parse the destination array: [page /Fit|/FitH|etc params...]
+            var (fitMode, x, y, zoom) = ParseDestinationArray(destObj);
+
+            var dest = new NamedDestination(
+                Name: name,
+                PageNumber: pageNumber,
+                X: x,
+                Y: y,
+                Zoom: zoom,
+                FitMode: fitMode);
+
+            result[name] = dest;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Parse a destination array to extract fit mode and coordinates.
+    /// Format: [page /FitMode param1 param2 ...]
+    /// </summary>
+    private static (string FitMode, double? X, double? Y, double? Zoom) ParseDestinationArray(PdfArray arr)
+    {
+        if (arr.Count < 2)
+            return ("XYZ", null, null, null);
+
+        var fitModeObj = arr[1];
+        string fitMode = fitModeObj is PdfName name ? name.Value : "XYZ";
+
+        // Parse parameters based on fit mode (ISO 32000-2 §12.3.2.2)
+        // Note: PdfName.Value does not include the "/" prefix
+        return fitMode switch
+        {
+            "Fit" => ("Fit", null, null, null),
+            "FitH" => ("FitH", null, arr.Count > 2 ? GetNumber(arr[2]) : null, null),
+            "FitV" => ("FitV", arr.Count > 2 ? GetNumber(arr[2]) : null, null, null),
+            "FitB" => ("FitB", null, null, null),
+            "FitBH" => ("FitBH", null, arr.Count > 2 ? GetNumber(arr[2]) : null, null),
+            "FitBV" => ("FitBV", arr.Count > 2 ? GetNumber(arr[2]) : null, null, null),
+            "FitR" => ("FitR",
+                arr.Count > 2 ? GetNumber(arr[2]) : null,
+                arr.Count > 3 ? GetNumber(arr[3]) : null,
+                null),  // FitR has left, bottom, right, top but we simplify
+            "XYZ" => ("XYZ",
+                arr.Count > 2 ? GetNumber(arr[2]) : null,
+                arr.Count > 3 ? GetNumber(arr[3]) : null,
+                arr.Count > 4 ? GetNumber(arr[4]) : null),
+            _ => ("XYZ", null, null, null)
+        };
+    }
+
+    /// <summary>
+    /// Extract a numeric value from a PDF object.
+    /// </summary>
+    private static double? GetNumber(PdfObject obj)
+    {
+        return obj switch
+        {
+            PdfInteger i => i.Value,
+            PdfReal r => r.Value,
+            PdfNull => null,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Cache for page labels (parsed on first access).
+    /// </summary>
+    private Dictionary<int, PdfPageLabel>? _pageLabelCache;
+
+    /// <summary>
+    /// Cache for named destinations (parsed on first access).
+    /// </summary>
+    private Dictionary<string, NamedDestination>? _namedDestinationsCache;
 
     /// <inheritdoc />
     public void Dispose()

@@ -389,7 +389,460 @@ public class PdfGraphicsTests
 
     #endregion
 
+    #region PdfFont Tests
+
+    [Fact]
+    public void PdfFont_Helvetica_CreatesCorrectly()
+    {
+        var font = PdfFont.Helvetica(12);
+        font.BaseFont.Should().Be("Helvetica");
+        font.Size.Should().Be(12);
+        font.IsStandard14.Should().BeTrue();
+    }
+
+    [Fact]
+    public void PdfFont_HelveticaBold_CreatesCorrectly()
+    {
+        var font = PdfFont.HelveticaBold(14);
+        font.BaseFont.Should().Be("Helvetica-Bold");
+        font.Size.Should().Be(14);
+        font.IsStandard14.Should().BeTrue();
+    }
+
+    [Fact]
+    public void PdfFont_TimesRoman_CreatesCorrectly()
+    {
+        var font = PdfFont.TimesRoman(11);
+        font.BaseFont.Should().Be("Times-Roman");
+        font.Size.Should().Be(11);
+    }
+
+    [Fact]
+    public void PdfFont_TimesBold_CreatesCorrectly()
+    {
+        var font = PdfFont.TimesBold(12);
+        font.BaseFont.Should().Be("Times-Bold");
+        font.Size.Should().Be(12);
+    }
+
+    [Fact]
+    public void PdfFont_TimesItalic_CreatesCorrectly()
+    {
+        var font = PdfFont.TimesItalic(12);
+        font.BaseFont.Should().Be("Times-Italic");
+        font.Size.Should().Be(12);
+    }
+
+    [Fact]
+    public void PdfFont_Courier_CreatesCorrectly()
+    {
+        var font = PdfFont.Courier(10);
+        font.BaseFont.Should().Be("Courier");
+        font.Size.Should().Be(10);
+    }
+
+    [Fact]
+    public void PdfFont_CourierBold_CreatesCorrectly()
+    {
+        var font = PdfFont.CourierBold(10);
+        font.BaseFont.Should().Be("Courier-Bold");
+        font.Size.Should().Be(10);
+    }
+
+    [Fact]
+    public void PdfFont_CourierOblique_CreatesCorrectly()
+    {
+        var font = PdfFont.CourierOblique(10);
+        font.BaseFont.Should().Be("Courier-Oblique");
+        font.Size.Should().Be(10);
+    }
+
+    [Fact]
+    public void PdfFont_HelveticaOblique_CreatesCorrectly()
+    {
+        var font = PdfFont.HelveticaOblique(12);
+        font.BaseFont.Should().Be("Helvetica-Oblique");
+        font.Size.Should().Be(12);
+    }
+
+    [Fact]
+    public void PdfFont_WithSize_CreatesNewFontWithDifferentSize()
+    {
+        var font1 = PdfFont.Helvetica(12);
+        var font2 = font1.WithSize(16);
+
+        font2.Size.Should().Be(16);
+        font2.BaseFont.Should().Be("Helvetica");
+        font1.Size.Should().Be(12); // Original unchanged
+    }
+
+    [Fact]
+    public void PdfFont_WithName_CreatesNewFontWithDifferentName()
+    {
+        var font1 = PdfFont.Helvetica(12);
+        var font2 = font1.WithName("F5");
+
+        font2.Name.Should().Be("F5");
+        font2.BaseFont.Should().Be("Helvetica");
+        font2.Size.Should().Be(12);
+    }
+
+    [Fact]
+    public void PdfFont_MeasureWidth_EmptyString_ReturnsZero()
+    {
+        var font = PdfFont.Helvetica(12);
+        var width = font.MeasureWidth("");
+        width.Should().Be(0);
+    }
+
+    [Fact]
+    public void PdfFont_MeasureWidth_SingleChar_ReturnsNonZero()
+    {
+        var font = PdfFont.Helvetica(12);
+        var width = font.MeasureWidth("A");
+        width.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void PdfFont_MeasureWidth_String_SumOfCharWidths()
+    {
+        var font = PdfFont.Helvetica(12);
+        var widthA = font.MeasureWidth("A");
+        var widthB = font.MeasureWidth("B");
+        var widthAB = font.MeasureWidth("AB");
+
+        widthAB.Should().BeApproximately(widthA + widthB, 0.1);
+    }
+
+    [Fact]
+    public void PdfFont_LineHeight_ReturnsNonZero()
+    {
+        var font = PdfFont.Helvetica(12);
+        var height = font.LineHeight;
+        height.Should().BeGreaterThan(0);
+        height.Should().BeApproximately(12 * 1.2, 0.1);
+    }
+
+    [Fact]
+    public void PdfFont_Ascender_ReturnsNonZero()
+    {
+        var font = PdfFont.Helvetica(12);
+        var ascender = font.Ascender;
+        ascender.Should().BeGreaterThan(0);
+        ascender.Should().BeApproximately(12 * 0.8, 0.1);
+    }
+
+    [Fact]
+    public void PdfFont_Descender_ReturnsNonZero()
+    {
+        var font = PdfFont.Helvetica(12);
+        var descender = font.Descender;
+        descender.Should().BeGreaterThan(0);
+        descender.Should().BeApproximately(12 * 0.2, 0.1);
+    }
+
+    [Fact]
+    public void PdfFont_EncodeString_EmptyString_ReturnsEmptyParens()
+    {
+        var font = PdfFont.Helvetica(12);
+        var encoded = font.EncodeString("");
+        encoded.Should().Be("()");
+    }
+
+    [Fact]
+    public void PdfFont_EncodeString_SimpleText_ProducesPdfString()
+    {
+        var font = PdfFont.Helvetica(12);
+        var encoded = font.EncodeString("Hello");
+        encoded.Should().StartWith("(");
+        encoded.Should().EndWith(")");
+        encoded.Should().Contain("Hello");
+    }
+
+    [Fact]
+    public void PdfFont_EncodeString_WithParentheses_EscapesThem()
+    {
+        var font = PdfFont.Helvetica(12);
+        var encoded = font.EncodeString("(test)");
+        encoded.Should().Contain("\\(");
+        encoded.Should().Contain("\\)");
+    }
+
+    [Fact]
+    public void PdfFont_EncodeString_WithBackslash_EscapesIt()
+    {
+        var font = PdfFont.Helvetica(12);
+        var encoded = font.EncodeString("test\\value");
+        encoded.Should().Contain("\\\\");
+    }
+
+    [Fact]
+    public void PdfFont_ToString_ReturnsFormatted()
+    {
+        var font = PdfFont.Helvetica(12);
+        var str = font.ToString();
+        str.Should().Contain("Helvetica");
+        str.Should().Contain("12");
+        str.Should().Contain("pt");
+    }
+
+    [Fact]
+    public void PdfFont_CourierIsMonospace_AllCharsSameWidth()
+    {
+        var font = PdfFont.Courier(12);
+        var widthA = font.MeasureWidth("A");
+        var widthI = font.MeasureWidth("I");
+        var widthM = font.MeasureWidth("M");
+
+        widthA.Should().BeApproximately(widthI, 0.01);
+        widthI.Should().BeApproximately(widthM, 0.01);
+    }
+
+    [Fact]
+    public void PdfFont_GetFontDictionary_CreatesValidDict()
+    {
+        var font = PdfFont.Helvetica(12);
+        var dict = font.CreateFontDictionary();
+
+        dict["Type"].Should().NotBeNull();
+        dict["BaseFont"].Should().NotBeNull();
+        dict["Subtype"].Should().NotBeNull();
+    }
+
+    #endregion
+
+    #region PdfGraphics Rotate/Transform Tests
+
+    [Fact]
+    public void PdfGraphics_Rotate_AddsRotationMatrix()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        graphics.Rotate(90);
+        var operators = graphics.GetOperators();
+
+        operators.Should().Contain("cm");
+    }
+
+    [Fact]
+    public void PdfGraphics_Transform_AddsTransformMatrix()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        graphics.Transform(1.5, 0, 0, 1.5, 10, 20);
+        var operators = graphics.GetOperators();
+
+        operators.Should().Contain("cm");
+        operators.Should().Contain("1.5");
+    }
+
+    [Fact]
+    public void PdfGraphics_Fill_SetsFillColorAndOperator()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        graphics.BeginPath();
+        graphics.MoveTo(0, 0);
+        graphics.LineTo(100, 0);
+        graphics.LineTo(100, 100);
+        graphics.LineTo(0, 100);
+        graphics.ClosePath();
+        graphics.Fill(PdfBrush.Black);
+
+        var operators = graphics.GetOperators();
+        operators.Should().Contain("f");
+    }
+
+    [Fact]
+    public void PdfGraphics_FillAndStroke_SetsBothOperators()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        graphics.BeginPath();
+        graphics.MoveTo(0, 0);
+        graphics.LineTo(100, 100);
+        graphics.ClosePath();
+        graphics.FillAndStroke(PdfBrush.Red, PdfPen.Black);
+
+        var operators = graphics.GetOperators();
+        operators.Should().Contain("B");
+    }
+
+    [Fact]
+    public void PdfGraphics_DrawString_WithFont_AddsFontOperators()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        var font = PdfFont.Helvetica(12);
+        graphics.DrawString("Test", font, PdfBrush.Black, 100, 100);
+
+        var operators = graphics.GetOperators();
+        operators.Should().Contain("Tf");
+        operators.Should().Contain("Tj");
+    }
+
+    [Fact]
+    public void PdfGraphics_DrawString_WithAlignment_Center_AdjustsPosition()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        var font = PdfFont.Helvetica(12);
+        graphics.DrawString("Test", font, PdfBrush.Black, 100, 100, TextAlignment.Center);
+
+        var operators = graphics.GetOperators();
+        operators.Should().NotBeEmpty();
+        operators.Should().Contain("Tj");
+    }
+
+    [Fact]
+    public void PdfGraphics_DrawString_WithAlignment_Right_AdjustsPosition()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        using var graphics = page.GetGraphics();
+
+        var font = PdfFont.Helvetica(12);
+        graphics.DrawString("Test", font, PdfBrush.Black, 100, 100, TextAlignment.Right);
+
+        var operators = graphics.GetOperators();
+        operators.Should().NotBeEmpty();
+        operators.Should().Contain("Tj");
+    }
+
+    [Fact]
+    public void PdfGraphics_MeasureString_ReturnsNonZeroSize()
+    {
+        var font = PdfFont.Helvetica(12);
+        var size = PdfGraphics.MeasureString("Test", font);
+
+        size.Width.Should().BeGreaterThan(0);
+        size.Height.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void PdfGraphics_MeasureString_EmptyString_ReturnsZero()
+    {
+        var font = PdfFont.Helvetica(12);
+        var size = PdfGraphics.MeasureString("", font);
+
+        size.Width.Should().Be(0);
+        size.Height.Should().Be(0);
+    }
+
+    [Fact]
+    public void PdfGraphics_Flush_WritesToContentStream()
+    {
+        var pdfData = CreateSimplePdf();
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+        var originalLength = page.GetContentStreamBytes().Length;
+
+        using var graphics = page.GetGraphics();
+        graphics.DrawRectangle(10, 10, 50, 50, PdfBrush.Black);
+        graphics.Flush();
+
+        var newLength = page.GetContentStreamBytes().Length;
+        newLength.Should().BeGreaterThan(originalLength);
+    }
+
+    #endregion
+
     #region Helper Methods
+
+    #region PdfPen Tests
+
+    [Fact]
+    public void PdfPen_BlackStatic_IsCreated()
+    {
+        PdfPen.Black.Should().NotBeNull();
+        PdfPen.Black.Color.Should().NotBeNull();
+        PdfPen.Black.Width.Should().Be(1);
+    }
+
+    [Fact]
+    public void PdfPen_WhiteStatic_IsCreated()
+    {
+        PdfPen.White.Should().NotBeNull();
+        PdfPen.White.Color.Should().NotBeNull();
+        PdfPen.White.Width.Should().Be(1);
+    }
+
+    [Fact]
+    public void PdfPen_RedStatic_IsCreated()
+    {
+        PdfPen.Red.Should().NotBeNull();
+        PdfPen.Red.Color.Should().NotBeNull();
+        PdfPen.Red.Width.Should().Be(1);
+    }
+
+    [Fact]
+    public void PdfPen_WithColor_StoresColor()
+    {
+        var pen = new PdfPen(PdfColor.Blue, 2.5);
+        pen.Color.Should().Be(PdfColor.Blue);
+        pen.Width.Should().Be(2.5);
+    }
+
+    [Fact]
+    public void PdfPen_WithNegativeWidth_ClipsToZero()
+    {
+        var pen = new PdfPen(PdfColor.Black, -5);
+        pen.Width.Should().Be(0);
+    }
+
+    [Fact]
+    public void PdfPen_GetStrokeColorOperator_GrayscaleBlack_ProducesOperator()
+    {
+        var pen = PdfPen.Black;
+        var op = pen.GetStrokeColorOperator();
+        op.Should().Contain("G");
+    }
+
+    [Fact]
+    public void PdfPen_GetStrokeColorOperator_Rgb_ProducesRgOperator()
+    {
+        var pen = new PdfPen(PdfColor.Blue, 1);
+        var op = pen.GetStrokeColorOperator();
+        op.Should().Contain("RG");
+    }
+
+    [Fact]
+    public void PdfPen_GetLineWidthOperator_ProducesWOperator()
+    {
+        var pen = new PdfPen(PdfColor.Black, 2.5);
+        var op = pen.GetLineWidthOperator();
+        op.Should().Contain("w");
+        op.Should().Contain("2.5");
+    }
+
+    [Fact]
+    public void PdfPen_GetLineWidthOperator_IntegerWidth_FormatsAsInteger()
+    {
+        var pen = new PdfPen(PdfColor.Black, 3);
+        var op = pen.GetLineWidthOperator();
+        op.Should().Be("3 w");
+    }
+
+    #endregion
 
     private static byte[] CreateSimplePdf()
     {
@@ -457,4 +910,5 @@ public class PdfGraphicsTests
     }
 
     #endregion
+
 }

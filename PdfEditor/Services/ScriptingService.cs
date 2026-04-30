@@ -78,12 +78,18 @@ public class ScriptingService
             // Create and run the script with the ViewModel as global context
             var script = CSharpScript.Create(scriptCode, options, typeof(MainWindowViewModel));
 
-            // Compile the script first to catch syntax errors
-            var diagnostics = script.Compile();
+            // Compile the script first to catch syntax errors. Only Error-severity
+            // diagnostics block execution — warnings such as "Assuming assembly
+            // reference X.0.0.0 used by ReactiveUI matches identity Y.0.0.0" are
+            // benign on cross-major-version runtimes (e.g. ReactiveUI built for
+            // net8 loaded by net10 host) and should not fail the script.
+            var fatal = script.Compile()
+                .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                .ToList();
 
-            if (diagnostics.Any())
+            if (fatal.Count > 0)
             {
-                var errors = diagnostics.Select(d => d.GetMessage()).ToList();
+                var errors = fatal.Select(d => d.GetMessage()).ToList();
                 return ScriptExecutionResult.FromError(string.Join("\n", errors));
             }
 
@@ -136,9 +142,10 @@ public class ScriptingService
         {
             var options = GetScriptOptions();
             var script = CSharpScript.Create(scriptCode, options, typeof(MainWindowViewModel));
-            var diagnostics = script.Compile();
-
-            return diagnostics.Select(d => d.GetMessage()).ToList();
+            return script.Compile()
+                .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                .Select(d => d.GetMessage())
+                .ToList();
         }
         catch (Exception ex)
         {

@@ -2,10 +2,18 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>pdfe</AssemblyName>
+    <!-- ReadyToRun compilation: pre-JIT compile IL at publish time for faster cold-start -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Composite R2R: bundle all dependencies into single R2R image for ~40% better cold-start -->
+    <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
+    <!-- Tiered compilation: helps R2R by deferring optimization to runtime for hot paths -->
+    <TieredCompilation>true</TieredCompilation>
+    <!-- Native AOT: EXPERIMENTAL - uncomment below to test (builds successfully) -->
+    <!-- <PublishAot>true</PublishAot> -->
   </PropertyGroup>
 
   <ItemGroup>

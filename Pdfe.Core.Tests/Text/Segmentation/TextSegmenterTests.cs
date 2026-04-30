@@ -1,5 +1,7 @@
 using FluentAssertions;
+using Pdfe.Core.Content;
 using Pdfe.Core.Document;
+using Pdfe.Core.Primitives;
 using Pdfe.Core.Text;
 using Pdfe.Core.Text.Segmentation;
 using Xunit;
@@ -399,6 +401,268 @@ public class TextSegmenterTests
 
         var overlapType = fullyContained ? GlyphOverlapType.Full : GlyphOverlapType.Partial;
         return (true, overlapType);
+    }
+
+    #endregion
+
+    #region Letter Tests
+
+    [Fact]
+    public void Letter_Properties_AreAccessible()
+    {
+        var rect = new PdfRectangle(100, 700, 110, 720);
+        var letter = new Letter("A", rect, 12, "F1", 100, 700, 10, 65);
+
+        letter.Value.Should().Be("A");
+        letter.FontSize.Should().Be(12);
+        letter.FontName.Should().Be("F1");
+        letter.StartX.Should().Be(100);
+        letter.StartY.Should().Be(700);
+        letter.Width.Should().Be(10);
+        letter.CharacterCode.Should().Be(65);
+    }
+
+    [Fact]
+    public void Letter_StartX_Property_Accessible()
+    {
+        var rect = new PdfRectangle(100, 700, 110, 720);
+        var letter = new Letter("A", rect, 12, "F1", 100, 700, 10, 65);
+        letter.StartX.Should().Be(100);
+    }
+
+    [Fact]
+    public void Letter_Width_Property_Accessible()
+    {
+        var rect = new PdfRectangle(100, 700, 110, 720);
+        var letter = new Letter("A", rect, 12, "F1", 100, 700, 10, 65);
+        letter.Width.Should().Be(10);
+    }
+
+    [Fact]
+    public void Letter_StartBaseLine_Returns_CorrectPoint()
+    {
+        var rect = new PdfRectangle(100, 700, 110, 720);
+        var letter = new Letter("A", rect, 12, "F1", 100, 700, 10, 65);
+        var baseline = letter.StartBaseLine;
+
+        baseline.X.Should().Be(100);
+        baseline.Y.Should().Be(700);
+    }
+
+    [Fact]
+    public void Letter_EndBaseLine_Returns_CorrectPoint()
+    {
+        var rect = new PdfRectangle(100, 700, 110, 720);
+        var letter = new Letter("A", rect, 12, "F1", 100, 700, 10, 65);
+        var endBaseLine = letter.EndBaseLine;
+
+        endBaseLine.X.Should().Be(110); // StartX + Width
+        endBaseLine.Y.Should().Be(700);
+    }
+
+    [Fact]
+    public void Letter_ToString_ReturnsFormattedString()
+    {
+        var rect = new PdfRectangle(100, 700, 110, 720);
+        var letter = new Letter("A", rect, 12, "F1", 100, 700, 10, 65);
+        var str = letter.ToString();
+
+        str.Should().Contain("A");
+        str.Should().Contain("100");
+        str.Should().Contain("700");
+    }
+
+    [Fact]
+    public void Letter_WithLigature_StoresMultipleCharacters()
+    {
+        var rect = new PdfRectangle(100, 700, 115, 720);
+        var letter = new Letter("fi", rect, 12, "F1", 100, 700, 15, 256);
+
+        letter.Value.Should().Be("fi");
+        letter.Width.Should().Be(15);
+    }
+
+    #endregion
+
+    #region TextSegment Tests
+
+    [Fact]
+    public void TextSegment_BoundingBox_Property_Accessible()
+    {
+        var segment = new TextSegment
+        {
+            StartIndex = 0,
+            EndIndex = 5,
+            Keep = false,
+            StartX = 100,
+            StartY = 700,
+            Height = 20,
+            OriginalText = "Hello",
+            Width = 100
+        };
+
+        var bbox = segment.BoundingBox;
+        bbox.Left.Should().Be(100);
+        bbox.Bottom.Should().Be(700);
+        bbox.Right.Should().Be(200);
+        bbox.Top.Should().Be(720);
+    }
+
+    [Fact]
+    public void TextSegment_HasToUnicode_Property_Accessible()
+    {
+        var segment = new TextSegment
+        {
+            StartIndex = 0,
+            EndIndex = 5,
+            Keep = false,
+            StartX = 100,
+            StartY = 700,
+            Height = 20,
+            OriginalText = "Hello",
+            Width = 100
+        };
+
+        segment.HasToUnicode.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TextSegment_WasHexString_Property_Accessible()
+    {
+        var segment = new TextSegment
+        {
+            StartIndex = 0,
+            EndIndex = 5,
+            Keep = false,
+            StartX = 100,
+            StartY = 700,
+            Height = 20,
+            OriginalText = "Hello",
+            Width = 100,
+            WasHexString = true
+        };
+
+        segment.WasHexString.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region LetterMatch Tests
+
+    [Fact]
+    public void LetterMatch_SourceOperation_Property_Accessible()
+    {
+        var letter = new Letter("H", new PdfRectangle(100, 700, 110, 720), 12, "F1", 100, 700, 10, 72);
+        var match = new LetterMatch
+        {
+            Letter = letter,
+            CharacterIndex = 0,
+            SourceOperation = "SomeOperation"
+        };
+
+        match.SourceOperation.Should().NotBeNull();
+    }
+
+    #endregion
+
+    #region Unmapped Character Tests
+
+    [Fact]
+    public void BuildSegments_WithUnmappedCharacter_UsesFixedWidthEstimate()
+    {
+        // Test lines 98-108: "No letter match for this index" else branch in TextSegmenter
+        // This tests the code path when a character has no corresponding letter (unmapped)
+        var segmenter = new TextSegmenter();
+        var text = "Test";
+        var operationBounds = new PdfRectangle(100, 100, 150, 120);
+
+        // Create letter matches for only 3 characters (missing 4th)
+        var letterMatches = new List<LetterMatch>
+        {
+            new LetterMatch
+            {
+                Letter = new Letter("T", new PdfRectangle(100, 100, 110, 120), 12, "F1", 100, 100, 10, 72),
+                CharacterIndex = 0
+            },
+            new LetterMatch
+            {
+                Letter = new Letter("e", new PdfRectangle(110, 100, 118, 120), 12, "F1", 110, 100, 8, 72),
+                CharacterIndex = 1
+            },
+            new LetterMatch
+            {
+                Letter = new Letter("s", new PdfRectangle(118, 100, 125, 120), 12, "F1", 118, 100, 7, 72),
+                CharacterIndex = 2
+            }
+            // Character at index 3 ('t') is unmapped - will trigger the "No letter match" else branch
+        };
+
+        var redactionRect = new PdfRectangle(200, 100, 300, 120); // Outside operation area
+
+        var segments = segmenter.BuildSegments(text, operationBounds, letterMatches, redactionRect);
+
+        // Should still produce segments despite missing letter
+        segments.Should().NotBeEmpty();
+        segments.Should().HaveCountGreaterThan(0);
+        // When no overlap, entire operation is kept
+        segments[0].Keep.Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildSegments_WithAllUnmappedCharacters_ProducesKeepSegment()
+    {
+        // Test when entire operation has no letter mappings but doesn't intersect redaction area
+        var segmenter = new TextSegmenter();
+        var text = "Test";
+        var operationBounds = new PdfRectangle(100, 100, 150, 120);
+        var letterMatches = new List<LetterMatch>(); // No letters at all
+        var redactionRect = new PdfRectangle(200, 100, 300, 120); // No intersection
+
+        var segments = segmenter.BuildSegments(text, operationBounds, letterMatches, redactionRect);
+
+        // Should produce segment for entire operation (no intersection with redaction)
+        segments.Should().HaveCount(1);
+        segments[0].Keep.Should().BeTrue();
+        segments[0].OriginalText.Should().Be("Test");
+    }
+
+    [Fact]
+    public void BuildSegments_WithPartialMappings_UsesEstimateForUnmapped()
+    {
+        // Test mixed case: some letters mapped, some unmapped with partial redaction
+        var segmenter = new TextSegmenter();
+        var text = "Hello";
+        var operationBounds = new PdfRectangle(100, 100, 180, 120);
+
+        // Map only first 2 and last letters
+        var letterMatches = new List<LetterMatch>
+        {
+            new LetterMatch
+            {
+                Letter = new Letter("H", new PdfRectangle(100, 100, 112, 120), 12, "F1", 100, 100, 12, 72),
+                CharacterIndex = 0
+            },
+            new LetterMatch
+            {
+                Letter = new Letter("e", new PdfRectangle(112, 100, 120, 120), 12, "F1", 112, 100, 8, 72),
+                CharacterIndex = 1
+            },
+            // Indices 2, 3 (l, l) are unmapped
+            new LetterMatch
+            {
+                Letter = new Letter("o", new PdfRectangle(160, 100, 175, 120), 12, "F1", 160, 100, 15, 72),
+                CharacterIndex = 4
+            }
+        };
+
+        var redactionRect = new PdfRectangle(200, 100, 250, 120); // No intersection
+
+        var segments = segmenter.BuildSegments(text, operationBounds, letterMatches, redactionRect);
+
+        // Should produce a keep segment for entire operation
+        segments.Should().NotBeEmpty();
+        segments[0].Keep.Should().BeTrue();
+        segments[0].OriginalText.Should().Be("Hello");
     }
 
     #endregion

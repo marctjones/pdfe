@@ -52,3 +52,8 @@ echo "  Linux:   dotnet publish -c Release -r linux-x64 --self-contained true -p
 echo "  macOS:   dotnet publish -c Release -r osx-x64 --self-contained true -p:PublishSingleFile=true"
 echo "  Windows: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true"
 echo ""
+echo "To build CLI with ReadyToRun (R2R) compilation for faster cold-start:"
+echo "  dotnet publish Pdfe.Cli/Pdfe.Cli.csproj -c Release -r linux-x64 --self-contained true"
+echo "  Binaries will be in: Pdfe.Cli/bin/Release/net10.0/linux-x64/publish/"
+echo "  (R2R is auto-enabled in csproj)"
+echo ""

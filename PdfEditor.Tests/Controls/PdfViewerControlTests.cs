@@ -1,10 +1,14 @@
+using System;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Avalonia.Controls;
+using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using FluentAssertions;
 using PdfEditor.Controls;
 using PdfEditor.Tests.Utilities;
-using System;
-using System.Threading.Tasks;
 using Xunit;
 using PdfCoreDocument = Pdfe.Core.Document.PdfDocument;
 
@@ -314,6 +318,173 @@ public class PdfViewerControlTests
 
         // Cleanup
         control.Document?.Dispose();
+    }
+
+    #endregion
+
+    #region Annotation Overlay Tests
+
+    [AvaloniaFact]
+    public async Task PdfViewerControl_LoadDocumentWithAnnotations_AnnotationsLayerHasChildren()
+    {
+        // Build a minimal in-memory PDF with a single Text annotation.
+        var pdf = MakePdfWithAnnotation(
+            "<< /Type /Annot /Subtype /Text /Rect [72 720 108 756] /Contents (test) >>");
+        var control = new PdfViewerControl();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var doc = PdfCoreDocument.Open(new System.IO.MemoryStream(pdf), false);
+            control.Document = doc;
+        });
+
+        // Poll until AnnotationsLayer acquires children (driven by document-load callback).
+        Canvas? layer = null;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+            bool hasChildren = false;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                layer = control.FindControl<Canvas>("AnnotationsLayer");
+                hasChildren = layer?.Children.Count > 0;
+            });
+            if (hasChildren) break;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var annotLayer = control.FindControl<Canvas>("AnnotationsLayer");
+            annotLayer.Should().NotBeNull("AnnotationsLayer canvas must exist");
+            annotLayer!.Children.Count.Should().BeGreaterThan(0,
+                "one annotation should produce at least one rectangle in the overlay");
+            annotLayer.Children.OfType<Rectangle>().Should().NotBeEmpty(
+                "annotations are rendered as Rectangle controls");
+        });
+
+        control.Document?.Dispose();
+    }
+
+    [AvaloniaFact]
+    public async Task PdfViewerControl_SetAnnotationsDirectly_LayerMatchesCount()
+    {
+        // Set the Annotations property with 2 known annotations and verify
+        // that the layer renders exactly 2 rectangles.
+        var pdf = MakePdfWithAnnotation(
+            "<< /Type /Annot /Subtype /Highlight /Rect [10 10 200 30] >>" +
+            "<< /Type /Annot /Subtype /Text    /Rect [50 50 100 80] >>");
+        var control = new PdfViewerControl();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var doc = PdfCoreDocument.Open(new System.IO.MemoryStream(pdf), false);
+            control.Document = doc;
+        });
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+            bool ready = false;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                ready = control.FindControl<Canvas>("AnnotationsLayer")?.Children.Count == 2;
+            });
+            if (ready) break;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var rects = control.FindControl<Canvas>("AnnotationsLayer")!
+                               .Children.OfType<Rectangle>().ToList();
+            rects.Should().HaveCount(2,
+                "two inline annotations should produce exactly two overlay rectangles");
+        });
+
+        control.Document?.Dispose();
+    }
+
+    [AvaloniaFact]
+    public async Task PdfViewerControl_AnnotationsCleared_WhenDocumentSetToNull()
+    {
+        var pdf = MakePdfWithAnnotation(
+            "<< /Type /Annot /Subtype /Text /Rect [0 0 100 20] >>");
+        var control = new PdfViewerControl();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var doc = PdfCoreDocument.Open(new System.IO.MemoryStream(pdf), false);
+            control.Document = doc;
+        });
+
+        // Wait for annotation to appear.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+            bool has = false;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                has = control.FindControl<Canvas>("AnnotationsLayer")?.Children.Count > 0);
+            if (has) break;
+        }
+
+        // Now clear the document.
+        PdfCoreDocument? old = null;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            old = control.Document;
+            control.Document = null;
+        });
+        old?.Dispose();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var layer = control.FindControl<Canvas>("AnnotationsLayer");
+            layer?.Children.Count.Should().Be(0,
+                "annotations must be cleared when the document is removed");
+        });
+    }
+
+    // ─── helpers ────────────────────────────────────────────────────────────
+
+    /// <summary>Build a minimal single-page PDF with one or more inline annotation dicts in /Annots.</summary>
+    private static byte[] MakePdfWithAnnotation(string annotsDef)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long o1, o2, o3, o4;
+
+        o1 = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine("<< /Type /Catalog /Pages 2 0 R >>");
+        sb.AppendLine("endobj");
+
+        o2 = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        sb.AppendLine("endobj");
+
+        o3 = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{annotsDef}] >>");
+        sb.AppendLine("endobj");
+
+        o4 = sb.Length;
+        sb.AppendLine("4 0 obj << /Length 0 >> stream\nendstream\nendobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref\n0 5");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{o1:D10} 00000 n ");
+        sb.AppendLine($"{o2:D10} 00000 n ");
+        sb.AppendLine($"{o3:D10} 00000 n ");
+        sb.AppendLine($"{o4:D10} 00000 n ");
+        sb.AppendLine("trailer\n<< /Size 5 /Root 1 0 R >>");
+        sb.AppendLine($"startxref\n{xrefPos}\n%%%%EOF");
+
+        return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
     #endregion

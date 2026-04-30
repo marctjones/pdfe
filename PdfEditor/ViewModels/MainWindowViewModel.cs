@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
 using PdfEditor.Controls;
 using PdfEditor.Models;
+using Pdfe.Core.Document;
 using PdfEditor.Services;
 using ReactiveUI;
 using System;
@@ -32,10 +33,16 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly PdfTextExtractionService _textExtractionService;
     private readonly SignatureVerificationService _signatureService;
     private readonly FilenameSuggestionService _filenameSuggestionService;
+    private readonly ToastService _toastService;
 
     // State managers
     public DocumentStateManager FileState { get; }
     public RedactionWorkflowManager RedactionWorkflow { get; }
+
+    /// <summary>
+    /// Toast notification service for displaying error/info messages.
+    /// </summary>
+    public ToastService ToastService => _toastService;
 
     private string _currentFilePath = string.Empty;
     private Bitmap? _currentPageImage;
@@ -60,6 +67,20 @@ public partial class MainWindowViewModel : ViewModelBase
     private int _renderCacheMax = 20;
     private string _operationStatus = string.Empty;
     private bool _hasInMemoryModifications; // Tracks if document has been modified in-memory (e.g., redactions applied)
+    private Services.ThumbnailCacheService? _thumbnailCache;
+    internal Services.DocumentTextIndex? TextIndex;
+    private System.Threading.CancellationTokenSource? _indexBuildCts;
+
+    /// <summary>
+    /// Tracks whether the user is in an "auto-fit" zoom state. When set to
+    /// <see cref="ZoomFitMode.FitWidth"/> or <see cref="ZoomFitMode.FitPage"/>
+    /// the renderer re-fits on viewport size changes; once the user manually
+    /// zooms (Ctrl++/-/0) we drop into <see cref="ZoomFitMode.Manual"/> and
+    /// stop auto-recomputing.
+    /// </summary>
+    private ZoomFitMode _zoomFitMode = ZoomFitMode.FitWidth;
+    private bool _isThumbnailsSidebarVisible = true;
+    private bool _isClipboardSidebarVisible = true;
 
     /// <summary>
     /// Parameterless constructor for testing and scripting scenarios.
@@ -79,6 +100,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _searchService = new PdfSearchService(Microsoft.Extensions.Logging.Abstractions.NullLogger<PdfSearchService>.Instance);
         _signatureService = new SignatureVerificationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<SignatureVerificationService>.Instance);
         _filenameSuggestionService = new FilenameSuggestionService();
+        _toastService = new ToastService();
 
         // Initialize state managers
         FileState = new DocumentStateManager();
@@ -105,6 +127,8 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogError(ex, "ApplyRedactionCommand threw exception"));
 
         ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
+        ToggleFormAuthoringModeCommand = ReactiveCommand.Create(() => { IsFormAuthoringMode = !IsFormAuthoringMode; });
+        AutoDetectFieldsCommand = ReactiveCommand.Create(() => AutoDetectAndApplyFormFields());
         CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
         ZoomInCommand = ReactiveCommand.Create(ZoomIn);
         ZoomOutCommand = ReactiveCommand.Create(ZoomOut);
@@ -153,7 +177,8 @@ public partial class MainWindowViewModel : ViewModelBase
         PdfTextExtractionService textExtractionService,
         PdfSearchService searchService,
         SignatureVerificationService signatureService,
-        FilenameSuggestionService filenameSuggestionService)
+        FilenameSuggestionService filenameSuggestionService,
+        ToastService toastService)
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -164,6 +189,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _searchService = searchService;
         _signatureService = signatureService;
         _filenameSuggestionService = filenameSuggestionService;
+        _toastService = toastService;
 
         // Initialize state managers
         FileState = new DocumentStateManager();
@@ -191,6 +217,8 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogError(ex, "ApplyRedactionCommand threw exception"));
 
         ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
+        ToggleFormAuthoringModeCommand = ReactiveCommand.Create(() => { IsFormAuthoringMode = !IsFormAuthoringMode; });
+        AutoDetectFieldsCommand = ReactiveCommand.Create(() => AutoDetectAndApplyFormFields());
         CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
         ZoomInCommand = ReactiveCommand.Create(ZoomIn);
         ZoomOutCommand = ReactiveCommand.Create(ZoomOut);
@@ -243,6 +271,38 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Properties
     public ObservableCollection<PageThumbnail> PageThumbnails { get; }
+
+    /// <summary>
+    /// Top-level outline nodes (PDF table of contents). Empty when the
+    /// document has no /Outlines entry. Each node carries its own children
+    /// for nested chapters/sections; the View binds via TreeView.
+    /// </summary>
+    public ObservableCollection<Models.OutlineNode> OutlineNodes { get; } = new();
+
+    /// <summary>True when the loaded document has at least one outline entry.</summary>
+    public bool HasOutline => OutlineNodes.Count > 0;
+    private bool _isOutlineSidebarVisible = true;
+    public bool IsOutlineSidebarVisible
+    {
+        get => _isOutlineSidebarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isOutlineSidebarVisible, value);
+    }
+
+    private Models.OutlineNode? _selectedOutlineNode;
+    /// <summary>
+    /// Bound to <see cref="Avalonia.Controls.TreeView.SelectedItem"/>. Setting
+    /// this — i.e. the user clicking an outline row — navigates the viewer
+    /// to the node's destination page.
+    /// </summary>
+    public Models.OutlineNode? SelectedOutlineNode
+    {
+        get => _selectedOutlineNode;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _selectedOutlineNode, value);
+            if (value != null) JumpToOutline(value);
+        }
+    }
     public ObservableCollection<ClipboardEntry> ClipboardHistory { get; }
 
     public Bitmap? CurrentPageImage
@@ -263,8 +323,128 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             if (IsRedactionMode) return InteractionMode.Redaction;
             if (IsTextSelectionMode) return InteractionMode.TextSelection;
+            if (IsFormAuthoringMode) return InteractionMode.FormAuthoring;
             return InteractionMode.None;
         }
+    }
+
+    private bool _isFormAuthoringMode;
+    /// <summary>
+    /// When true, dragging on the page draws a new AcroForm field rect of
+    /// type <see cref="FormAuthoringFieldType"/>.
+    /// </summary>
+    public bool IsFormAuthoringMode
+    {
+        get => _isFormAuthoringMode;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isFormAuthoringMode, value);
+            // Mutually exclusive with redaction / text-selection modes.
+            if (value)
+            {
+                if (_isRedactionMode) IsRedactionMode = false;
+                if (_isTextSelectionMode) IsTextSelectionMode = false;
+            }
+            this.RaisePropertyChanged(nameof(InteractionMode));
+            this.RaisePropertyChanged(nameof(CurrentModeText));
+        }
+    }
+
+    private Pdfe.Core.Document.PdfFieldType _formAuthoringFieldType =
+        Pdfe.Core.Document.PdfFieldType.Text;
+    /// <summary>
+    /// Field type the next drag-rect should produce when authoring.
+    /// </summary>
+    public Pdfe.Core.Document.PdfFieldType FormAuthoringFieldType
+    {
+        get => _formAuthoringFieldType;
+        set => this.RaiseAndSetIfChanged(ref _formAuthoringFieldType, value);
+    }
+
+    /// <summary>
+    /// Called by MainWindow when the viewer raises FormFieldRectDrawn.
+    /// Materialises a real form field via the AcroFormAuthoring API and
+    /// refreshes the on-screen overlay so the new field is immediately
+    /// editable.
+    /// </summary>
+    public void OnFormFieldRectDrawn(Pdfe.Core.Document.PdfRectangle rect, int pageNumber)
+    {
+        if (_pdfCoreDocument == null) return;
+        try
+        {
+            var name = NextUniqueFieldName(_pdfCoreDocument, FormAuthoringFieldType);
+            switch (FormAuthoringFieldType)
+            {
+                case Pdfe.Core.Document.PdfFieldType.Text:
+                    _pdfCoreDocument.AddTextField(pageNumber, rect, name);
+                    break;
+                case Pdfe.Core.Document.PdfFieldType.Button:
+                    _pdfCoreDocument.AddCheckBox(pageNumber, rect, name);
+                    break;
+                case Pdfe.Core.Document.PdfFieldType.Signature:
+                    _pdfCoreDocument.AddSignatureField(pageNumber, rect, name);
+                    break;
+                case Pdfe.Core.Document.PdfFieldType.Choice:
+                    // Choice fields need /Opt; default to two placeholder
+                    // options so the field is at least addressable from
+                    // the GUI. The user is expected to edit /Opt later
+                    // through the field properties dialog.
+                    _pdfCoreDocument.AddChoiceField(pageNumber, rect, name,
+                        new[] { "Option 1", "Option 2" });
+                    break;
+                default:
+                    return;
+            }
+            FileState.FormFieldEditsCount++;
+            // Trigger overlay refresh so the new field becomes editable.
+            this.RaisePropertyChanged(nameof(CurrentPageFormFields));
+            _logger.LogInformation("Added {Type} field '{Name}' to page {Page}",
+                FormAuthoringFieldType, name, pageNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to add form field at page {Page}", pageNumber);
+        }
+    }
+
+    /// <summary>
+    /// Run the auto-detector on the current document and apply suggestions.
+    /// </summary>
+    public int AutoDetectAndApplyFormFields()
+    {
+        if (_pdfCoreDocument == null) return 0;
+        var sugg = Pdfe.Core.Document.PdfFormAutoDetector.Scan(_pdfCoreDocument);
+        if (sugg.Count == 0) return 0;
+        var n = Pdfe.Core.Document.PdfFormAutoDetector.Apply(_pdfCoreDocument, sugg);
+        if (n > 0)
+        {
+            FileState.FormFieldEditsCount += n;
+            this.RaisePropertyChanged(nameof(CurrentPageFormFields));
+            _logger.LogInformation("Auto-detected and added {Count} form field(s)", n);
+        }
+        return n;
+    }
+
+    private static string NextUniqueFieldName(
+        Pdfe.Core.Document.PdfDocument doc,
+        Pdfe.Core.Document.PdfFieldType type)
+    {
+        var prefix = type switch
+        {
+            Pdfe.Core.Document.PdfFieldType.Text      => "Text",
+            Pdfe.Core.Document.PdfFieldType.Button    => "Checkbox",
+            Pdfe.Core.Document.PdfFieldType.Choice    => "Choice",
+            Pdfe.Core.Document.PdfFieldType.Signature => "Signature",
+            _                                         => "Field",
+        };
+        var existing = doc.GetAcroForm()?.Fields.Select(f => f.FullName).ToHashSet()
+            ?? new HashSet<string>();
+        for (int i = 1; i < 10_000; i++)
+        {
+            var name = $"{prefix}{i}";
+            if (!existing.Contains(name)) return name;
+        }
+        return $"{prefix}{Guid.NewGuid():N}".Substring(0, 16);
     }
 
     public int CurrentPage => CurrentPageIndex + 1; // 1-based for PdfViewerControl
@@ -281,10 +461,48 @@ public partial class MainWindowViewModel : ViewModelBase
             // notification, thumbnail clicks updated the index but the viewer
             // stayed on the previous page.
             this.RaisePropertyChanged(nameof(CurrentPage));
+            this.RaisePropertyChanged(nameof(CurrentPageFormFields));
             UpdateThumbnailSelection();
             UpdateSearchHighlights(); // Update highlights when page changes (fixes #310)
             RefreshHiddenTextHighlights();
         }
+    }
+
+    /// <summary>
+    /// AcroForm fields whose widget annotations are on the currently
+    /// displayed page. Bound to PdfViewerControl.FormFields so the user can
+    /// edit values inline. Empty when the document has no AcroForm.
+    /// </summary>
+    public IReadOnlyList<Pdfe.Core.Document.PdfField> CurrentPageFormFields
+    {
+        get
+        {
+            if (_pdfCoreDocument == null || _currentPageIndex < 0 || _currentPageIndex >= TotalPages)
+                return Array.Empty<Pdfe.Core.Document.PdfField>();
+            try
+            {
+                return _pdfCoreDocument.GetPage(_currentPageIndex + 1).GetFormFields();
+            }
+            catch
+            {
+                return Array.Empty<Pdfe.Core.Document.PdfField>();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called by MainWindow when PdfViewerControl raises FormFieldEdited.
+    /// The viewer has already mutated the field value via PdfField.SetValue,
+    /// so all that remains is to mark the document dirty so the Save command
+    /// activates. The form-fill overlay reflects the new value already; the
+    /// underlying bitmap is left as-is (the user sees the text in the input
+    /// box, not a rasterized appearance, until they save and re-open).
+    /// </summary>
+    public void OnFormFieldEdited(string fieldName, string? newValue)
+    {
+        if (_pdfCoreDocument == null) return;
+        FileState.FormFieldEditsCount++;
+        _logger.LogInformation("Form field '{Field}' set to '{Value}'", fieldName, newValue);
     }
 
     private bool _revealHiddenText;
@@ -448,9 +666,86 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Visibility of the left thumbnail strip. Toggled from View menu.</summary>
+    public bool IsThumbnailsSidebarVisible
+    {
+        get => _isThumbnailsSidebarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isThumbnailsSidebarVisible, value);
+    }
+
+    /// <summary>Visibility of the right clipboard / pending-redactions sidebar.</summary>
+    public bool IsClipboardSidebarVisible
+    {
+        get => _isClipboardSidebarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isClipboardSidebarVisible, value);
+    }
+
+    public void ToggleThumbnailsSidebar() =>
+        IsThumbnailsSidebarVisible = !IsThumbnailsSidebarVisible;
+
+    public void ToggleClipboardSidebar() =>
+        IsClipboardSidebarVisible = !IsClipboardSidebarVisible;
+
+    public void ToggleOutlineSidebar() =>
+        IsOutlineSidebarVisible = !IsOutlineSidebarVisible;
+
+    /// <summary>
+    /// Click handler for an outline tree row. Jumps to the node's page
+    /// (1-based) if the destination resolved during parse; no-op otherwise.
+    /// Bound via JumpToOutlineCommand on the TreeView item template.
+    /// </summary>
+    public void JumpToOutline(Models.OutlineNode? node)
+    {
+        if (node == null)
+        {
+            _logger.LogDebug("JumpToOutline: null node");
+            return;
+        }
+        if (node.PageNumber == null)
+        {
+            _logger.LogInformation("JumpToOutline: '{Title}' has no resolvable page", node.Title);
+            return;
+        }
+        var idx = node.PageNumber.Value - 1;
+        if (idx < 0 || idx >= TotalPages)
+        {
+            _logger.LogWarning("JumpToOutline: page {Page} out of range", node.PageNumber);
+            return;
+        }
+        _logger.LogInformation("JumpToOutline: '{Title}' → page {Page}", node.Title, node.PageNumber);
+        CurrentPageIndex = idx;
+    }
+
     public string DocumentName => string.IsNullOrEmpty(_currentFilePath)
         ? "No document open"
         : System.IO.Path.GetFileName(_currentFilePath);
+
+    /// <summary>
+    /// Gets the text content of the currently displayed page via the text extraction service.
+    /// Returns empty string if no document is loaded or extraction fails.
+    /// Used for testing: verifies that redacted text has been removed from the PDF structure.
+    /// </summary>
+    public string CurrentPageText
+    {
+        get
+        {
+            if (_pdfCoreDocument == null || _currentPageIndex < 0 || _currentPageIndex >= TotalPages)
+                return string.Empty;
+
+            try
+            {
+                // Use the current page from the Pdfe.Core document to extract text
+                var page = _pdfCoreDocument.GetPage(_currentPageIndex + 1);
+                var text = _textExtractionService.ExtractTextFromPage(_currentFilePath, _currentPageIndex);
+                return text ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract text from page {PageIndex}", _currentPageIndex);
+                return string.Empty;
+            }
+        }
+    }
 
     public bool IsRedactionMode
     {
@@ -460,6 +755,9 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaiseAndSetIfChanged(ref _isRedactionMode, value);
             this.RaisePropertyChanged(nameof(CurrentModeText));
             this.RaisePropertyChanged(nameof(InteractionMode));
+            // The right sidebar's panel selector depends on this flag.
+            this.RaisePropertyChanged(nameof(ShowPendingRedactionsPanel));
+            this.RaisePropertyChanged(nameof(ShowClipboardHistoryPanel));
         }
     }
 
@@ -493,6 +791,20 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         get => _selectedText;
         set => this.RaiseAndSetIfChanged(ref _selectedText, value);
+    }
+
+    /// <summary>
+    /// Called by the View when the user finishes a text-line selection
+    /// drag. The text is already known at the View layer (computed via
+    /// letter hit-testing in PdfViewerControl), so we don't need to
+    /// re-extract from the rect — just publish to SelectedText, copy to
+    /// the clipboard, and add to history.
+    /// </summary>
+    public async Task SetSelectedTextAndCopyAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        SelectedText = text;
+        await PublishToClipboardAndHistoryAsync(text);
     }
 
     public bool DebugVerifyRedaction
@@ -563,17 +875,43 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // Viewport dimensions (set by View for accurate zoom calculations)
+    // Viewport dimensions (set by View for accurate zoom calculations).
+    // Re-applies the active fit mode when they change so window resizes
+    // keep the page snapped to the viewport.
     public double ViewportWidth
     {
         get => _viewportWidth;
-        set => this.RaiseAndSetIfChanged(ref _viewportWidth, value);
+        set
+        {
+            if (Math.Abs(_viewportWidth - value) < 0.5) return;
+            this.RaiseAndSetIfChanged(ref _viewportWidth, value);
+            ReapplyFitModeIfNeeded();
+        }
     }
 
     public double ViewportHeight
     {
         get => _viewportHeight;
-        set => this.RaiseAndSetIfChanged(ref _viewportHeight, value);
+        set
+        {
+            if (Math.Abs(_viewportHeight - value) < 0.5) return;
+            this.RaiseAndSetIfChanged(ref _viewportHeight, value);
+            ReapplyFitModeIfNeeded();
+        }
+    }
+
+    private void ReapplyFitModeIfNeeded()
+    {
+        if (PdfCoreDocument == null) return;
+        switch (_zoomFitMode)
+        {
+            case ZoomFitMode.FitWidth:
+                ZoomFitWidthInternal(latch: true);
+                break;
+            case ZoomFitMode.FitPage:
+                ZoomFitPageInternal(latch: true);
+                break;
+        }
     }
 
     // Search highlight rectangles for current page (in screen coordinates)
@@ -605,12 +943,17 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> ClearAllRedactionsCommand { get; }
     public ReactiveCommand<Unit, Unit> ApplyAllRedactionsCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleTextSelectionModeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleFormAuthoringModeCommand { get; }
+    public ReactiveCommand<Unit, int> AutoDetectFieldsCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyTextCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomInCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomOutCommand { get; }
     public ReactiveCommand<Unit, Unit> NextPageCommand { get; }
     public ReactiveCommand<Unit, Unit> PreviousPageCommand { get; }
     public ReactiveCommand<int, Unit> GoToPageCommand { get; }
+    public ReactiveCommand<Models.OutlineNode, Unit> JumpToOutlineCommand =>
+        _jumpToOutline ??= ReactiveCommand.Create<Models.OutlineNode>(JumpToOutline);
+    private ReactiveCommand<Models.OutlineNode, Unit>? _jumpToOutline;
 
     // Rotation Commands
     public ReactiveCommand<Unit, Unit> RotatePageLeftCommand { get; }
@@ -725,23 +1068,98 @@ public partial class MainWindowViewModel : ViewModelBase
             this.RaisePropertyChanged(nameof(DocumentName));
             this.RaisePropertyChanged(nameof(StatusBarText));
 
-            _logger.LogInformation(">>> STEP 5: Calling _documentService.LoadDocument");
-            _documentService.LoadDocument(filePath);
+            // Stage label for the status bar — empty string clears it. Rendering
+            // text + the parser parse both happen off the UI thread, but the
+            // user otherwise has no signal that anything is in progress.
+            OperationStatus = "Opening PDF…";
 
-            _logger.LogInformation(">>> STEP 5.5: Loading Pdfe.Core document for PdfViewerControl");
-            PdfCoreDocument = await Task.Run(() => Pdfe.Core.Document.PdfDocument.Open(filePath));
-            _logger.LogInformation(">>> STEP 5.5: Pdfe.Core document loaded successfully");
+            // Open the document on a worker thread (the parser walks the
+            // entire xref + catalog up front; on a 455-page book that's
+            // hundreds of milliseconds we shouldn't pay on the dispatcher).
+            // Both services need their own instance — they have separate
+            // ownership lifecycles — but the parses run in parallel.
+            _logger.LogInformation(">>> STEP 5: Loading Pdfe.Core document (parallel parse)");
+            var docServiceLoad = Task.Run(() => _documentService.LoadDocument(filePath));
+            var coreDocLoad = Task.Run(() => Pdfe.Core.Document.PdfDocument.Open(filePath));
+            await Task.WhenAll(docServiceLoad, coreDocLoad);
+            PdfCoreDocument = await coreDocLoad;
+            _logger.LogInformation(">>> STEP 5: Both document instances loaded");
 
             _logger.LogInformation(">>> STEP 6: Setting CurrentPageIndex = 0");
             CurrentPageIndex = 0;
 
-            _logger.LogInformation(">>> STEP 7: Loading page thumbnails");
-            await LoadPageThumbnailsAsync();
-            _logger.LogInformation(">>> STEP 7: Page thumbnails loaded successfully");
-
-            _logger.LogInformation(">>> STEP 8: Rendering current page");
+            // Render the current page FIRST — the user wants to see
+            // something. The 455 thumbnails for the sidebar can come
+            // afterwards. Pre-fix the order was reversed and on a long
+            // document we'd block on N×Task.Run thumbnail jobs before the
+            // user saw page 1, saturating the threadpool the main render
+            // also needed.
+            OperationStatus = $"Rendering page 1 of {TotalPages}…";
+            _logger.LogInformation(">>> STEP 7: Rendering current page");
             await RenderCurrentPageAsync();
-            _logger.LogInformation(">>> STEP 8: Current page rendered successfully");
+            _logger.LogInformation(">>> STEP 7: Current page rendered successfully");
+
+            // Auto-fit-width on document open so the page is never wider than
+            // the central pane (otherwise it scrolls behind the right sidebar
+            // on default windows). The fit-mode latch in the ZoomFit* path
+            // also keeps it fitted on subsequent window resizes.
+            ReapplyFitModeIfNeeded();
+
+            // Build the on-disk thumbnail cache for this document; the
+            // strip's items will pull from it on demand as they scroll
+            // into view (no eager batch render any more — that fired
+            // hundreds of renders for pages the user might never look at).
+            _thumbnailCache?.Dispose();
+            _thumbnailCache = new Services.ThumbnailCacheService(
+                filePath, PdfCoreDocument!,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+            _logger.LogInformation(">>> STEP 8: Creating thumbnail placeholders (lazy load)");
+            await LoadPageThumbnailsAsync();
+
+            // Parse the document's table-of-contents outline (if any).
+            // Cheap — just a tree walk over the catalog's /Outlines, no
+            // text extraction needed. Populates the left-sidebar tree.
+            try
+            {
+                var outline = Pdfe.Core.Document.PdfOutlineParser.Parse(PdfCoreDocument!);
+                OutlineNodes.Clear();
+                foreach (var item in outline)
+                    OutlineNodes.Add(Models.OutlineNode.From(item));
+                this.RaisePropertyChanged(nameof(HasOutline));
+                _logger.LogInformation(">>> STEP 8b: Outline parsed — {Count} top-level entries", outline.Count);
+            }
+            catch (Exception outlineEx)
+            {
+                _logger.LogWarning(outlineEx, "Failed to parse document outline");
+                OutlineNodes.Clear();
+            }
+
+            // Kick off the text index build in the background. First
+            // search after this completes is sub-second instead of the
+            // multi-second per-keystroke walk we used to do live.
+            _indexBuildCts?.Cancel();
+            _indexBuildCts = new System.Threading.CancellationTokenSource();
+            TextIndex = new Services.DocumentTextIndex(PdfCoreDocument!,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            var indexCts = _indexBuildCts;
+            var totalPagesForIndex = TotalPages;
+            var indexProgress = new Progress<(int Done, int Total)>(p =>
+            {
+                if (indexCts.IsCancellationRequested) return;
+                // Don't overwrite a "Searching…" / "Rendering…" status —
+                // index building runs alongside other ops and shouldn't
+                // hijack the bar. Only show indexing progress when nothing
+                // else is in flight.
+                if (string.IsNullOrEmpty(OperationStatus) ||
+                    OperationStatus.StartsWith("Indexing"))
+                {
+                    OperationStatus = p.Done < p.Total
+                        ? $"Indexing for search… {p.Done}/{p.Total}"
+                        : string.Empty;
+                }
+            });
+            _ = TextIndex.BuildAsync(indexProgress, indexCts.Token);
 
             _logger.LogInformation(">>> STEP 9: RaisePropertyChanged(TotalPages)");
             this.RaisePropertyChanged(nameof(TotalPages));
@@ -755,6 +1173,9 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogInformation(">>> STEP 12: Adding to recent files");
             AddToRecentFiles(filePath);
 
+            _logger.LogInformation(">>> STEP 12b: Restoring document state (zoom, page index)");
+            await RestoreDocumentStateAsync(filePath);
+
             _logger.LogInformation(">>> STEP 13: LoadDocumentAsync COMPLETE. Total pages: {PageCount}", TotalPages);
         }
         catch (Exception ex)
@@ -766,20 +1187,24 @@ public partial class MainWindowViewModel : ViewModelBase
             // Clear document state on failure
             _currentFilePath = string.Empty;
             FileState.Reset();
+            OperationStatus = string.Empty;
 
             // Determine user-friendly error message
             string userMessage;
             if (ex.Message.Contains("owner password") || ex.Message.Contains("password is required"))
             {
-                userMessage = "This PDF is password-protected and cannot be opened for editing.\n\nPlease use the original application to remove password protection, or open a different file.";
+                userMessage = "This PDF is password-protected and cannot be opened for editing.";
+                _toastService.ShowError("Cannot Open PDF", "Password-protected file. Please remove protection and try again.");
             }
             else if (ex.Message.Contains("encrypted"))
             {
-                userMessage = "This PDF is encrypted and cannot be opened.\n\nPlease provide an unencrypted version of the file.";
+                userMessage = "This PDF is encrypted and cannot be opened.";
+                _toastService.ShowError("Cannot Open PDF", "File is encrypted. Please provide an unencrypted version.");
             }
             else
             {
                 userMessage = $"Failed to open PDF:\n\n{ex.Message}";
+                _toastService.ShowError("Cannot Open PDF", ex.Message);
             }
 
             // Show error dialog to user (StatusBarText will show "Ready" from FileState.Reset())
@@ -870,10 +1295,12 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _documentService.SaveDocument();
             _logger.LogInformation("Document saved successfully");
+            _toastService.ShowSuccess("Document saved");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error saving document");
+            _toastService.ShowError("Failed to save document", ex.Message);
         }
 
         await Task.CompletedTask;
@@ -1014,77 +1441,83 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             string textToCopy;
 
-            // If there's a selection area, extract text from that area
-            if (CurrentTextSelectionArea.Width > 0 && CurrentTextSelectionArea.Height > 0)
+            // Letter-walk selection (PdfViewerControl.OnInteractionLayerPointerReleased)
+            // already populated SelectedText with the exact text the user
+            // dragged over. Use it directly. The earlier rect-based path
+            // re-extracted from CurrentTextSelectionArea, which silently
+            // grabbed extra glyphs from neighbouring lines/columns when
+            // the bbox extended past the actual selection — the user's
+            // "Ctrl+C copies wrong text" bug.
+            if (!string.IsNullOrEmpty(SelectedText))
             {
-                _logger.LogInformation(
-                    "Extracting text from selection area on page {PageIndex}: ({X:F2},{Y:F2},{W:F2}x{H:F2})",
-                    CurrentPageIndex + 1,
-                    CurrentTextSelectionArea.X, CurrentTextSelectionArea.Y,
-                    CurrentTextSelectionArea.Width, CurrentTextSelectionArea.Height);
-
-                textToCopy = _textExtractionService.ExtractTextFromArea(
-                    _currentFilePath, CurrentPageIndex, CurrentTextSelectionArea);
+                textToCopy = SelectedText;
             }
             else
             {
-                // No selection, extract all text from current page
-                _logger.LogInformation("Extracting all text from page {PageIndex}", CurrentPageIndex + 1);
+                // No live selection — fall back to whole-page extraction.
+                _logger.LogInformation("No live selection; extracting all text from page {PageIndex}", CurrentPageIndex + 1);
                 textToCopy = _textExtractionService.ExtractTextFromPage(_currentFilePath, CurrentPageIndex);
             }
 
-            if (!string.IsNullOrEmpty(textToCopy))
+            if (string.IsNullOrEmpty(textToCopy))
             {
-                // Log the actual text being copied (first 200 chars for preview)
-                var textPreview = textToCopy.Length > 200 ? textToCopy.Substring(0, 200) + "..." : textToCopy;
-                _logger.LogInformation(
-                    "TEXT EXTRACTED ({Length} chars): \"{Text}\"",
-                    textToCopy.Length, textPreview);
-
-                // Copy to clipboard using TopLevel
-                var topLevel = Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                    ? desktop.MainWindow
-                    : null;
-
-                if (topLevel?.Clipboard != null)
-                {
-                    await topLevel.Clipboard.SetTextAsync(textToCopy);
-                    SelectedText = textToCopy;
-                    _logger.LogInformation("✓ Successfully copied {Length} characters to clipboard", textToCopy.Length);
-
-                    // Add to clipboard history
-                    var clipboardEntry = new ClipboardEntry
-                    {
-                        Text = textToCopy,
-                        Timestamp = DateTime.Now,
-                        PageNumber = CurrentPageIndex + 1
-                    };
-
-                    // Add to beginning of list (most recent first)
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        ClipboardHistory.Insert(0, clipboardEntry);
-
-                        // Keep only last 20 entries
-                        while (ClipboardHistory.Count > 20)
-                        {
-                            ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
-                        }
-                    });
-                }
-                else
-                {
-                    _logger.LogWarning("Clipboard not available");
-                }
+                _logger.LogWarning("No text to copy");
+                return;
             }
-            else
-            {
-                _logger.LogWarning("No text extracted from selection - area may not contain any text");
-            }
+
+            SelectedText = textToCopy;
+            await PublishToClipboardAndHistoryAsync(textToCopy);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error copying text");
+            _toastService.ShowError("Failed to copy text", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Copy the given text to the OS clipboard (best effort) AND record
+    /// it in <see cref="ClipboardHistory"/>. Splitting these concerns
+    /// keeps the in-app history correct even when the OS clipboard isn't
+    /// reachable (headless tests, transient lifecycle states).
+    /// </summary>
+    private async Task PublishToClipboardAndHistoryAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        var entry = new ClipboardEntry
+        {
+            Text = text,
+            Timestamp = DateTime.Now,
+            PageNumber = CurrentPageIndex + 1,
+        };
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            ClipboardHistory.Insert(0, entry);
+            while (ClipboardHistory.Count > 20)
+                ClipboardHistory.RemoveAt(ClipboardHistory.Count - 1);
+        });
+
+        try
+        {
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow
+                : null;
+            if (topLevel?.Clipboard != null)
+            {
+                await topLevel.Clipboard.SetTextAsync(text);
+                _logger.LogInformation("✓ Copied {Length} characters to clipboard", text.Length);
+            }
+            else
+            {
+                _logger.LogWarning("OS clipboard unavailable; text recorded in history only");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to set OS clipboard");
         }
     }
 
@@ -1405,6 +1838,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error applying redaction");
+            _toastService.ShowError("Redaction failed", ex.Message);
         }
         finally
         {
@@ -1516,12 +1950,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void ZoomIn()
     {
+        // User-initiated zoom drops out of any auto-fit mode so a window
+        // resize doesn't immediately undo what they just clicked.
+        _zoomFitMode = ZoomFitMode.Manual;
         ZoomLevel = Math.Min(ZoomLevel * 1.25, 5.0);
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
     private void ZoomOut()
     {
+        _zoomFitMode = ZoomFitMode.Manual;
         ZoomLevel = Math.Max(ZoomLevel / 1.25, 0.25);
         this.RaisePropertyChanged(nameof(StatusText));
     }
@@ -1529,68 +1967,87 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ZoomActualSize()
     {
         _logger.LogInformation("Setting zoom to actual size (100%)");
+        _zoomFitMode = ZoomFitMode.Manual;
         ZoomLevel = 1.0;
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
-    private void ZoomFitWidth()
+    private void ZoomFitWidth() => ZoomFitWidthInternal(latch: true);
+    private void ZoomFitPage() => ZoomFitPageInternal(latch: true);
+
+    /// <summary>
+    /// Resize zoom to fit the page width. When <paramref name="latch"/> is
+    /// true the mode is recorded so subsequent viewport-size changes
+    /// re-apply this fit until the user manually zooms.
+    /// </summary>
+    private void ZoomFitWidthInternal(bool latch)
     {
         _logger.LogInformation("Setting zoom to fit width");
-
-        if (_currentPageImage == null || ViewportWidth <= 0)
+        if (latch) _zoomFitMode = ZoomFitMode.FitWidth;
+        if (TryGetPageDimensionsInViewerDips(out var pageW, out _) &&
+            ViewportWidth > 0)
         {
-            // Fallback to default if no image loaded
-            ZoomLevel = 1.0;
-            this.RaisePropertyChanged(nameof(StatusText));
-            return;
-        }
-
-        // Calculate zoom to fit page width in viewport (with small margin)
-        var pageWidth = _currentPageImage.Size.Width;
-        var margin = 40; // Leave some margin on sides
-        var targetWidth = ViewportWidth - margin;
-
-        if (pageWidth > 0)
-        {
-            ZoomLevel = Math.Max(0.25, Math.Min(5.0, targetWidth / pageWidth));
+            // Tiny gutter so the page edge doesn't kiss the scrollbar /
+            // central-pane border. Now that the viewport measurement is
+            // the *inside-the-scrollbars* width and zoom uses LayoutTransform,
+            // the math doesn't need a 40-DIP fudge any more.
+            const double margin = 8;
+            var target = Math.Max(1.0, ViewportWidth - margin);
+            ZoomLevel = Math.Clamp(target / pageW, 0.25, 5.0);
             _logger.LogDebug("Fit width: viewport={Viewport}, page={Page}, zoom={Zoom:P0}",
-                ViewportWidth, pageWidth, ZoomLevel);
+                ViewportWidth, pageW, ZoomLevel);
         }
-
+        else
+        {
+            ZoomLevel = 1.0;
+        }
         this.RaisePropertyChanged(nameof(StatusText));
     }
 
-    private void ZoomFitPage()
+    private void ZoomFitPageInternal(bool latch)
     {
         _logger.LogInformation("Setting zoom to fit page");
-
-        if (_currentPageImage == null || ViewportWidth <= 0 || ViewportHeight <= 0)
+        if (latch) _zoomFitMode = ZoomFitMode.FitPage;
+        if (TryGetPageDimensionsInViewerDips(out var pageW, out var pageH) &&
+            ViewportWidth > 0 && ViewportHeight > 0)
         {
-            // Fallback to default if no image loaded
+            const double marginH = 8;
+            const double marginV = 8;
+            var targetW = Math.Max(1.0, ViewportWidth - marginH);
+            var targetH = Math.Max(1.0, ViewportHeight - marginV);
+            // Whichever dimension is the binding constraint wins.
+            var zoom = Math.Min(targetW / pageW, targetH / pageH);
+            ZoomLevel = Math.Clamp(zoom, 0.25, 5.0);
+            _logger.LogDebug("Fit page: vp=({Vw}x{Vh}), pg=({Pw}x{Ph}), zoom={Zoom:P0}",
+                ViewportWidth, ViewportHeight, pageW, pageH, ZoomLevel);
+        }
+        else
+        {
             ZoomLevel = 1.0;
-            this.RaisePropertyChanged(nameof(StatusText));
-            return;
         }
-
-        // Calculate zoom to fit entire page in viewport (with margins)
-        var pageWidth = _currentPageImage.Size.Width;
-        var pageHeight = _currentPageImage.Size.Height;
-        var marginH = 40;
-        var marginV = 40;
-        var targetWidth = ViewportWidth - marginH;
-        var targetHeight = ViewportHeight - marginV;
-
-        if (pageWidth > 0 && pageHeight > 0)
-        {
-            // Use the smaller ratio to fit both dimensions
-            var zoomW = targetWidth / pageWidth;
-            var zoomH = targetHeight / pageHeight;
-            ZoomLevel = Math.Max(0.25, Math.Min(5.0, Math.Min(zoomW, zoomH)));
-            _logger.LogDebug("Fit page: viewport=({VW}x{VH}), page=({PW}x{PH}), zoom={Zoom:P0}",
-                ViewportWidth, ViewportHeight, pageWidth, pageHeight, ZoomLevel);
-        }
-
         this.RaisePropertyChanged(nameof(StatusText));
+    }
+
+    /// <summary>
+    /// Page dimensions in viewer DIPs at zoom 1.0. Reads page size from
+    /// the parsed PdfCoreDocument (in PDF points) so we don't depend on
+    /// the legacy <c>_currentPageImage</c> being populated, and converts
+    /// to DIPs at the viewer's render DPI (the bitmap is tagged 96 DPI
+    /// in WriteableBitmap so 1 bitmap-pixel = 1 DIP, and 1 page-point at
+    /// our render DPI = render-DPI/72 bitmap-pixels).
+    /// </summary>
+    private bool TryGetPageDimensionsInViewerDips(out double widthDip, out double heightDip)
+    {
+        widthDip = 0; heightDip = 0;
+        var doc = PdfCoreDocument;
+        if (doc == null) return false;
+        var pageNumber = CurrentPageIndex + 1;
+        if (pageNumber < 1 || pageNumber > doc.PageCount) return false;
+        var page = doc.GetPage(pageNumber);
+        const double renderDpi = 120.0; // matches PdfViewerControl.DefaultRenderDpi
+        widthDip  = page.Width  * (renderDpi / 72.0);
+        heightDip = page.Height * (renderDpi / 72.0);
+        return widthDip > 0 && heightDip > 0;
     }
 
     private async Task NextPageAsync()
@@ -1704,6 +2161,13 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        // Surface a stage label in the status bar so the user has feedback
+        // during the render. Keep the existing label if a thumbnail batch
+        // is still in flight (it'll overwrite this anyway as it ticks).
+        var existingStatus = OperationStatus;
+        var renderingStatus = $"Rendering page {DisplayPageNumber} of {TotalPages}…";
+        OperationStatus = renderingStatus;
+
         try
         {
             SkiaSharp.SKBitmap? skBitmap = null;
@@ -1757,6 +2221,14 @@ public partial class MainWindowViewModel : ViewModelBase
             _logger.LogError("!!! Exception Message: {Message}", ex.Message);
             throw;
         }
+        finally
+        {
+            // Only clear if we set the rendering label AND nothing else
+            // overwrote it during the render (the thumbnail batch keeps
+            // updating as pages complete and should win).
+            if (OperationStatus == renderingStatus)
+                OperationStatus = existingStatus;
+        }
     }
 
     private void UpdateThumbnailSelection()
@@ -1767,119 +2239,64 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task LoadPageThumbnailsAsync()
+    /// <summary>
+    /// Lazy thumbnail strategy: create one PageThumbnail placeholder per
+    /// page (so the sidebar shows the right number of slots immediately)
+    /// and let the View trigger renders as items scroll into view via
+    /// <c>EnsureThumbnailLoadedAsync</c>. Combined with the on-disk
+    /// thumbnail cache (ThumbnailCacheService), reopening a book renders
+    /// only the pages the user looks at, and re-opens hit a sub-ms WebP
+    /// decode rather than re-rasterising.
+    /// </summary>
+    private Task LoadPageThumbnailsAsync()
     {
-        _logger.LogInformation(">>> LoadPageThumbnailsAsync: START");
-
-        if (string.IsNullOrEmpty(_currentFilePath))
-        {
-            _logger.LogWarning(">>> LoadPageThumbnailsAsync: SKIP (no file)");
-            return;
-        }
-
+        _logger.LogInformation(">>> LoadPageThumbnailsAsync (lazy): START");
         try
         {
-            // Capture the current file path to avoid race conditions
-            var filePath = _currentFilePath;
-
-            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Clearing existing thumbnails");
             PageThumbnails.Clear();
-
-            var loadTasks = new List<Task>();
-
-            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Creating thumbnail placeholders for {PageCount} pages", TotalPages);
-
-            for (int i = 0; i < TotalPages; i++)
-            {
-                var thumbnail = new PageThumbnail
-                {
-                    PageNumber = i + 1,
-                    PageIndex = i
-                };
-
-                PageThumbnails.Add(thumbnail);
-
-                // Load thumbnail asynchronously
-                int pageIndex = i;
-                var task = Task.Run(async () =>
-                {
-                    _logger.LogInformation(">>> LoadPageThumbnailsAsync: Task.Run started for page {PageIndex}", pageIndex);
-
-                    try
-                    {
-                        _logger.LogInformation(">>> LoadPageThumbnailsAsync: About to call RenderThumbnailAsync for page {PageIndex}", pageIndex);
-
-                        SKBitmap? image = null;
-                        try
-                        {
-                            image = await _renderService.RenderThumbnailAsync(filePath, pageIndex).ConfigureAwait(false);
-                        }
-                        catch (Exception renderEx)
-                        {
-                            _logger.LogError(renderEx, "!!! ERROR calling RenderThumbnailAsync for page {PageIndex}", pageIndex);
-                            throw;
-                        }
-
-                        if (image == null)
-                        {
-                            _logger.LogWarning(">>> LoadPageThumbnailsAsync: RenderThumbnailAsync returned null for page {PageIndex}", pageIndex);
-                            return;
-                        }
-
-                        _logger.LogInformation(">>> LoadPageThumbnailsAsync: About to invoke UI thread for page {PageIndex}", pageIndex);
-
-                        // Update UI on UI thread
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                        {
-                            try
-                            {
-                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] ENTERED callback for page {PageIndex}", pageIndex);
-                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] About to convert bitmap for page {PageIndex}", pageIndex);
-                                var avaloniaBitmap = ToAvaloniaBitmap(image);
-                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] Bitmap converted, about to set property for page {PageIndex}", pageIndex);
-                                thumbnail.ThumbnailImage = avaloniaBitmap;
-                                _logger.LogInformation(">>> LoadPageThumbnailsAsync: [UI Thread] ThumbnailImage property set for page {PageIndex}", pageIndex);
-                            }
-                            catch (Exception uiEx)
-                            {
-                                _logger.LogError(uiEx, "!!! ERROR in UI thread callback for thumbnail {PageIndex}", pageIndex);
-                                _logger.LogError("!!! UI Exception Type: {ExceptionType}", uiEx.GetType().Name);
-                                _logger.LogError("!!! UI Exception Message: {Message}", uiEx.Message);
-                                _logger.LogError("!!! UI Stack Trace: {StackTrace}", uiEx.StackTrace);
-                            }
-                        });
-                        _logger.LogInformation(">>> LoadPageThumbnailsAsync: Dispatcher.InvokeAsync RETURNED for page {PageIndex}", pageIndex);
-
-                        // Dispose the SKBitmap now that we've converted it to Avalonia bitmap
-                        image?.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "!!! ERROR in thumbnail task for page {PageIndex}", pageIndex);
-                        _logger.LogError("!!! Thumbnail Exception Type: {ExceptionType}", ex.GetType().Name);
-                        _logger.LogError("!!! Thumbnail Exception Message: {Message}", ex.Message);
-                        _logger.LogError("!!! Thumbnail Stack Trace: {StackTrace}", ex.StackTrace);
-                    }
-
-                    _logger.LogInformation(">>> LoadPageThumbnailsAsync: Task.Run ENDING for page {PageIndex}", pageIndex);
-                });
-
-                loadTasks.Add(task);
-            }
-
-            // Wait for all thumbnails to load
-            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Waiting for all {Count} thumbnails to load", loadTasks.Count);
-            await Task.WhenAll(loadTasks);
-            _logger.LogInformation(">>> LoadPageThumbnailsAsync: Task.WhenAll completed");
-
-            _logger.LogInformation(">>> LoadPageThumbnailsAsync: COMPLETE - All {Count} thumbnails loaded successfully", TotalPages);
+            var total = TotalPages;
+            for (int i = 0; i < total; i++)
+                PageThumbnails.Add(new PageThumbnail { PageNumber = i + 1, PageIndex = i });
+            _logger.LogInformation(
+                ">>> LoadPageThumbnailsAsync: created {Count} placeholders; loads happen on demand",
+                total);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "!!! ERROR in LoadPageThumbnailsAsync");
-            _logger.LogError("!!! Exception Type: {ExceptionType}", ex.GetType().Name);
-            _logger.LogError("!!! Exception Message: {Message}", ex.Message);
-            throw;
+            _logger.LogError(ex, "!!! ERROR creating thumbnail placeholders");
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Render or load the thumbnail for one page. Called by the View when
+    /// the corresponding item scrolls into the visible viewport. Idempotent:
+    /// repeated calls for an already-loaded page no-op; concurrent calls for
+    /// the same page coalesce on a single in-flight Task in the cache service.
+    /// </summary>
+    public async Task EnsureThumbnailLoadedAsync(int pageIndex,
+        System.Threading.CancellationToken cancellationToken = default)
+    {
+        if (pageIndex < 0 || pageIndex >= PageThumbnails.Count) return;
+        var thumb = PageThumbnails[pageIndex];
+        if (thumb.ThumbnailImage != null) return; // already loaded
+        if (_thumbnailCache == null) return; // no doc loaded yet
+
+        try
+        {
+            using var sk = await _thumbnailCache.GetThumbnailAsync(pageIndex, cancellationToken);
+            if (sk == null) return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                thumb.ThumbnailImage = ToAvaloniaBitmap(sk);
+            }, DispatcherPriority.Background);
+        }
+        catch (OperationCanceledException) { /* expected when scrolled away */ }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "EnsureThumbnailLoadedAsync failed for page {Page}", pageIndex);
         }
     }
 
@@ -1963,6 +2380,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         try
         {
+            // Save document state before closing
+            SaveDocumentState();
+
             // Close the PDF document
             _documentService.CloseDocument();
 
@@ -2661,23 +3081,83 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Restore document state (zoom level and last page index) from persisted settings.
+    /// Called after a document is successfully loaded.
+    /// </summary>
+    private async Task RestoreDocumentStateAsync(string filePath)
+    {
+        try
+        {
+            var settings = Models.WindowSettings.Load();
+            var docState = settings.DocumentStates.FirstOrDefault(d =>
+                System.IO.Path.GetFullPath(d.FilePath) == System.IO.Path.GetFullPath(filePath));
+
+            if (docState != null)
+            {
+                _logger.LogInformation("Restoring document state: ZoomLevel={Zoom}, LastPageIndex={Page}",
+                    docState.ZoomLevel, docState.LastPageIndex);
+
+                // Restore zoom level
+                if (docState.ZoomLevel > 0 && docState.ZoomLevel <= 5.0) // Reasonable bounds
+                {
+                    _skipZoomSave = true;
+                    ZoomLevel = docState.ZoomLevel;
+                    _zoomFitMode = ZoomFitMode.Manual;
+                    _skipZoomSave = false;
+                    _logger.LogDebug("Zoom restored: {Zoom}", docState.ZoomLevel);
+                }
+
+                // Restore last page index
+                if (docState.LastPageIndex >= 0 && docState.LastPageIndex < TotalPages)
+                {
+                    await GoToPageAsync(docState.LastPageIndex);
+                    _logger.LogDebug("Page restored: {Page}", docState.LastPageIndex);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to restore document state for {FilePath}", filePath);
+            // Don't fail document load if state restoration fails
+        }
+    }
+
+    /// <summary>
+    /// Save document state (zoom level and current page) to persistent settings.
+    /// Called when the document is being closed.
+    /// </summary>
+    private void SaveDocumentState()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_currentFilePath) || !_documentService.IsDocumentLoaded)
+                return;
+
+            var settings = Models.WindowSettings.Load();
+            settings.UpdateDocumentState(_currentFilePath, ZoomLevel, CurrentPageIndex);
+            settings.Save();
+            _logger.LogDebug("Document state saved for {FilePath}: Zoom={Zoom}, Page={Page}",
+                _currentFilePath, ZoomLevel, CurrentPageIndex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save document state");
+        }
+    }
+
+    /// <summary>
     /// Converts an SKBitmap to an Avalonia.Media.Imaging.Bitmap.
     /// </summary>
     /// <param name="skBitmap">The SKBitmap to convert.</param>
     /// <returns>An Avalonia.Media.Imaging.Bitmap, or null if conversion fails.</returns>
     private Avalonia.Media.Imaging.Bitmap? ToAvaloniaBitmap(SKBitmap? skBitmap)
     {
-        if (skBitmap == null)
-        {
-            return null;
-        }
-
+        // Direct pixel copy via WriteableBitmap — replaces a per-render
+        // PNG encode + decode round-trip that ate ~150-300ms on every
+        // page render. See PdfEditor.Imaging.SkiaInterop for the rationale.
         try
         {
-            using var image = SKImage.FromBitmap(skBitmap);
-            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-            using var stream = new MemoryStream(data.ToArray());
-            return new Avalonia.Media.Imaging.Bitmap(stream);
+            return PdfEditor.Imaging.SkiaInterop.ToAvaloniaBitmap(skBitmap);
         }
         catch (Exception ex)
         {
@@ -2685,4 +3165,17 @@ public partial class MainWindowViewModel : ViewModelBase
             return null;
         }
     }
+}
+
+/// <summary>
+/// Zoom-mode latching for the viewer. PDF readers traditionally let users
+/// pick a fit mode (Width / Page) that survives window resizes — once the
+/// user manually changes zoom (Ctrl++/-/0 or scroll-wheel zoom) we drop
+/// to <see cref="Manual"/> and stop auto-recomputing.
+/// </summary>
+public enum ZoomFitMode
+{
+    Manual,
+    FitWidth,
+    FitPage,
 }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Pdfe.Core.ColorSpaces;
 using Pdfe.Core.Document;
 using SkiaSharp;
 
@@ -55,6 +56,13 @@ public class SkiaRenderer
 /// </summary>
 internal class RenderContext
 {
+    // SkiaSharp's font subsystem is not safe under concurrent typeface creation:
+    // SKTypeface.FromData and SKTypeface.FromFamilyName both reach into a process-wide
+    // native font manager whose cache can corrupt or deadlock when two managed threads
+    // call them simultaneously. Visual tests previously failed under xUnit parallelism
+    // because of this; we serialize all typeface acquisition with a process-wide lock.
+    private static readonly object _typefaceLoadLock = new();
+
     private readonly SKCanvas _canvas;
     private readonly PdfPage _page;
     private readonly RenderOptions _options;
@@ -63,6 +71,7 @@ internal class RenderContext
     private SKPath? _currentPath;
     private TextState _textState;
     private bool _inTextBlock;
+    private bool _inCompatibilitySection;
     private SKTypeface? _currentTypeface;
     private string _currentFontEncoding;
 
@@ -463,6 +472,14 @@ internal class RenderContext
                 }
                 break;
 
+            // Compatibility operators
+            case "BX":
+                _inCompatibilitySection = true;
+                break;
+            case "EX":
+                _inCompatibilitySection = false;
+                break;
+
             // Ignore unknown operators
             default:
                 break;
@@ -573,6 +590,7 @@ internal class RenderContext
                 _ => SKStrokeJoin.Miter
             },
             StrokeMiter = _state.MiterLimit,
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         };
 
@@ -591,6 +609,7 @@ internal class RenderContext
         {
             Style = SKPaintStyle.Fill,
             Color = _state.FillColor.WithAlpha((byte)(_state.FillAlpha * 255)),
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         };
 
@@ -610,6 +629,7 @@ internal class RenderContext
         {
             Style = SKPaintStyle.Fill,
             Color = _state.FillColor.WithAlpha((byte)(_state.FillAlpha * 255)),
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         })
         {
@@ -635,6 +655,7 @@ internal class RenderContext
                 _ => SKStrokeJoin.Miter
             },
             StrokeMiter = _state.MiterLimit,
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         })
         {
@@ -867,25 +888,28 @@ internal class RenderContext
         }
 
         SKTypeface? typeface;
-        try
+        lock (_typefaceLoadLock)
         {
-            using var data = SKData.CreateCopy(loadableBytes);
-            typeface = SKTypeface.FromData(data);
-        }
-        catch { typeface = null; }
+            try
+            {
+                using var data = SKData.CreateCopy(loadableBytes);
+                typeface = SKTypeface.FromData(data);
+            }
+            catch { typeface = null; }
 
-        if (typeface == null) return null;
+            if (typeface == null) return null;
 
-        // Sanity-probe the wrapped font — for some CFF subsets (most commonly
-        // dingbat fonts produced by the XEP toolchain) Skia loads our wrapper
-        // and resolves the cmap, but its CFF interpreter finds no charstring
-        // outlines and silently draws nothing. Detect that and fall back to
-        // the system-font path so the user at least sees *some* glyph for the
-        // codepoint instead of empty whitespace.
-        if (isCff && !ProducesGlyphOutlines(typeface))
-        {
-            typeface.Dispose();
-            return null;
+            // Sanity-probe the wrapped font — for some CFF subsets (most commonly
+            // dingbat fonts produced by the XEP toolchain) Skia loads our wrapper
+            // and resolves the cmap, but its CFF interpreter finds no charstring
+            // outlines and silently draws nothing. Detect that and fall back to
+            // the system-font path so the user at least sees *some* glyph for the
+            // codepoint instead of empty whitespace.
+            if (isCff && !ProducesGlyphOutlines(typeface))
+            {
+                typeface.Dispose();
+                return null;
+            }
         }
 
         _embeddedTypefaces[fontName] = typeface;
@@ -1111,7 +1135,10 @@ internal class RenderContext
         else if (bareName.Contains("Italic") || bareName.Contains("Oblique"))
             style = SKFontStyle.Italic;
 
-        return SKTypeface.FromFamilyName(family, style) ?? SKTypeface.Default;
+        lock (_typefaceLoadLock)
+        {
+            return SKTypeface.FromFamilyName(family, style) ?? SKTypeface.Default;
+        }
     }
 
     private static bool Starts(string s, string prefix) =>
@@ -1213,6 +1240,7 @@ internal class RenderContext
         using var paint = new SKPaint(font)
         {
             Color = _state.FillColor,
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         };
 
@@ -1379,6 +1407,7 @@ internal class RenderContext
         using var paint = new SKPaint(font)
         {
             Color = _state.FillColor,
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias,
             TextEncoding = SKTextEncoding.GlyphId,
         };
@@ -1605,7 +1634,43 @@ internal class RenderContext
         {
             _state.MiterLimit = (float)extGState.GetNumber("ML", 10.0);
         }
+
+        if (extGState.ContainsKey("BM"))
+        {
+            var bm = extGState.GetNameOrNull("BM") ?? "Normal";
+            _state.BlendMode = MapBlendMode(bm);
+        }
+
+        if (extGState.ContainsKey("SMask"))
+        {
+            var smaskObj = extGState.GetOptional("SMask");
+            if (smaskObj is Pdfe.Core.Primitives.PdfName n && n.Value == "None")
+            {
+                // Clear soft mask - no visual effect needed
+            }
+            // Note: full soft mask (transparency group) rendering not yet supported
+        }
     }
+
+    private static SKBlendMode MapBlendMode(string pdfName) => pdfName switch
+    {
+        "Multiply"   => SKBlendMode.Multiply,
+        "Screen"     => SKBlendMode.Screen,
+        "Overlay"    => SKBlendMode.Overlay,
+        "Darken"     => SKBlendMode.Darken,
+        "Lighten"    => SKBlendMode.Lighten,
+        "ColorDodge" => SKBlendMode.ColorDodge,
+        "ColorBurn"  => SKBlendMode.ColorBurn,
+        "HardLight"  => SKBlendMode.HardLight,
+        "SoftLight"  => SKBlendMode.SoftLight,
+        "Difference" => SKBlendMode.Difference,
+        "Exclusion"  => SKBlendMode.Exclusion,
+        "Hue"        => SKBlendMode.Hue,
+        "Saturation" => SKBlendMode.Saturation,
+        "Color"      => SKBlendMode.Color,
+        "Luminosity" => SKBlendMode.Luminosity,
+        _            => SKBlendMode.SrcOver,
+    };
 
     #endregion
 
@@ -1656,6 +1721,13 @@ internal class RenderContext
                 // JPEG data - decode directly
                 bitmap = SKBitmap.Decode(imageStream.EncodedData);
             }
+            else if (filters.Contains("JPXDecode"))
+            {
+                // JPEG 2000 data - try platform codec, fall back to placeholder
+                bitmap = SKBitmap.Decode(imageStream.EncodedData);
+                if (bitmap == null && width > 0 && height > 0)
+                    bitmap = CreatePlaceholderBitmap(width, height);
+            }
             else
             {
                 // Raw image data - create bitmap based on color space
@@ -1673,7 +1745,11 @@ internal class RenderContext
             _canvas.Scale(1.0f / width, -1.0f / height);
             _canvas.Translate(0, -height);
 
-            using var paint = new SKPaint { IsAntialias = _options.AntiAlias };
+            using var paint = new SKPaint
+            {
+                BlendMode = _state.BlendMode,
+                IsAntialias = _options.AntiAlias
+            };
             if (_state.FillAlpha < 1.0f)
             {
                 paint.Color = paint.Color.WithAlpha((byte)(_state.FillAlpha * 255));
@@ -1690,27 +1766,23 @@ internal class RenderContext
 
     private SKBitmap? CreateBitmapFromRawData(byte[] data, int width, int height, int bitsPerComponent, string colorSpace, Pdfe.Core.Primitives.PdfStream stream)
     {
-        // Handle different color spaces
-        int componentsPerPixel = colorSpace switch
-        {
-            "DeviceGray" => 1,
-            "DeviceRGB" => 3,
-            "DeviceCMYK" => 4,
-            "CalGray" => 1,
-            "CalRGB" => 3,
-            _ => 3 // Default to RGB
-        };
+        PdfColorSpace? pdfColorSpace = null;
+        int componentsPerPixel = 3;
 
-        // Check for indexed color space
         var csObj = stream.GetOptional("ColorSpace");
-        if (csObj is Pdfe.Core.Primitives.PdfArray csArray && csArray.Count >= 1)
+        if (csObj != null)
         {
-            var csName = (csArray[0] as Pdfe.Core.Primitives.PdfName)?.Value;
-            if (csName == "Indexed")
-            {
-                componentsPerPixel = 1; // Indexed uses palette lookup
-            }
+            pdfColorSpace = PdfColorSpace.Parse(csObj, _page.Document);
+            componentsPerPixel = pdfColorSpace.Components;
         }
+        else
+        {
+            pdfColorSpace = PdfColorSpace.FromName(colorSpace);
+            componentsPerPixel = pdfColorSpace.Components;
+        }
+
+        if (componentsPerPixel == 0)
+            componentsPerPixel = 3;
 
         var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
         var pixels = new byte[width * height * 4];
@@ -1726,36 +1798,19 @@ internal class RenderContext
                 {
                     byte r = 0, g = 0, b = 0, a = 255;
 
-                    if (bitsPerComponent == 8)
+                    if (bitsPerComponent == 8 && pdfColorSpace != null)
                     {
-                        switch (componentsPerPixel)
+                        var pixelValues = new double[componentsPerPixel];
+                        if (srcIndex + componentsPerPixel <= data.Length)
                         {
-                            case 1: // Grayscale
-                                if (srcIndex < data.Length)
-                                {
-                                    r = g = b = data[srcIndex++];
-                                }
-                                break;
-                            case 3: // RGB
-                                if (srcIndex + 2 < data.Length)
-                                {
-                                    r = data[srcIndex++];
-                                    g = data[srcIndex++];
-                                    b = data[srcIndex++];
-                                }
-                                break;
-                            case 4: // CMYK
-                                if (srcIndex + 3 < data.Length)
-                                {
-                                    var c = data[srcIndex++] / 255.0;
-                                    var m = data[srcIndex++] / 255.0;
-                                    var yy = data[srcIndex++] / 255.0;
-                                    var k = data[srcIndex++] / 255.0;
-                                    r = (byte)Math.Clamp(255 * (1 - c) * (1 - k), 0, 255);
-                                    g = (byte)Math.Clamp(255 * (1 - m) * (1 - k), 0, 255);
-                                    b = (byte)Math.Clamp(255 * (1 - yy) * (1 - k), 0, 255);
-                                }
-                                break;
+                            for (int i = 0; i < componentsPerPixel; i++)
+                                pixelValues[i] = data[srcIndex + i] / 255.0;
+                            srcIndex += componentsPerPixel;
+
+                            var (rd, gd, bd) = pdfColorSpace.ToRgb(pixelValues);
+                            r = (byte)Math.Clamp(rd * 255, 0, 255);
+                            g = (byte)Math.Clamp(gd * 255, 0, 255);
+                            b = (byte)Math.Clamp(bd * 255, 0, 255);
                         }
                     }
                     else if (bitsPerComponent == 1)
@@ -1803,6 +1858,13 @@ internal class RenderContext
         }
 
         return bitmap;
+    }
+
+    private static SKBitmap CreatePlaceholderBitmap(int width, int height)
+    {
+        var bmp = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        bmp.Erase(new SKColor(192, 192, 192, 255));
+        return bmp;
     }
 
     private void RenderFormXObject(Pdfe.Core.Primitives.PdfStream formStream)
@@ -1886,13 +1948,16 @@ internal class RenderContext
         // Handle different shading types
         switch (shadingType)
         {
+            case 1: // Function-based shading
+                RenderFunctionShading(shading);
+                break;
             case 2: // Axial shading (linear gradient)
                 RenderAxialShading(shading);
                 break;
             case 3: // Radial shading (radial gradient)
                 RenderRadialShading(shading);
                 break;
-            // Types 1, 4-7 are more complex (function-based, mesh-based)
+            // Types 4-7 are more complex (mesh-based)
             // For now, just fill with background color as fallback
             default:
                 // Shading fills the current clipping path
@@ -1912,26 +1977,27 @@ internal class RenderContext
         var x1 = (float)coords.GetNumber(2);
         var y1 = (float)coords.GetNumber(3);
 
-        // Get colors from the color space and function
-        // For simplicity, use black to white gradient as fallback
-        var startColor = SKColors.Black;
-        var endColor = SKColors.White;
-
-        // Try to get colors from the function if available
-        var colorSpace = shading.GetNameOrNull("ColorSpace") ?? "DeviceGray";
-        var function = shading.GetOptional("Function");
+        var (startColor, endColor, stops, positions) = ResolveGradientColors(shading);
 
         // Create the gradient shader
-        using var shader = SKShader.CreateLinearGradient(
-            new SKPoint(x0, y0),
-            new SKPoint(x1, y1),
-            new[] { startColor, endColor },
-            null,
-            SKShaderTileMode.Clamp);
+        using var shader = stops != null && stops.Length > 2
+            ? SKShader.CreateLinearGradient(
+                new SKPoint(x0, y0),
+                new SKPoint(x1, y1),
+                stops,
+                positions,
+                SKShaderTileMode.Clamp)
+            : SKShader.CreateLinearGradient(
+                new SKPoint(x0, y0),
+                new SKPoint(x1, y1),
+                new[] { startColor, endColor },
+                null,
+                SKShaderTileMode.Clamp);
 
         using var paint = new SKPaint
         {
             Shader = shader,
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         };
 
@@ -1954,27 +2020,126 @@ internal class RenderContext
         var y1 = (float)coords.GetNumber(4);
         var r1 = (float)coords.GetNumber(5);
 
-        // For simplicity, use black to white gradient as fallback
-        var startColor = SKColors.Black;
-        var endColor = SKColors.White;
+        var (startColor, endColor, stops, positions) = ResolveGradientColors(shading);
 
         // Create the two-point conical gradient
-        using var shader = SKShader.CreateTwoPointConicalGradient(
-            new SKPoint(x0, y0), r0,
-            new SKPoint(x1, y1), r1,
-            new[] { startColor, endColor },
-            null,
-            SKShaderTileMode.Clamp);
+        using var shader = stops != null && stops.Length > 2
+            ? SKShader.CreateTwoPointConicalGradient(
+                new SKPoint(x0, y0), r0,
+                new SKPoint(x1, y1), r1,
+                stops,
+                positions,
+                SKShaderTileMode.Clamp)
+            : SKShader.CreateTwoPointConicalGradient(
+                new SKPoint(x0, y0), r0,
+                new SKPoint(x1, y1), r1,
+                new[] { startColor, endColor },
+                null,
+                SKShaderTileMode.Clamp);
 
         using var paint = new SKPaint
         {
             Shader = shader,
+            BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias
         };
 
         // Fill the current clipping area
         var clipBounds = _canvas.LocalClipBounds;
         _canvas.DrawRect(clipBounds, paint);
+    }
+
+    private void RenderFunctionShading(Pdfe.Core.Primitives.PdfDictionary shading)
+    {
+        var funcObj = shading.GetOptional("Function");
+        var colorSpaceName = shading.GetNameOrNull("ColorSpace") ?? "DeviceGray";
+        var comps = PdfFunctionEvaluator.Evaluate(funcObj, 0.5) ?? new[] { 0.0 };
+        var color = ComponentsToSkColor(comps, colorSpaceName);
+
+        using var paint = new SKPaint
+        {
+            Color = color,
+            BlendMode = _state.BlendMode,
+            IsAntialias = _options.AntiAlias
+        };
+
+        var clipBounds = _canvas.LocalClipBounds;
+        _canvas.DrawRect(clipBounds, paint);
+    }
+
+    private (SKColor start, SKColor end, SKColor[]? stops, float[]? positions) ResolveGradientColors(
+        Pdfe.Core.Primitives.PdfDictionary shading)
+    {
+        var colorSpaceName = shading.GetNameOrNull("ColorSpace") ?? "DeviceGray";
+        var funcObj = shading.GetOptional("Function");
+
+        var c0 = PdfFunctionEvaluator.Evaluate(funcObj, 0.0) ?? new[] { 0.0 };
+        var c1 = PdfFunctionEvaluator.Evaluate(funcObj, 1.0) ?? new[] { 1.0 };
+
+        var startColor = ComponentsToSkColor(c0, colorSpaceName);
+        var endColor = ComponentsToSkColor(c1, colorSpaceName);
+
+        SKColor[]? stops = null;
+        float[]? positions = null;
+
+        if (funcObj is Pdfe.Core.Primitives.PdfDictionary fd && fd.GetInt("FunctionType", -1) == 3)
+        {
+            var boundsObj = fd.GetOptional("Bounds") as Pdfe.Core.Primitives.PdfArray;
+            if (boundsObj != null && boundsObj.Count > 0)
+            {
+                var pts = new List<float> { 0f };
+                for (int i = 0; i < boundsObj.Count; i++)
+                    pts.Add((float)boundsObj.GetNumber(i));
+                pts.Add(1f);
+
+                var colors = new List<SKColor>();
+                foreach (var pt in pts)
+                {
+                    var c = PdfFunctionEvaluator.Evaluate(funcObj, pt) ?? new[] { 0.0 };
+                    colors.Add(ComponentsToSkColor(c, colorSpaceName));
+                }
+
+                stops = colors.ToArray();
+                positions = pts.ToArray();
+            }
+        }
+
+        return (startColor, endColor, stops, positions);
+    }
+
+    private static SKColor ComponentsToSkColor(double[] comps, string colorSpace)
+    {
+        return colorSpace switch
+        {
+            "DeviceGray" or "G" =>
+                comps.Length >= 1 ? ToGray(comps[0]) : SKColors.Black,
+            "DeviceRGB" or "RGB" =>
+                comps.Length >= 3 ? ToRGB(comps[0], comps[1], comps[2]) : SKColors.Black,
+            "DeviceCMYK" or "CMYK" =>
+                comps.Length >= 4 ? CmykToRgbColor(comps[0], comps[1], comps[2], comps[3]) : SKColors.Black,
+            _ => comps.Length >= 3 ? ToRGB(comps[0], comps[1], comps[2])
+               : comps.Length >= 1 ? ToGray(comps[0]) : SKColors.Black
+        };
+    }
+
+    private static SKColor ToGray(double g)
+    {
+        byte v = (byte)Math.Clamp(g * 255, 0, 255);
+        return new SKColor(v, v, v);
+    }
+
+    private static SKColor ToRGB(double r, double g, double b) =>
+        new SKColor(
+            (byte)Math.Clamp(r * 255, 0, 255),
+            (byte)Math.Clamp(g * 255, 0, 255),
+            (byte)Math.Clamp(b * 255, 0, 255));
+
+    private static SKColor CmykToRgbColor(double c, double m, double y, double k)
+    {
+        double r = (1 - c) * (1 - k);
+        double g = (1 - m) * (1 - k);
+        double b = (1 - y) * (1 - k);
+        return ToRGB(r, g, b);
     }
 
     #endregion
@@ -1997,43 +2162,42 @@ internal class RenderContext
 
     private SKColor? ParseColorFromOperands(List<string> operands, string colorSpace)
     {
-        // Filter out pattern names (start with /)
         var values = operands.Where(o => !o.StartsWith("/")).ToList();
+
+        if (values.Count == 0)
+            return null;
+
+        var doubleValues = new double[values.Count];
+        for (int i = 0; i < values.Count; i++)
+            doubleValues[i] = ParseNumber(values[i]);
+
+        var cs = ResolveColorSpace(colorSpace);
+        if (cs != null && cs.Type != PdfColorSpaceType.Pattern)
+        {
+            var (r, g, b) = cs.ToRgb(doubleValues);
+            return RgbToColor(r, g, b);
+        }
 
         return colorSpace switch
         {
-            "DeviceGray" or "CalGray" when values.Count >= 1 =>
-                GrayToColor(ParseNumber(values[0])),
-
-            "DeviceRGB" or "CalRGB" when values.Count >= 3 =>
-                RgbToColor(
-                    ParseNumber(values[0]),
-                    ParseNumber(values[1]),
-                    ParseNumber(values[2])),
-
-            "DeviceCMYK" when values.Count >= 4 =>
-                CmykToColor(
-                    ParseNumber(values[0]),
-                    ParseNumber(values[1]),
-                    ParseNumber(values[2]),
-                    ParseNumber(values[3])),
-
-            // Pattern color space - the pattern name is handled separately
             "Pattern" when operands.Any(o => o.StartsWith("/")) =>
-                null, // Pattern fills are handled by pattern rendering
-
-            // ICCBased, Lab, Indexed, Separation, DeviceN - fallback behavior
-            _ when values.Count >= 3 =>
-                RgbToColor(
-                    ParseNumber(values[0]),
-                    ParseNumber(values[1]),
-                    ParseNumber(values[2])),
-
-            _ when values.Count >= 1 =>
-                GrayToColor(ParseNumber(values[0])),
+                null,
 
             _ => null
         };
+    }
+
+    private PdfColorSpace? ResolveColorSpace(string name)
+    {
+        var cs = PdfColorSpace.FromName(name);
+        if (cs.Type != PdfColorSpaceType.Unknown)
+            return cs;
+
+        var csObj = _page.GetColorSpaceObject(name);
+        if (csObj != null)
+            return PdfColorSpace.Parse(csObj, _page.Document);
+
+        return null;
     }
 
     #endregion
@@ -2218,6 +2382,7 @@ internal class GraphicsState
     public float MiterLimit { get; set; } = 10.0f;
     public string FillColorSpace { get; set; } = "DeviceGray";
     public string StrokeColorSpace { get; set; } = "DeviceGray";
+    public SKBlendMode BlendMode { get; set; } = SKBlendMode.SrcOver;
 
     public GraphicsState Clone()
     {
@@ -2232,7 +2397,8 @@ internal class GraphicsState
             LineJoin = LineJoin,
             MiterLimit = MiterLimit,
             FillColorSpace = FillColorSpace,
-            StrokeColorSpace = StrokeColorSpace
+            StrokeColorSpace = StrokeColorSpace,
+            BlendMode = BlendMode
         };
     }
 }

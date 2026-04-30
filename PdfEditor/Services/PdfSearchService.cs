@@ -3,8 +3,11 @@ using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace PdfEditor.Services;
 
@@ -35,6 +38,15 @@ public class PdfSearchService
     }
 
     /// <summary>
+    /// Progress report emitted as the service walks the document.
+    /// Consumed via IProgress&lt;SearchProgress&gt; — typical use is to
+    /// drive a status bar / inline spinner / determinate progress
+    /// indicator while a long search runs on a large file.
+    /// </summary>
+    public readonly record struct SearchProgress(
+        int PagesScanned, int TotalPages, int MatchesFound);
+
+    /// <summary>
     /// Search for text in a PDF file
     /// </summary>
     /// <param name="pdfPath">Path to the PDF file</param>
@@ -48,7 +60,8 @@ public class PdfSearchService
         string searchTerm,
         bool caseSensitive = false,
         bool wholeWordsOnly = false,
-        bool useRegex = false)
+        bool useRegex = false,
+        IProgress<SearchProgress>? progress = null)
     {
         var matches = new List<SearchMatch>();
 
@@ -61,27 +74,144 @@ public class PdfSearchService
         try
         {
             using var document = PdfDocument.Open(pdfPath);
-
-            _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages",
-                searchTerm, document.PageCount);
-
-            for (int i = 0; i < document.PageCount; i++)
-            {
-                var page = document.GetPage(i + 1); // Pdfe.Core uses 1-based indexing
-                var pageMatches = SearchInPage(page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, i);
-                matches.AddRange(pageMatches);
-            }
-
-            _logger.LogInformation("Found {MatchCount} matches for '{SearchTerm}'",
-                matches.Count, searchTerm);
+            return Search(document, searchTerm, caseSensitive, wholeWordsOnly, useRegex,
+                progress: progress);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error searching PDF: {Message}", ex.Message);
+            return matches;
         }
+    }
 
+    /// <summary>
+    /// Search for text in an already-open PDF document. Use this overload
+    /// when the caller already holds a parsed <see cref="PdfDocument"/> —
+    /// re-parsing on every keystroke makes typed search unusable on
+    /// large files. The optional <paramref name="cancellationToken"/>
+    /// lets a debounced caller drop a stale search when a newer
+    /// keystroke supersedes it.
+    /// </summary>
+    /// <summary>
+    /// Search using a pre-built <see cref="DocumentTextIndex"/>. Skips
+    /// per-page text extraction (the dominant cost) so subsequent
+    /// queries on the same document are nearly instant.
+    /// </summary>
+    public List<SearchMatch> Search(
+        DocumentTextIndex index,
+        string searchTerm,
+        bool caseSensitive = false,
+        bool wholeWordsOnly = false,
+        bool useRegex = false,
+        CancellationToken cancellationToken = default,
+        IProgress<SearchProgress>? progress = null)
+    {
+        var matches = new List<SearchMatch>();
+        if (index == null || string.IsNullOrWhiteSpace(searchTerm))
+            return matches;
+
+        try
+        {
+            var totalPages = index.PageCount;
+            progress?.Report(new SearchProgress(0, totalPages, 0));
+
+            for (int i = 0; i < totalPages; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!index.IsPageIndexed(i))
+                {
+                    // Index built incrementally — skip pages not yet cached.
+                    // The next search after the build completes covers them.
+                    continue;
+                }
+                var pageText = index.GetPageText(i);
+                var pageWords = index.GetPageWords(i);
+                if (useRegex)
+                    matches.AddRange(SearchWithRegex(pageText, searchTerm, pageWords.ToList(), i, caseSensitive));
+                else if (wholeWordsOnly)
+                    matches.AddRange(SearchWholeWords(pageWords.ToList(), searchTerm, i, caseSensitive));
+                else
+                    matches.AddRange(SearchSubstring(pageText, pageWords.ToList(), searchTerm, i, caseSensitive));
+
+                if (progress != null && ((i & 3) == 0 || i == totalPages - 1))
+                    progress.Report(new SearchProgress(i + 1, totalPages, matches.Count));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Indexed search cancelled at page progress; returning partial results");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching index: {Message}", ex.Message);
+        }
         return matches;
     }
+
+    public List<SearchMatch> Search(
+        PdfDocument document,
+        string searchTerm,
+        bool caseSensitive = false,
+        bool wholeWordsOnly = false,
+        bool useRegex = false,
+        CancellationToken cancellationToken = default,
+        IProgress<SearchProgress>? progress = null)
+    {
+        if (document == null || string.IsNullOrWhiteSpace(searchTerm))
+            return new List<SearchMatch>();
+
+        var matches = new List<SearchMatch>();
+
+        try
+        {
+            var totalPages = document.PageCount;
+            _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages",
+                searchTerm, totalPages);
+
+            // Initial 0/N report so the UI can show the spinner+text
+            // immediately rather than waiting for page 1 to finish.
+            progress?.Report(new SearchProgress(0, totalPages, 0));
+
+            // Sequential search through pages
+            for (int i = 0; i < totalPages; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var page = document.GetPage(i + 1);
+                    var pageMatches = SearchInPage(
+                        page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, i);
+
+                    matches.AddRange(pageMatches);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error searching page {PageIndex}", i);
+                }
+
+                // Emit progress at i=0, every 4 pages, and on the last page
+                if (progress != null && ((i & 3) == 0 || i == totalPages - 1))
+                    progress.Report(new SearchProgress(i + 1, totalPages, matches.Count));
+            }
+
+            _logger.LogInformation("Found {MatchCount} matches for '{SearchTerm}'",
+                matches.Count, searchTerm);
+
+            return matches;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Search cancelled; returning partial results");
+            return matches;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching PDF: {Message}", ex.Message);
+            return matches;
+        }
+    }
+
 
     /// <summary>
     /// Search for text in a specific page

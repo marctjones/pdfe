@@ -21,6 +21,11 @@ public class TextExtractor
     private double _charSpacing = 0;
     private double _wordSpacing = 0;
     private double _horizontalScaling = 100;
+    // Type 0 / CID font state (§9.7)
+    private bool _is2ByteFont;
+    private bool _isVerticalWriting;
+    private Dictionary<int, double>? _cidWidths;
+    private double _cidDefaultWidth = 1000;
 
     // Text matrix (position + transformation)
     private double _tm_a = 1, _tm_b = 0, _tm_c = 0, _tm_d = 1, _tm_e = 0, _tm_f = 0;
@@ -41,13 +46,88 @@ public class TextExtractor
     }
 
     /// <summary>
+    /// When true, AcroForm field values whose widget is on this page are
+    /// emitted as synthetic Letters in addition to the content-stream text.
+    /// This makes form-fill values visible to search, text extraction, and
+    /// — critically — redaction. Defaults to true; the only reason to turn
+    /// it off is to inspect raw content-stream output for diagnostics.
+    /// </summary>
+    public bool IncludeFormFieldValues { get; set; } = true;
+
+    /// <summary>
     /// Extract all letters from the page.
     /// </summary>
     public IReadOnlyList<Letter> ExtractLetters()
     {
         _letters.Clear();
         ParseContentStream();
+        if (IncludeFormFieldValues)
+            EmitFormFieldLetters();
         return _letters.AsReadOnly();
+    }
+
+    /// <summary>
+    /// Walk the page's AcroForm fields and emit synthetic Letters for any with
+    /// a string value (/V) and a widget rectangle. Positions are an estimate
+    /// based on the widget rect — the real glyph layout would require parsing
+    /// the field's appearance stream, which the read-only AcroForm slice
+    /// deliberately defers. For search and redaction the rect-based positions
+    /// are precise enough: the redaction rectangle still encloses the value,
+    /// and search just needs the text content present.
+    /// </summary>
+    private void EmitFormFieldLetters()
+    {
+        IReadOnlyList<PdfField> fields;
+        try { fields = _page.GetFormFields(); }
+        catch { return; }
+
+        foreach (var field in fields)
+        {
+            if (field.Rect == null) continue;
+            var value = field.Value ?? field.DefaultValue;
+            if (string.IsNullOrEmpty(value)) continue;
+            // Buttons are off/on/checked/unchecked names — not human-readable text.
+            if (field.FieldType == PdfFieldType.Button) continue;
+            // Signatures don't render text in the field; skip.
+            if (field.FieldType == PdfFieldType.Signature) continue;
+
+            EmitLettersInRect(value, field.Rect.Value, $"AcroForm:{field.FieldType}");
+        }
+    }
+
+    private void EmitLettersInRect(string text, PdfRectangle rect, string fontName)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0) return;
+        var fontSize = Math.Min(rect.Height * 0.85, 12.0);
+        if (fontSize <= 0) return;
+
+        // Approximation: assume average glyph advance of 0.55em. Real PDFs
+        // vary, but for search/redaction we just need to land letters within
+        // the widget's rect.
+        var advance = fontSize * 0.55;
+        var maxChars = (int)Math.Floor(rect.Width / advance);
+        if (maxChars <= 0) return;
+
+        // Truncate so we never paint outside the widget rect.
+        if (text.Length > maxChars) text = text.Substring(0, maxChars);
+
+        var x = rect.Left;
+        var baselineY = rect.Bottom + (rect.Height - fontSize) * 0.5;
+
+        foreach (var ch in text)
+        {
+            var bbox = new PdfRectangle(x, baselineY, x + advance, baselineY + fontSize);
+            _letters.Add(new Letter(
+                ch.ToString(),
+                bbox,
+                fontSize,
+                fontName,
+                x,
+                baselineY,
+                advance,
+                ch));
+            x += advance;
+        }
     }
 
     /// <summary>
@@ -242,9 +322,9 @@ public class TextExtractor
         return null;
     }
 
-    private string ParseStringLiteral(string content, ref int pos)
+    private byte[] ParseStringLiteral(string content, ref int pos)
     {
-        var sb = new StringBuilder();
+        var bytes = new List<byte>();
         pos++; // Skip opening '('
         int parenDepth = 1;
 
@@ -258,14 +338,14 @@ public class TextExtractor
                 var escaped = content[pos];
                 switch (escaped)
                 {
-                    case 'n': sb.Append('\n'); break;
-                    case 'r': sb.Append('\r'); break;
-                    case 't': sb.Append('\t'); break;
-                    case 'b': sb.Append('\b'); break;
-                    case 'f': sb.Append('\f'); break;
-                    case '(': sb.Append('('); break;
-                    case ')': sb.Append(')'); break;
-                    case '\\': sb.Append('\\'); break;
+                    case 'n': bytes.Add((byte)'\n'); break;
+                    case 'r': bytes.Add((byte)'\r'); break;
+                    case 't': bytes.Add((byte)'\t'); break;
+                    case 'b': bytes.Add((byte)'\b'); break;
+                    case 'f': bytes.Add((byte)'\f'); break;
+                    case '(': bytes.Add((byte)'('); break;
+                    case ')': bytes.Add((byte)')'); break;
+                    case '\\': bytes.Add((byte)'\\'); break;
                     default:
                         // Octal escape
                         if (escaped >= '0' && escaped <= '7')
@@ -278,12 +358,11 @@ public class TextExtractor
                                 pos++;
                                 octal.Append(content[pos]);
                             }
-                            var code = Convert.ToInt32(octal.ToString(), 8);
-                            sb.Append((char)code);
+                            bytes.Add((byte)Convert.ToInt32(octal.ToString(), 8));
                         }
                         else
                         {
-                            sb.Append(escaped);
+                            bytes.Add((byte)escaped);
                         }
                         break;
                 }
@@ -291,22 +370,22 @@ public class TextExtractor
             else if (c == '(')
             {
                 parenDepth++;
-                sb.Append(c);
+                bytes.Add((byte)c);
             }
             else if (c == ')')
             {
                 parenDepth--;
                 if (parenDepth > 0)
-                    sb.Append(c);
+                    bytes.Add((byte)c);
             }
             else
             {
-                sb.Append(c);
+                bytes.Add((byte)c);
             }
             pos++;
         }
 
-        return sb.ToString();
+        return bytes.ToArray();
     }
 
     private byte[] ParseHexString(string content, ref int pos)
@@ -503,6 +582,7 @@ public class TextExtractor
                     _fontSize = ToDouble(operands[1]);
                     _currentFont = _page.GetFont(_fontName);
                     _toUnicodeMap = LoadToUnicodeMap(_currentFont);
+                    LoadFontGeometry();
                 }
                 break;
 
@@ -677,9 +757,20 @@ public class TextExtractor
 
     private void ShowText(byte[] bytes)
     {
-        foreach (var b in bytes)
+        // Type 0 / composite fonts use multi-byte source codes. The descendant
+        // CIDFont's encoding (or the outer ToUnicode CMap) tells us how many
+        // bytes per code; in practice every modern producer uses 2 bytes for
+        // Identity-H/V, so we treat the font as 2-byte if the Tf-loaded font
+        // has Subtype /Type0. Simple fonts (Type1/TrueType not wrapped in a
+        // Type 0 / CIDFont) stay 1-byte.
+        int stride = _is2ByteFont ? 2 : 1;
+
+        for (int i = 0; i + stride <= bytes.Length; i += stride)
         {
-            var charCode = (int)b;
+            int charCode = stride == 2
+                ? (bytes[i] << 8) | bytes[i + 1]
+                : bytes[i];
+
             var unicode = DecodeCharacter(charCode);
             var charWidth = GetCharWidth(charCode);
 
@@ -705,14 +796,107 @@ public class TextExtractor
             );
             _letters.Add(letter);
 
-            // Advance text position
-            var tx = (charWidth / 1000.0) * _fontSize * (_horizontalScaling / 100.0);
-            tx += _charSpacing;
-            if (charCode == 32) // Space
-                tx += _wordSpacing;
+            // Advance text position. For vertical writing (WMode 1) the
+            // displacement is along the y-axis; horizontal is along x. We don't
+            // model glyph-specific vertical metrics yet, so vertical advance
+            // uses the same width-as-displacement assumption.
+            var displacement = (charWidth / 1000.0) * _fontSize * (_horizontalScaling / 100.0);
+            displacement += _charSpacing;
+            if (charCode == 32) // Space — also fire wordSpacing per §9.3.3
+                displacement += _wordSpacing;
 
-            _tm_e += tx * _tm_a;
-            _tm_f += tx * _tm_b;
+            if (_isVerticalWriting)
+            {
+                _tm_e += displacement * _tm_c;
+                _tm_f += displacement * _tm_d;
+            }
+            else
+            {
+                _tm_e += displacement * _tm_a;
+                _tm_f += displacement * _tm_b;
+            }
+        }
+    }
+
+    /// <summary>
+    /// After Tf loads a font, update Type 0 / CID-specific state: 2-byte stride,
+    /// vertical writing mode, default CID width, and per-CID width table.
+    /// </summary>
+    private void LoadFontGeometry()
+    {
+        _is2ByteFont = false;
+        _isVerticalWriting = false;
+        _cidWidths = null;
+        _cidDefaultWidth = 1000;
+
+        if (_currentFont == null) return;
+
+        var subtype = _currentFont.GetNameOrNull("Subtype");
+        if (subtype != "Type0") return;
+
+        _is2ByteFont = true;
+
+        // /Encoding can be a name (Identity-H/V) or a CMap stream. Identity-V
+        // and any /WMode 1 in a custom CMap means vertical writing.
+        var encObj = _currentFont.GetOptional("Encoding");
+        if (encObj is PdfName encName && encName.Value == "Identity-V")
+            _isVerticalWriting = true;
+
+        // Resolve descendant CIDFont (always exactly one entry, per §9.7.6.1).
+        var descendantsObj = _currentFont.GetOptional("DescendantFonts");
+        if (descendantsObj == null) return;
+        var descendantsResolved = _page.Document.Resolve(descendantsObj);
+        if (descendantsResolved is not PdfArray descendants || descendants.Count == 0) return;
+
+        var firstResolved = _page.Document.Resolve(descendants[0]);
+        if (firstResolved is not PdfDictionary cidFont) return;
+
+        // Default width (DW) — applied to any CID not in the W table (§9.7.4.3).
+        if (cidFont.GetOptional("DW") is { } dwObj && TryNumber(dwObj, out var dwVal))
+            _cidDefaultWidth = dwVal;
+
+        // /W = [c [w1 w2 …]] | [c1 c2 w] mixed array
+        if (cidFont.GetOptional("W") is { } wObj &&
+            _page.Document.Resolve(wObj) is PdfArray w)
+        {
+            _cidWidths = new Dictionary<int, double>();
+            int idx = 0;
+            while (idx < w.Count)
+            {
+                if (!TryNumber(w[idx], out var firstNum)) { idx++; continue; }
+                int firstCid = (int)firstNum;
+
+                if (idx + 1 < w.Count && _page.Document.Resolve(w[idx + 1]) is PdfArray inner)
+                {
+                    for (int k = 0; k < inner.Count; k++)
+                        if (TryNumber(inner[k], out var width))
+                            _cidWidths[firstCid + k] = width;
+                    idx += 2;
+                }
+                else if (idx + 2 < w.Count
+                         && TryNumber(w[idx + 1], out var lastNum)
+                         && TryNumber(w[idx + 2], out var widthAll))
+                {
+                    int lastCid = (int)lastNum;
+                    for (int c = firstCid; c <= lastCid; c++)
+                        _cidWidths[c] = widthAll;
+                    idx += 3;
+                }
+                else
+                {
+                    idx++;
+                }
+            }
+        }
+    }
+
+    private static bool TryNumber(PdfObject? obj, out double v)
+    {
+        switch (obj)
+        {
+            case PdfInteger i: v = i.Value; return true;
+            case PdfReal r:    v = r.Value; return true;
+            default:           v = 0; return false;
         }
     }
 
@@ -868,6 +1052,15 @@ public class TextExtractor
 
     private double GetCharWidth(int charCode)
     {
+        // Type 0 / CIDFont: width comes from the /W table on the descendant font,
+        // falling back to /DW when the CID is unlisted (§9.7.4.3).
+        if (_is2ByteFont)
+        {
+            if (_cidWidths != null && _cidWidths.TryGetValue(charCode, out var w))
+                return w;
+            return _cidDefaultWidth;
+        }
+
         // Try to get width from font dictionary
         if (_currentFont != null)
         {

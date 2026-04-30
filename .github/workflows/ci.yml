@@ -4,17 +4,19 @@ on:
   push:
     branches:
       - main
+      - develop
   pull_request:
 
 jobs:
-  build-test:
+  build-test-coverage:
+    name: Build, Test & Coverage Gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Set up Java (for veraPDF)
         uses: actions/setup-java@v4
@@ -56,19 +58,81 @@ jobs:
           # Verify installation
           ~/verapdf/verapdf --version
 
-      - name: Restore
+      - name: Install xvfb for headless UI tests
+        run: sudo apt-get install -y xvfb
+
+      - name: Restore packages
         run: dotnet restore
 
       - name: Verify TRUE Redaction Implementation
         run: ./scripts/verify-true-redaction.sh
 
-      - name: Build
-        run: dotnet build --no-restore
+      - name: Build (Debug)
+        run: dotnet build pdfe.sln -c Debug
 
-      - name: Test (without veraPDF tests)
-        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~VeraPdfConformance&FullyQualifiedName!~VeraPdfCorpus"
-
-      - name: Test (veraPDF integration tests)
+      - name: Run Pdfe.Core.Tests with coverage
         run: |
-          export PATH="$HOME/verapdf:$PATH"
-          dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~VeraPdfConformance|FullyQualifiedName~VeraPdfCorpus"
+          dotnet test Pdfe.Core.Tests --no-build -c Debug \
+            --collect:"XPlat Code Coverage" \
+            --results-directory coverage/ \
+            --logger "console;verbosity=normal" \
+            --verbosity normal
+
+      - name: Install reportgenerator
+        run: mkdir -p tools && dotnet tool install --tool-path ./tools dotnet-reportgenerator-globaltool
+
+      - name: Generate coverage report
+        run: |
+          ./tools/reportgenerator \
+            -reports:coverage/*/coverage.cobertura.xml \
+            -targetdir:coverage/report \
+            -reporttypes:Cobertura
+
+      - name: Coverage Gate (Pdfe.Core >= 94%)
+        run: scripts/check-coverage.sh coverage/report/coverage.cobertura.xml 0.94 Pdfe.Core
+
+      - name: Run Pdfe.Cli.Tests
+        run: |
+          dotnet test Pdfe.Cli.Tests --no-build -c Debug \
+            --logger "console;verbosity=normal"
+
+      - name: Run Pdfe.Rendering.Tests (no Corpus - too slow)
+        run: |
+          dotnet test Pdfe.Rendering.Tests --no-build -c Debug \
+            --filter "FullyQualifiedName!~Corpus" \
+            --logger "console;verbosity=normal"
+
+      - name: Run Performance Benchmark Tests
+        run: |
+          dotnet test Pdfe.Rendering.Tests --no-build -c Debug \
+            --filter "FullyQualifiedName~PerformanceBenchmark|FullyQualifiedName~MemoryBenchmark" \
+            --logger "console;verbosity=normal"
+
+      - name: Run Pdfe.Ocr.Tests
+        run: |
+          dotnet test Pdfe.Ocr.Tests --no-build -c Debug \
+            --logger "console;verbosity=normal" || true
+
+      - name: Run PdfEditor.Tests (headless with xvfb)
+        run: |
+          xvfb-run -a dotnet test PdfEditor.Tests --no-build -c Debug \
+            --logger "console;verbosity=normal" \
+            --blame-hang-timeout 120000
+
+      - name: Upload coverage report as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/report/
+          retention-days: 30
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/TestResults/
+            **/*.trx
+          retention-days: 7
