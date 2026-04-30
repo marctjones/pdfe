@@ -10,6 +10,8 @@ namespace Pdfe.Core.Document;
 /// </summary>
 public sealed class PdfField
 {
+    private readonly PdfDocument _document;
+
     /// <summary>
     /// The fully-qualified field name, formed by concatenating the /T entries
     /// of the field and its ancestors with dots. For example, "Address.City".
@@ -31,14 +33,17 @@ public sealed class PdfField
     /// For text fields, this is a string. For choice fields, this is
     /// typically one of the option values. For buttons, this is usually
     /// a name like /Yes or /Off.
+    ///
+    /// This property re-reads the underlying dictionary, so it reflects
+    /// any mutation made via <see cref="SetValue(string?)"/>.
     /// </summary>
-    public string? Value { get; }
+    public string? Value => ResolveString(RawDictionary.GetOptional("V"));
 
     /// <summary>
     /// The field's default value (/DV entry), or null if not set.
     /// Used when the field has no explicit value.
     /// </summary>
-    public string? DefaultValue { get; }
+    public string? DefaultValue => ResolveString(RawDictionary.GetOptional("DV"));
 
     /// <summary>
     /// For choice fields, the list of available options (/Opt array).
@@ -86,25 +91,31 @@ public sealed class PdfField
     /// </summary>
     public PdfDictionary RawDictionary { get; }
 
+    /// <summary>
+    /// The Widget annotation dictionaries associated with this field. May be empty.
+    /// Includes the field's own dictionary if it is itself a /Subtype /Widget,
+    /// otherwise the dictionaries from its /Kids that are /Subtype /Widget.
+    /// </summary>
+    internal IReadOnlyList<PdfDictionary> WidgetDictionaries { get; }
+
     public PdfField(
+        PdfDocument document,
         string fullName,
         string partialName,
         PdfFieldType fieldType,
-        string? value,
-        string? defaultValue,
         IReadOnlyList<string>? options,
         PdfRectangle? rect,
         int? pageNumber,
         bool isReadOnly,
         bool isRequired,
         bool isMultiline,
-        PdfDictionary rawDictionary)
+        PdfDictionary rawDictionary,
+        IReadOnlyList<PdfDictionary> widgetDictionaries)
     {
+        _document = document;
         FullName = fullName;
         PartialName = partialName;
         FieldType = fieldType;
-        Value = value;
-        DefaultValue = defaultValue;
         Options = options;
         Rect = rect;
         PageNumber = pageNumber;
@@ -112,6 +123,90 @@ public sealed class PdfField
         IsRequired = isRequired;
         IsMultiline = isMultiline;
         RawDictionary = rawDictionary;
+        WidgetDictionaries = widgetDictionaries;
+    }
+
+    /// <summary>
+    /// Set the field's value (/V entry). For Text and Choice fields, the value
+    /// is stored as a PDF string. For Button (checkbox/radio) fields, the value
+    /// is stored as a PDF name (e.g. "Yes" / "Off") and each widget annotation's
+    /// /AS appearance state is updated to match.
+    ///
+    /// Sets /NeedAppearances=true on the AcroForm dictionary so PDF readers
+    /// regenerate the visual appearance from the new value. Callers who want
+    /// to bake the value into static page content should call
+    /// <see cref="PdfDocument.FlattenAcroForm"/> after setting all values.
+    ///
+    /// Pass null to clear the value (removes /V).
+    ///
+    /// Throws InvalidOperationException if the field is read-only or is a
+    /// Signature field. Throws ArgumentException if the value isn't valid
+    /// for the field's type (e.g. a Choice field's options).
+    /// </summary>
+    public void SetValue(string? value)
+    {
+        if (IsReadOnly)
+            throw new InvalidOperationException(
+                $"Field '{FullName}' is read-only (Ff bit 0 set) and cannot be modified.");
+
+        if (FieldType == PdfFieldType.Signature)
+            throw new InvalidOperationException(
+                $"Field '{FullName}' is a Signature field. Use the signing API to populate signatures.");
+
+        if (value == null)
+        {
+            RawDictionary.Remove("V");
+            // For buttons, also reset /AS on widgets to /Off.
+            if (FieldType == PdfFieldType.Button)
+                SetButtonAppearanceState("Off");
+            _document.SetAcroFormNeedAppearances();
+            return;
+        }
+
+        switch (FieldType)
+        {
+            case PdfFieldType.Button:
+                // Checkbox / radio: /V is a name, and each widget's /AS reflects state.
+                RawDictionary.Set("V", new PdfName(value));
+                SetButtonAppearanceState(value);
+                break;
+
+            case PdfFieldType.Choice:
+                if (Options != null && Options.Count > 0 && !Options.Contains(value))
+                    throw new ArgumentException(
+                        $"Value '{value}' is not one of the choice field options for '{FullName}'. " +
+                        $"Allowed: {string.Join(", ", Options)}",
+                        nameof(value));
+                RawDictionary.Set("V", new PdfString(value));
+                break;
+
+            case PdfFieldType.Text:
+            default:
+                RawDictionary.Set("V", new PdfString(value));
+                break;
+        }
+
+        _document.SetAcroFormNeedAppearances();
+    }
+
+    /// <summary>
+    /// Update the /AS (appearance state) entry on each widget dictionary so
+    /// readers without /NeedAppearances support still display the correct
+    /// state.
+    /// </summary>
+    private void SetButtonAppearanceState(string state)
+    {
+        foreach (var widget in WidgetDictionaries)
+            widget.Set("AS", new PdfName(state));
+    }
+
+    private string? ResolveString(PdfObject? obj)
+    {
+        if (obj == null) return null;
+        obj = _document.Resolve(obj);
+        if (obj is PdfString s) return s.Value;
+        if (obj is PdfName n) return n.Value;
+        return null;
     }
 
     public override string ToString()

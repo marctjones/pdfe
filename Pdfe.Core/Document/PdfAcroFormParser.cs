@@ -104,8 +104,9 @@ internal static class PdfAcroFormParser
         string partialName,
         Dictionary<(int, int), int> pageRefToNumber)
     {
-        // Get field type (/FT: /Btn, /Tx, /Ch, /Sig)
-        var fieldTypeStr = fieldDict.GetNameOrNull("FT");
+        // Get field type (/FT: /Btn, /Tx, /Ch, /Sig). FT may be inherited from
+        // a parent field — walk /Parent chain if not present locally.
+        var fieldTypeStr = ResolveInheritedName(doc, fieldDict, "FT");
         var fieldType = fieldTypeStr switch
         {
             "Btn" => PdfFieldType.Button,
@@ -114,12 +115,6 @@ internal static class PdfAcroFormParser
             "Sig" => PdfFieldType.Signature,
             _ => PdfFieldType.Unknown,
         };
-
-        // Get value (/V) — try to extract as string or name
-        string? value = ExtractString(doc, fieldDict.GetOptional("V"));
-
-        // Get default value (/DV)
-        string? defaultValue = ExtractString(doc, fieldDict.GetOptional("DV"));
 
         // Get options (/Opt) for choice fields
         IReadOnlyList<string>? options = null;
@@ -138,17 +133,20 @@ internal static class PdfAcroFormParser
         // A field can be a widget itself, or have widget kids.
         PdfRectangle? rect = null;
         int? pageNumber = null;
+        var widgetDicts = new List<PdfDictionary>();
 
         // Check if the field itself is a widget annotation
         var subtype = fieldDict.GetNameOrNull("Subtype");
         if (subtype == "Widget")
         {
+            widgetDicts.Add(fieldDict);
             (rect, pageNumber) = ExtractWidgetInfo(doc, fieldDict, pageRefToNumber);
         }
         else
         {
             // Otherwise, look for widget kids
             var widgetKids = FindWidgetKids(doc, fieldDict);
+            widgetDicts.AddRange(widgetKids);
             if (widgetKids.Count > 0)
             {
                 // Use the first Widget annotation
@@ -157,18 +155,18 @@ internal static class PdfAcroFormParser
         }
 
         return new PdfField(
+            document: doc,
             fullName: fullName,
             partialName: partialName,
             fieldType: fieldType,
-            value: value,
-            defaultValue: defaultValue,
             options: options,
             rect: rect,
             pageNumber: pageNumber,
             isReadOnly: isReadOnly,
             isRequired: isRequired,
             isMultiline: isMultiline,
-            rawDictionary: fieldDict);
+            rawDictionary: fieldDict,
+            widgetDictionaries: widgetDicts.AsReadOnly());
     }
 
     /// <summary>
@@ -232,22 +230,22 @@ internal static class PdfAcroFormParser
     }
 
     /// <summary>
-    /// Extract a string value from a PDF object.
-    /// Handles PdfString, PdfName, and returns null otherwise.
+    /// Walk the /Parent chain to find an inherited name entry. Used for /FT,
+    /// /Ff, etc. which can be set on an ancestor and inherited by descendants
+    /// per PDF §12.7.4.4 (Field hierarchy).
     /// </summary>
-    private static string? ExtractString(PdfDocument doc, PdfObject? obj)
+    private static string? ResolveInheritedName(PdfDocument doc, PdfDictionary fieldDict, string key)
     {
-        if (obj == null)
-            return null;
+        var current = fieldDict;
+        for (int depth = 0; depth < 16 && current != null; depth++)
+        {
+            var name = current.GetNameOrNull(key);
+            if (name != null) return name;
 
-        obj = doc.Resolve(obj);
-
-        if (obj is PdfString str)
-            return str.Value;
-
-        if (obj is PdfName name)
-            return name.Value;
-
+            var parent = current.GetOptional("Parent");
+            if (parent == null) return null;
+            current = doc.Resolve(parent) as PdfDictionary;
+        }
         return null;
     }
 

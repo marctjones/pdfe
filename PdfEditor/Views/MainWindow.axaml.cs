@@ -486,6 +486,46 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Handle an AcroForm field edit. The viewer has already mutated the
+    /// PdfField. We tell the VM so it can mark the document dirty and
+    /// re-render the page so the appearance reflects the new value (the
+    /// form field overlay sits on top, but if /NeedAppearances is honored
+    /// by the renderer the bitmap underneath will refresh too).
+    /// </summary>
+    private void OnFormFieldEdited(object? sender, FormFieldEditedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        viewModel.OnFormFieldEdited(e.FieldName, e.NewValue);
+    }
+
+    /// <summary>
+    /// User finished drag-defining a new form-field rect in authoring mode.
+    /// </summary>
+    private void OnFormFieldRectDrawn(object? sender, FormFieldRectDrawnEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        viewModel.OnFormFieldRectDrawn(e.Rect, e.PageNumber);
+    }
+
+    /// <summary>
+    /// Toolbar combo selection — translate the selected ComboBoxItem to the
+    /// corresponding PdfFieldType for the next drag.
+    /// </summary>
+    private void OnFormFieldTypeChanged(object? sender, Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item) return;
+        var content = item.Content?.ToString() ?? "Text";
+        viewModel.FormAuthoringFieldType = content switch
+        {
+            "Checkbox" => Pdfe.Core.Document.PdfFieldType.Button,
+            "Choice"   => Pdfe.Core.Document.PdfFieldType.Choice,
+            "Signature"=> Pdfe.Core.Document.PdfFieldType.Signature,
+            _          => Pdfe.Core.Document.PdfFieldType.Text,
+        };
+    }
+
+    /// <summary>
     /// Handle toast notifications from the ViewModel.
     /// Shows an InfoBar notification for 5 seconds, then auto-dismisses.
     /// </summary>

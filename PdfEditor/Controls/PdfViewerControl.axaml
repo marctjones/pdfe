@@ -42,6 +42,7 @@
                         <Canvas Name="PendingRedactionsLayer" />
                         <Canvas Name="TextSelectionLayer" />
                         <Canvas Name="HiddenTextRevealLayer" />
+                        <Canvas Name="FormFieldsLayer" />
                         <Canvas Name="InteractionLayer" Background="Transparent" />
                     </Canvas>
                 </Grid>
