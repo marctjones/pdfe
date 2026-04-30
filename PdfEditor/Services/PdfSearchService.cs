@@ -2,10 +2,13 @@ using Microsoft.Extensions.Logging;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace PdfEditor.Services;
 
@@ -15,6 +18,21 @@ namespace PdfEditor.Services;
 public class PdfSearchService
 {
     private readonly ILogger<PdfSearchService> _logger;
+
+    /// <summary>
+    /// Number of pages per worker thread (configurable).
+    /// Larger values = fewer threads, less context switching overhead.
+    /// Smaller values = better load balancing but higher overhead.
+    /// </summary>
+    private const int PagesPerChunk = 8;
+
+    /// <summary>
+    /// Maximum degree of parallelism. Use Environment.ProcessorCount
+    /// for full utilization, or cap at a reasonable limit to avoid
+    /// excessive context switching.
+    /// </summary>
+    private static readonly int MaxDegreeOfParallelism =
+        Math.Min(Environment.ProcessorCount, 4);
 
     public PdfSearchService(ILogger<PdfSearchService> logger)
     {
@@ -155,47 +173,136 @@ public class PdfSearchService
         CancellationToken cancellationToken = default,
         IProgress<SearchProgress>? progress = null)
     {
-        var matches = new List<SearchMatch>();
         if (document == null || string.IsNullOrWhiteSpace(searchTerm))
-            return matches;
+            return new List<SearchMatch>();
 
         try
         {
             var totalPages = document.PageCount;
-            _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages",
+            _logger.LogInformation("Searching for '{SearchTerm}' in PDF with {PageCount} pages (parallel)",
                 searchTerm, totalPages);
 
             // Initial 0/N report so the UI can show the spinner+text
             // immediately rather than waiting for page 1 to finish.
             progress?.Report(new SearchProgress(0, totalPages, 0));
 
-            for (int i = 0; i < totalPages; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var page = document.GetPage(i + 1);
-                var pageMatches = SearchInPage(page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, i);
-                matches.AddRange(pageMatches);
-
-                // Throttle progress callbacks to keep the dispatcher
-                // unflooded — every 4 pages, plus always the last page
-                // (so the final report shows total = scanned).
-                if (progress != null && ((i & 3) == 0 || i == totalPages - 1))
-                    progress.Report(new SearchProgress(i + 1, totalPages, matches.Count));
-            }
+            // Parallel search with bounded concurrency and progress tracking
+            var allMatches = SearchParallel(
+                document, searchTerm, caseSensitive, wholeWordsOnly, useRegex,
+                totalPages, progress, cancellationToken);
 
             _logger.LogInformation("Found {MatchCount} matches for '{SearchTerm}'",
-                matches.Count, searchTerm);
+                allMatches.Count, searchTerm);
+
+            return allMatches;
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("Search cancelled at page progress; returning partial results");
+            _logger.LogDebug("Search cancelled; returning partial results");
+            return new List<SearchMatch>();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error searching PDF: {Message}", ex.Message);
+            return new List<SearchMatch>();
+        }
+    }
+
+    /// <summary>
+    /// Parallel search implementation using Parallel.For with bounded concurrency.
+    /// Pages are processed in chunks; each worker searches its chunk independently.
+    /// Results are collected in a thread-safe bag and sorted by (PageNumber, Index)
+    /// before returning.
+    /// </summary>
+    private List<SearchMatch> SearchParallel(
+        PdfDocument document,
+        string searchTerm,
+        bool caseSensitive,
+        bool wholeWordsOnly,
+        bool useRegex,
+        int totalPages,
+        IProgress<SearchProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var matchesBag = new ConcurrentBag<SearchMatch>();
+        int pagesDone = 0;
+        var pageDoneLock = new object();
+
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = MaxDegreeOfParallelism,
+            CancellationToken = cancellationToken
+        };
+
+        try
+        {
+            // Split pages into chunks and process in parallel
+            var pageChunks = GetPageChunks(totalPages);
+
+            Parallel.ForEach(pageChunks, parallelOptions, chunk =>
+            {
+                // Process each page in this chunk
+                foreach (var pageIndex in chunk)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        var page = document.GetPage(pageIndex + 1);
+                        var pageMatches = SearchInPage(
+                            page, searchTerm, caseSensitive, wholeWordsOnly, useRegex, pageIndex);
+
+                        foreach (var match in pageMatches)
+                        {
+                            matchesBag.Add(match);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error searching page {PageIndex}", pageIndex);
+                    }
+
+                    // Update progress atomically — only every 4 pages to throttle callbacks
+                    lock (pageDoneLock)
+                    {
+                        pagesDone++;
+                        if ((pagesDone & 3) == 0 || pagesDone == totalPages)
+                        {
+                            progress?.Report(new SearchProgress(pagesDone, totalPages, matchesBag.Count));
+                        }
+                    }
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Parallel search cancelled");
         }
 
-        return matches;
+        // Sort matches by page number, then by position in page for deterministic ordering
+        var sorted = matchesBag
+            .OrderBy(m => m.PageIndex)
+            .ThenBy(m => m.Y)
+            .ThenBy(m => m.X)
+            .ToList();
+
+        return sorted;
+    }
+
+    /// <summary>
+    /// Split pages into chunks for parallel processing.
+    /// Each chunk contains up to PagesPerChunk pages.
+    /// </summary>
+    private List<List<int>> GetPageChunks(int totalPages)
+    {
+        var chunks = new List<List<int>>();
+        for (int i = 0; i < totalPages; i += PagesPerChunk)
+        {
+            var chunkEnd = Math.Min(i + PagesPerChunk, totalPages);
+            var chunk = Enumerable.Range(i, chunkEnd - i).ToList();
+            chunks.Add(chunk);
+        }
+        return chunks;
     }
 
     /// <summary>

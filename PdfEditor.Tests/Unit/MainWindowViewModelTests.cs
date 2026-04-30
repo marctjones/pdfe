@@ -63,7 +63,8 @@ public class MainWindowViewModelTests
             _mockTextExtractionService.Object,
             _mockSearchService.Object,
             _mockSignatureService.Object,
-            _mockFilenameSuggestionService.Object);
+            _mockFilenameSuggestionService.Object,
+            new PdfEditor.Services.ToastService());
     }
 
     #region Property Tests
@@ -789,7 +790,8 @@ public class MainWindowViewModelTests
             _mockTextExtractionService.Object,
             _mockSearchService.Object,
             _mockSignatureService.Object,
-            _mockFilenameSuggestionService.Object);
+            _mockFilenameSuggestionService.Object,
+            new PdfEditor.Services.ToastService());
 
         // Assert
         vm.Should().NotBeNull();

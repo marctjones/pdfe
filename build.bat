@@ -50,4 +50,9 @@ echo.
 echo To publish a standalone executable:
 echo   dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 echo.
+echo To build CLI with ReadyToRun (R2R) compilation for faster cold-start:
+echo   dotnet publish Pdfe.Cli\Pdfe.Cli.csproj -c Release -r win-x64 --self-contained true
+echo   Binaries will be in: Pdfe.Cli\bin\Release\net10.0\win-x64\publish\
+echo   (R2R is auto-enabled in csproj)
+echo.
 pause

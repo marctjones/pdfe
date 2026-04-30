@@ -13,6 +13,9 @@ public class PdfPage
     private readonly PdfDocument _document;
     private readonly PdfDictionary _pageDict;
     private PdfGraphics? _graphics;
+    private IReadOnlyList<Letter>? _cachedLetters;
+    private string? _cachedText;
+    private IReadOnlyList<Word>? _cachedWords;
 
     /// <summary>
     /// The 1-based page number.
@@ -41,37 +44,52 @@ public class PdfPage
 
     /// <summary>
     /// Get the extracted text content from the page.
+    /// Cached on first access; subsequent calls return the cached result.
     /// </summary>
     public string Text
     {
         get
         {
+            if (_cachedText != null)
+                return _cachedText;
+
             var extractor = new TextExtractor(this);
-            return extractor.ExtractText();
+            _cachedText = extractor.ExtractText();
+            return _cachedText;
         }
     }
 
     /// <summary>
     /// Get all letters extracted from the page with position information.
+    /// Cached on first access; subsequent calls return the cached result.
     /// </summary>
     public IReadOnlyList<Letter> Letters
     {
         get
         {
+            if (_cachedLetters != null)
+                return _cachedLetters;
+
             var extractor = new TextExtractor(this);
-            return extractor.ExtractLetters();
+            _cachedLetters = extractor.ExtractLetters();
+            return _cachedLetters;
         }
     }
 
     /// <summary>
     /// Get all words extracted from the page.
     /// A word is a sequence of letters separated by whitespace.
+    /// Cached on first access; subsequent calls return the cached result.
     /// </summary>
     /// <returns>List of words with their letters and bounding boxes.</returns>
     public IReadOnlyList<Word> GetWords()
     {
+        if (_cachedWords != null)
+            return _cachedWords;
+
         var extractor = new TextExtractor(this);
-        return extractor.ExtractWords();
+        _cachedWords = extractor.ExtractWords();
+        return _cachedWords;
     }
 
     /// <summary>
