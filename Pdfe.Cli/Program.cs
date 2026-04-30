@@ -29,6 +29,9 @@ class Program
             CreateRenderCommand(),
             CreateDrawCommand(),
             CreateRedactCommand(),
+            CreateFillFormCommand(),
+            CreateAddFieldCommand(),
+            CreateAutodetectFieldsCommand(),
             CreateAuditCommand(),
             CreateOcrCommand(),
             CreateDemoCommand()
@@ -426,6 +429,278 @@ class Program
         var count = doc.RedactText(text, caseSensitive);
         doc.Save(outputPath);
         return count;
+    }
+
+    /// <summary>
+    /// pdfe fill-form &lt;input&gt; &lt;output&gt; --field name=value [--field name=value]... [--flatten]
+    /// Set AcroForm field values on a PDF and save. With --flatten, the
+    /// values are baked into the page content streams and the form is
+    /// removed (no longer interactive).
+    /// </summary>
+    static Command CreateFillFormCommand()
+    {
+        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
+        var outputArg = new Argument<FileInfo>("output", "Output PDF path");
+        var fieldOption = new Option<string[]>(
+            "--field",
+            "Field assignment in the form 'FullName=Value'. May be repeated for multiple fields.")
+        { AllowMultipleArgumentsPerToken = false };
+        fieldOption.AddAlias("-f");
+        var flattenOption = new Option<bool>(
+            "--flatten",
+            () => false,
+            "Bake values into page content and remove the form (non-interactive output)");
+
+        var command = new Command(
+            "fill-form",
+            "Set AcroForm field values and save (optionally flatten to baked content)")
+        {
+            inputArg, outputArg, fieldOption, flattenOption
+        };
+
+        command.SetHandler((FileInfo input, FileInfo output, string[] fields, bool flatten) =>
+        {
+            if (!input.Exists)
+            {
+                Console.Error.WriteLine($"File not found: {input.FullName}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            if (fields == null || fields.Length == 0)
+            {
+                Console.Error.WriteLine("At least one --field name=value assignment is required.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            try
+            {
+                int set = RunFillForm(input.FullName, output.FullName, fields, flatten);
+                Console.WriteLine($"Set {set} field value(s){(flatten ? " (flattened)" : "")}");
+                Console.WriteLine($"Output: {output.FullName}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, inputArg, outputArg, fieldOption, flattenOption);
+
+        return command;
+    }
+
+    /// <summary>
+    /// Core fill-form operation. Returns the number of fields that were
+    /// successfully assigned. Throws InvalidOperationException if the
+    /// document has no AcroForm or any --field token is malformed; throws
+    /// KeyNotFoundException for an unknown field name.
+    /// </summary>
+    internal static int RunFillForm(string inputPath, string outputPath, string[] fields, bool flatten)
+    {
+        var bytes = File.ReadAllBytes(inputPath);
+        using var doc = PdfDocument.Open(bytes);
+
+        var form = doc.GetAcroForm()
+            ?? throw new InvalidOperationException("Document has no /AcroForm — nothing to fill.");
+
+        int set = 0;
+        foreach (var raw in fields)
+        {
+            var eq = raw.IndexOf('=');
+            if (eq <= 0)
+                throw new InvalidOperationException(
+                    $"Malformed --field '{raw}'. Expected 'FullName=Value'.");
+            var name = raw.Substring(0, eq);
+            var value = raw.Substring(eq + 1);
+
+            var field = form.FindField(name)
+                ?? throw new KeyNotFoundException($"Field '{name}' not found in document.");
+            field.SetValue(value);
+            set++;
+        }
+
+        if (flatten)
+            doc.FlattenAcroForm();
+
+        doc.Save(outputPath);
+        return set;
+    }
+
+    /// <summary>
+    /// pdfe add-field input output --type T --name N --page P --rect "x,y,w,h" [--value v] [--option o]...
+    /// Add a new AcroForm field to an existing PDF.
+    /// </summary>
+    static Command CreateAddFieldCommand()
+    {
+        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
+        var outputArg = new Argument<FileInfo>("output", "Output PDF path");
+        var typeOption = new Option<string>("--type", () => "Text",
+            "Field type: Text, Checkbox, Choice, Signature");
+        var nameOption = new Option<string>("--name", "Full field name") { IsRequired = true };
+        var pageOption = new Option<int>("--page", () => 1, "1-based page number");
+        var rectOption = new Option<string>("--rect",
+            "Rect in PDF points as 'left,bottom,right,top' (bottom-left origin)") { IsRequired = true };
+        var valueOption = new Option<string?>("--value", "Default value (Text/Choice) or 'Yes'/'Off' (Checkbox)");
+        var optionsOption = new Option<string[]>("--option",
+            "Choice option (repeatable). At least one required for --type Choice.")
+        { AllowMultipleArgumentsPerToken = false };
+
+        var command = new Command("add-field",
+            "Add a new AcroForm field (Text/Checkbox/Choice/Signature) to a PDF")
+        {
+            inputArg, outputArg, typeOption, nameOption, pageOption, rectOption, valueOption, optionsOption
+        };
+
+        command.SetHandler(ctx =>
+        {
+            var input = ctx.ParseResult.GetValueForArgument(inputArg);
+            var output = ctx.ParseResult.GetValueForArgument(outputArg);
+            var type = ctx.ParseResult.GetValueForOption(typeOption)!;
+            var name = ctx.ParseResult.GetValueForOption(nameOption)!;
+            var page = ctx.ParseResult.GetValueForOption(pageOption);
+            var rectStr = ctx.ParseResult.GetValueForOption(rectOption)!;
+            var value = ctx.ParseResult.GetValueForOption(valueOption);
+            var options = ctx.ParseResult.GetValueForOption(optionsOption) ?? Array.Empty<string>();
+
+            if (!input.Exists)
+            {
+                Console.Error.WriteLine($"File not found: {input.FullName}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            try
+            {
+                RunAddField(input.FullName, output.FullName, type, name, page, rectStr, value, options);
+                Console.WriteLine($"Added {type} field '{name}' to page {page}");
+                Console.WriteLine($"Output: {output.FullName}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        });
+
+        return command;
+    }
+
+    internal static void RunAddField(string inputPath, string outputPath,
+        string type, string name, int page, string rectStr,
+        string? value, string[] options)
+    {
+        var rect = ParseRect(rectStr);
+        var bytes = File.ReadAllBytes(inputPath);
+        using var doc = PdfDocument.Open(bytes);
+
+        switch (type.ToLowerInvariant())
+        {
+            case "text":
+                var t = doc.AddTextField(page, rect, name, defaultValue: value);
+                break;
+            case "checkbox":
+            case "btn":
+            case "button":
+                doc.AddCheckBox(page, rect, name,
+                    defaultChecked: string.Equals(value, "Yes", StringComparison.OrdinalIgnoreCase));
+                break;
+            case "choice":
+            case "combo":
+            case "dropdown":
+                if (options.Length == 0)
+                    throw new ArgumentException("--option is required at least once for --type Choice.");
+                doc.AddChoiceField(page, rect, name, options, defaultValue: value);
+                break;
+            case "signature":
+            case "sig":
+                doc.AddSignatureField(page, rect, name);
+                break;
+            default:
+                throw new ArgumentException(
+                    $"Unknown field type '{type}'. Use Text, Checkbox, Choice, or Signature.");
+        }
+
+        doc.Save(outputPath);
+    }
+
+    private static Pdfe.Core.Document.PdfRectangle ParseRect(string s)
+    {
+        var parts = s.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 4)
+            throw new ArgumentException($"Expected --rect 'left,bottom,right,top'; got '{s}'.");
+        var nums = new double[4];
+        for (int i = 0; i < 4; i++)
+        {
+            if (!double.TryParse(parts[i], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out nums[i]))
+                throw new ArgumentException($"Bad number in --rect: '{parts[i]}'.");
+        }
+        return new Pdfe.Core.Document.PdfRectangle(nums[0], nums[1], nums[2], nums[3]);
+    }
+
+    /// <summary>
+    /// pdfe autodetect-fields input [output] [--apply] [--json]
+    /// Run heuristic auto-detection. Prints suggestions; with --apply,
+    /// also materialises them into output.
+    /// </summary>
+    static Command CreateAutodetectFieldsCommand()
+    {
+        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
+        var outputArg = new Argument<FileInfo?>("output",
+            () => null, "Output PDF (required with --apply)");
+        var applyOption = new Option<bool>("--apply", () => false,
+            "Add the detected fields to the PDF and save to <output>");
+
+        var command = new Command("autodetect-fields",
+            "Heuristically detect likely form-field locations on each page")
+        {
+            inputArg, outputArg, applyOption
+        };
+
+        command.SetHandler((FileInfo input, FileInfo? output, bool apply) =>
+        {
+            if (!input.Exists)
+            {
+                Console.Error.WriteLine($"File not found: {input.FullName}");
+                Environment.ExitCode = 1;
+                return;
+            }
+            if (apply && output == null)
+            {
+                Console.Error.WriteLine("--apply requires an <output> PDF path.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            try
+            {
+                var bytes = File.ReadAllBytes(input.FullName);
+                using var doc = PdfDocument.Open(bytes);
+                var sugg = PdfFormAutoDetector.Scan(doc);
+
+                Console.WriteLine($"Detected {sugg.Count} field candidate(s):");
+                foreach (var s in sugg)
+                    Console.WriteLine(
+                        $"  page {s.PageNumber}  {s.FieldType,-9}  " +
+                        $"[{s.Rect.Left:0.#},{s.Rect.Bottom:0.#}-{s.Rect.Right:0.#},{s.Rect.Top:0.#}]  " +
+                        $"{s.SuggestedName}  ({s.Reason})");
+
+                if (apply)
+                {
+                    var n = PdfFormAutoDetector.Apply(doc, sugg);
+                    doc.Save(output!.FullName);
+                    Console.WriteLine($"Applied {n} field(s); wrote {output.FullName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, inputArg, outputArg, applyOption);
+
+        return command;
     }
 
     /// <summary>

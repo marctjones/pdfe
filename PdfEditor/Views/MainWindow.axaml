@@ -232,6 +232,34 @@
                     <Border Width="1" Height="24" Margin="6,0"
                             Background="{DynamicResource DividerBrush}"/>
 
+                    <!-- Form Authoring -->
+                    <Button Content="📋 Add Field" Command="{Binding ToggleFormAuthoringModeCommand}"
+                            Classes="modern-button toggle"
+                            Classes.active="{Binding IsFormAuthoringMode}"
+                            Padding="12,6"
+                            ToolTip.Tip="Form Authoring Mode — drag to define a new field"
+                            AutomationProperties.Name="Form Authoring Mode"/>
+
+                    <ComboBox SelectedIndex="0"
+                              IsVisible="{Binding IsFormAuthoringMode}"
+                              SelectionChanged="OnFormFieldTypeChanged"
+                              ToolTip.Tip="Field type for the next drag"
+                              MinWidth="100" Margin="4,0">
+                        <ComboBoxItem Content="Text"/>
+                        <ComboBoxItem Content="Checkbox"/>
+                        <ComboBoxItem Content="Choice"/>
+                        <ComboBoxItem Content="Signature"/>
+                    </ComboBox>
+
+                    <Button Content="🪄 Auto-detect" Command="{Binding AutoDetectFieldsCommand}"
+                            Classes="modern-button"
+                            Padding="12,6"
+                            ToolTip.Tip="Heuristically add form fields where the page has underline placeholders or empty squares"
+                            AutomationProperties.Name="Auto-detect Form Fields"/>
+
+                    <Border Width="1" Height="24" Margin="6,0"
+                            Background="{DynamicResource DividerBrush}"/>
+
                     <!-- Tools Group -->
                     <Button Content="🔍 Find" Command="{Binding ToggleSearchCommand}"
                             Classes="modern-button" Padding="12,6"
@@ -582,9 +610,12 @@
                                                ZoomLevel="{Binding ZoomLevel}"
                                                InteractionMode="{Binding InteractionMode}"
                                                HiddenTextHighlights="{Binding HiddenTextHighlights}"
+                                               FormFields="{Binding CurrentPageFormFields}"
                                                RedactionDrawn="OnRedactionDrawn"
                                                TextSelected="OnTextSelected"
                                                LinkClicked="OnLinkClicked"
+                                               FormFieldEdited="OnFormFieldEdited"
+                                               FormFieldRectDrawn="OnFormFieldRectDrawn"
                                                PageChanged="OnPageChanged" />
                 </Grid>
             </Border>

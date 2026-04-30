@@ -671,6 +671,49 @@ public class PdfDocument : IDisposable
     }
 
     /// <summary>
+    /// Mark the AcroForm dictionary as requiring appearance stream regeneration
+    /// (sets /NeedAppearances true). Called automatically by
+    /// <see cref="PdfField.SetValue(string?)"/>; expose for callers that mutate
+    /// field dictionaries directly.
+    /// No-op if the document has no AcroForm.
+    /// </summary>
+    public void SetAcroFormNeedAppearances()
+    {
+        var acroFormObj = Catalog.GetOptional("AcroForm");
+        if (acroFormObj == null) return;
+        if (Resolve(acroFormObj) is not PdfDictionary acroFormDict) return;
+        acroFormDict.SetBool("NeedAppearances", true);
+    }
+
+    /// <summary>
+    /// Bake all current AcroForm field values into static page content and
+    /// remove the interactive form. After flattening:
+    ///   • Each text/choice field's /V is rendered as page content at the
+    ///     widget's /Rect (using /DA appearance string when available, else
+    ///     a default Helvetica 10 pt black);
+    ///   • Each widget annotation is removed from its host page's /Annots
+    ///     array;
+    ///   • The /AcroForm catalog entry is removed;
+    ///   • Any cached page state (letters, text) is invalidated so subsequent
+    ///     reads see the baked content.
+    ///
+    /// Call <see cref="Save(Stream)"/> afterwards to persist.
+    ///
+    /// Signature fields are skipped (their visual representation comes from
+    /// the signature appearance, not /V) and their widget annotations are
+    /// preserved.
+    /// </summary>
+    public void FlattenAcroForm()
+    {
+        var form = GetAcroForm();
+        if (form == null) return;
+
+        AcroFormFlattener.Flatten(this, form);
+
+        Catalog.Remove("AcroForm");
+    }
+
+    /// <summary>
     /// Check whether this document has embedded files (PDF 2.0 portfolios / associated files).
     /// Returns true if /Catalog/Names/EmbeddedFiles or legacy /Catalog/AF are present.
     /// </summary>

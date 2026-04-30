@@ -14,6 +14,7 @@ public class DocumentStateManager : ReactiveObject
     private string _originalFilePath = string.Empty;
     private int _pendingRedactionsCount;
     private int _removedPagesCount;
+    private int _formFieldEditsCount;
 
     /// <summary>
     /// Path to the currently open file
@@ -49,6 +50,15 @@ public class DocumentStateManager : ReactiveObject
     {
         get => _removedPagesCount;
         set => this.RaiseAndSetIfChanged(ref _removedPagesCount, value);
+    }
+
+    /// <summary>
+    /// Number of AcroForm field edits not yet saved.
+    /// </summary>
+    public int FormFieldEditsCount
+    {
+        get => _formFieldEditsCount;
+        set => this.RaiseAndSetIfChanged(ref _formFieldEditsCount, value);
     }
 
     /// <summary>
@@ -88,7 +98,8 @@ public class DocumentStateManager : ReactiveObject
     /// <summary>
     /// True if there are any unsaved changes (redactions or page modifications)
     /// </summary>
-    public bool HasUnsavedChanges => PendingRedactionsCount > 0 || RemovedPagesCount > 0;
+    public bool HasUnsavedChanges =>
+        PendingRedactionsCount > 0 || RemovedPagesCount > 0 || FormFieldEditsCount > 0;
 
     /// <summary>
     /// User-friendly description of file type
@@ -125,6 +136,7 @@ public class DocumentStateManager : ReactiveObject
         OriginalFilePath = filePath;
         PendingRedactionsCount = 0;
         RemovedPagesCount = 0;
+        FormFieldEditsCount = 0;
     }
 
     /// <summary>
@@ -148,6 +160,7 @@ public class DocumentStateManager : ReactiveObject
         OriginalFilePath = string.Empty;
         PendingRedactionsCount = 0;
         RemovedPagesCount = 0;
+        FormFieldEditsCount = 0;
     }
 
     /// <summary>

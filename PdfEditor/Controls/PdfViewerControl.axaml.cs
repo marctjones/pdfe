@@ -125,6 +125,21 @@ public partial class PdfViewerControl : UserControl
     }
 
     /// <summary>
+    /// AcroForm fields on the current page. When set, the FormFieldsLayer
+    /// canvas paints a clickable text input for each text/choice field and a
+    /// checkbox for each button field. Mutating an input fires
+    /// <see cref="FormFieldEdited"/>.
+    /// </summary>
+    public static readonly StyledProperty<System.Collections.Generic.IReadOnlyList<Pdfe.Core.Document.PdfField>?> FormFieldsProperty =
+        AvaloniaProperty.Register<PdfViewerControl, System.Collections.Generic.IReadOnlyList<Pdfe.Core.Document.PdfField>?>(nameof(FormFields));
+
+    public System.Collections.Generic.IReadOnlyList<Pdfe.Core.Document.PdfField>? FormFields
+    {
+        get => GetValue(FormFieldsProperty);
+        set => SetValue(FormFieldsProperty, value);
+    }
+
+    /// <summary>
     /// Highlights for hidden-behind-overlay text to paint on top of the
     /// rendered page. Bound to a VM observable collection; whenever it
     /// changes, <see cref="RefreshHiddenTextOverlays"/> redraws them.
@@ -162,6 +177,21 @@ public partial class PdfViewerControl : UserControl
     /// typically sets <see cref="CurrentPage"/> to <see cref="LinkClickedEventArgs.PageNumber"/>.
     /// </summary>
     public event EventHandler<LinkClickedEventArgs>? LinkClicked;
+
+    /// <summary>
+    /// Fired when the user edits an AcroForm field via the FormFieldsLayer
+    /// inputs. The control has already mutated the underlying PdfField; the
+    /// host typically reacts by re-rendering the page so any baked-in
+    /// appearance is refreshed.
+    /// </summary>
+    public event EventHandler<FormFieldEditedEventArgs>? FormFieldEdited;
+
+    /// <summary>
+    /// Fired when the user finishes drawing a new field rect in
+    /// FormAuthoring mode. Carries the rect in PDF points (bottom-left
+    /// origin) plus the host page number.
+    /// </summary>
+    public event EventHandler<FormFieldRectDrawnEventArgs>? FormFieldRectDrawn;
 
     #endregion
 
@@ -235,6 +265,8 @@ public partial class PdfViewerControl : UserControl
             control.OnErrorMessageChanged());
         AnnotationsProperty.Changed.AddClassHandler<PdfViewerControl>((control, _) =>
             control.RedrawAnnotationsLayer());
+        FormFieldsProperty.Changed.AddClassHandler<PdfViewerControl>((control, _) =>
+            control.RedrawFormFieldsLayer());
         HiddenTextHighlightsProperty.Changed.AddClassHandler<PdfViewerControl>((control, e) =>
             control.OnHiddenTextHighlightsChanged(
                 e.OldValue as System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>,
@@ -351,6 +383,128 @@ public partial class PdfViewerControl : UserControl
             Canvas.SetTop(rect, dipY);
             layer.Children.Add(rect);
         }
+    }
+
+    private void RedrawFormFieldsLayer()
+    {
+        var layer = this.FindControl<Canvas>("FormFieldsLayer");
+        if (layer == null) return;
+        layer.Children.Clear();
+
+        var fields = FormFields;
+        if (fields == null || Document == null || fields.Count == 0) return;
+
+        var page = Document.GetPage(CurrentPage);
+        double pageHeight = page.Height;
+        double scale = AnnotationRenderDpi / 72.0;
+
+        foreach (var field in fields)
+        {
+            if (field.Rect is not Pdfe.Core.Document.PdfRectangle r) continue;
+
+            // Y-flip: PDF bottom-left → DIP top-left
+            double dipX = r.Left * scale;
+            double dipY = (pageHeight - r.Top) * scale;
+            double dipW = Math.Max((r.Right - r.Left) * scale, 12);
+            double dipH = Math.Max((r.Top - r.Bottom) * scale, 12);
+
+            Control? input = field.FieldType switch
+            {
+                Pdfe.Core.Document.PdfFieldType.Text   => CreateTextFieldInput(field, dipW, dipH),
+                Pdfe.Core.Document.PdfFieldType.Choice => CreateChoiceFieldInput(field, dipW, dipH),
+                Pdfe.Core.Document.PdfFieldType.Button => CreateButtonFieldInput(field, dipW, dipH),
+                _ => null,
+            };
+            if (input == null) continue;
+
+            input.Width = dipW;
+            input.Height = dipH;
+            Canvas.SetLeft(input, dipX);
+            Canvas.SetTop(input, dipY);
+            layer.Children.Add(input);
+        }
+    }
+
+    private TextBox CreateTextFieldInput(Pdfe.Core.Document.PdfField field, double w, double h)
+    {
+        var box = new TextBox
+        {
+            Text = field.Value ?? string.Empty,
+            IsReadOnly = field.IsReadOnly,
+            AcceptsReturn = field.IsMultiline,
+            Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0x80)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0xCC, 0xAA, 0x00)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(2),
+            FontSize = Math.Max(10, h * 0.6),
+            VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+        };
+
+        // Commit on Enter (single-line) or focus loss.
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && !field.IsMultiline)
+            {
+                CommitFieldEdit(field, box.Text);
+                e.Handled = true;
+            }
+        };
+        box.LostFocus += (_, _) => CommitFieldEdit(field, box.Text);
+        return box;
+    }
+
+    private Control CreateChoiceFieldInput(Pdfe.Core.Document.PdfField field, double w, double h)
+    {
+        var combo = new ComboBox
+        {
+            ItemsSource = field.Options,
+            SelectedItem = field.Value,
+            IsEnabled = !field.IsReadOnly,
+            Background = new SolidColorBrush(Color.FromArgb(0x20, 0x80, 0xFF, 0xFF)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x00, 0x88, 0xAA)),
+        };
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedItem is string s)
+                CommitFieldEdit(field, s);
+        };
+        return combo;
+    }
+
+    private Control CreateButtonFieldInput(Pdfe.Core.Document.PdfField field, double w, double h)
+    {
+        // Treat any value other than "Off"/null as checked for the MVP.
+        // Acrobat stores radio-button states as the option's name (e.g.
+        // "/Choice1"), so this works for both checkbox and the simplest
+        // single-radio case.
+        var checkBox = new CheckBox
+        {
+            IsChecked = !string.IsNullOrEmpty(field.Value)
+                && !string.Equals(field.Value, "Off", StringComparison.OrdinalIgnoreCase),
+            IsEnabled = !field.IsReadOnly,
+            Background = new SolidColorBrush(Color.FromArgb(0x20, 0x00, 0xAA, 0x44)),
+        };
+        checkBox.IsCheckedChanged += (_, _) =>
+        {
+            var newValue = checkBox.IsChecked == true ? "Yes" : "Off";
+            CommitFieldEdit(field, newValue);
+        };
+        return checkBox;
+    }
+
+    private void CommitFieldEdit(Pdfe.Core.Document.PdfField field, string? newValue)
+    {
+        // Skip a no-op assignment so we don't fire spurious re-render events.
+        if (string.Equals(field.Value, newValue, StringComparison.Ordinal)) return;
+        try
+        {
+            field.SetValue(newValue);
+        }
+        catch (InvalidOperationException) { return; } // read-only / signature
+        catch (ArgumentException)        { return; } // choice value not in /Opt
+
+        FormFieldEdited?.Invoke(this,
+            new FormFieldEditedEventArgs(field.FullName, newValue, CurrentPage));
     }
 
     private static (Color Fill, Color Stroke) AnnotationColors(Pdfe.Core.Document.PdfAnnotation a)
@@ -762,7 +916,8 @@ public partial class PdfViewerControl : UserControl
 
         var currentPoint = GetPressPoint(e);
 
-        if (InteractionMode == InteractionMode.Redaction)
+        if (InteractionMode == InteractionMode.Redaction ||
+            InteractionMode == InteractionMode.FormAuthoring)
         {
             DrawTemporaryRedactionRectangle(_dragStart, currentPoint);
         }
@@ -799,6 +954,29 @@ public partial class PdfViewerControl : UserControl
                 rect.Width / ZoomLevel, rect.Height / ZoomLevel);
             RedactionDrawn?.Invoke(this, new RedactionDrawnEventArgs(adjustedRect));
             ClearTemporaryDrawings();
+        }
+        else if (InteractionMode == InteractionMode.FormAuthoring)
+        {
+            var endPoint = GetPressPoint(e);
+            var dipRect = CreateRect(_dragStart, endPoint);
+            ClearTemporaryDrawings();
+            // Convert from viewer DIPs to PDF points (Y-flipped).
+            if (Document != null && dipRect.Width > 4 && dipRect.Height > 4)
+            {
+                var page = Document.GetPage(CurrentPage);
+                double scale = AnnotationRenderDpi / 72.0;
+                double pdfLeft   = dipRect.X / scale;
+                double pdfRight  = (dipRect.X + dipRect.Width) / scale;
+                double pdfTop    = page.Height - dipRect.Y / scale;
+                double pdfBottom = page.Height - (dipRect.Y + dipRect.Height) / scale;
+                var pdfRect = new Pdfe.Core.Document.PdfRectangle(
+                    Math.Min(pdfLeft, pdfRight),
+                    Math.Min(pdfBottom, pdfTop),
+                    Math.Max(pdfLeft, pdfRight),
+                    Math.Max(pdfBottom, pdfTop));
+                FormFieldRectDrawn?.Invoke(this,
+                    new FormFieldRectDrawnEventArgs(pdfRect, CurrentPage));
+            }
         }
         else if (InteractionMode == InteractionMode.TextSelection &&
                  _selectionAnchor != null && _selectionFocus != null &&
@@ -1250,6 +1428,39 @@ public class LinkClickedEventArgs : EventArgs
 }
 
 /// <summary>
+/// Event arguments for the user finishing a drag-rect in FormAuthoring
+/// mode. The rect is in PDF points, bottom-left origin.
+/// </summary>
+public class FormFieldRectDrawnEventArgs : EventArgs
+{
+    public Pdfe.Core.Document.PdfRectangle Rect { get; }
+    public int PageNumber { get; }
+    public FormFieldRectDrawnEventArgs(Pdfe.Core.Document.PdfRectangle rect, int pageNumber)
+    {
+        Rect = rect;
+        PageNumber = pageNumber;
+    }
+}
+
+/// <summary>
+/// Event arguments for an AcroForm field edit. The control has already
+/// mutated <see cref="Pdfe.Core.Document.PdfField.SetValue"/>; carries the
+/// field's full name and the new value (null if cleared).
+/// </summary>
+public class FormFieldEditedEventArgs : EventArgs
+{
+    public string FieldName { get; }
+    public string? NewValue { get; }
+    public int PageNumber { get; }
+    public FormFieldEditedEventArgs(string fieldName, string? newValue, int pageNumber)
+    {
+        FieldName = fieldName;
+        NewValue = newValue;
+        PageNumber = pageNumber;
+    }
+}
+
+/// <summary>
 /// Event arguments for page changed event.
 /// </summary>
 public class PageChangedEventArgs : EventArgs
@@ -1289,7 +1500,14 @@ public enum InteractionMode
     /// <summary>
     /// Pan/scroll the document.
     /// </summary>
-    Pan
+    Pan,
+
+    /// <summary>
+    /// Drag to define a new AcroForm field rect. The host listens for
+    /// <see cref="PdfViewerControl.FormFieldRectDrawn"/> and materialises
+    /// a field of the user-selected type.
+    /// </summary>
+    FormAuthoring,
 }
 
 #endregion
