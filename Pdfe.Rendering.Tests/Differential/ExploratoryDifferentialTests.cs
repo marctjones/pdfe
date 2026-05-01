@@ -17,28 +17,31 @@ namespace Pdfe.Rendering.Tests.Differential;
 /// pdf.js test corpus (~684 PDFs) and emits a JSON report instead of
 /// passing/failing the build.
 ///
-/// Why a report and not a normal test:
-///   • The pdf.js corpus is intentionally diverse and surfaces ~250+
-///     real disagreements with mutool today. Failing those would block
-///     CI; allowlisting each one would mean ~250 hand-written reasons.
-///   • Skipping them was the previous compromise — and it hid the
-///     failures behind a benign-looking Skip count.
-///   • A report file makes every result *visible* without conflating
-///     "we don't render this correctly" with "this test was skipped
-///     because it can't run." Each PDF is recorded as PASS / FAIL /
-///     PARSE_ERROR / MISSING_PAGE / etc., with metrics.
+/// MEMORY BUDGET: must stay under ~4 GB peak per process. SkiaSharp
+/// bitmaps are native-allocated; the .NET GC reclaims them lazily, so
+/// running all 684 PDFs in one process accumulates 26+ GB before the
+/// kernel intervenes (this is exactly what OOM-killed Claude's session
+/// on 2026-05-01). The test is therefore CHUNKED across processes:
 ///
-/// The report is written to:
-///   Pdfe.Rendering.Tests/bin/.../exploratory-report.json
+///   • PDFE_CHUNK_INDEX (default 0) and PDFE_CHUNK_TOTAL (default 1)
+///     env vars slice the discovered corpus by `i % total == index`.
+///   • One process handles ~50 PDFs, then exits — process exit
+///     guarantees full native-memory reclamation.
+///   • The shell driver scripts/run-exploratory-corpus.sh runs all
+///     chunks sequentially and merges the per-chunk JSON outputs into
+///     a single exploratory-report.json.
 ///
-/// To run it:
-///   dotnet test Pdfe.Rendering.Tests --filter "Trait=Exploratory"
+/// Within a chunk we also force GC every N iterations so per-bitmap
+/// native memory doesn't pile up before exit.
 ///
-/// Default `dotnet test` skips this class entirely so CI sees only the
-/// gating tests (smoke + Isartor) and reports honest pass/fail counts.
-/// Run this manually when you want to know "how many pdf.js fixtures
-/// does pdfe currently render correctly" — the count goes up as we fix
-/// bugs and down when something regresses.
+/// To run a single chunk locally:
+///   PDFE_CHUNK_INDEX=0 PDFE_CHUNK_TOTAL=14 \
+///     dotnet test --filter "Category=Exploratory"
+///
+/// To run the whole corpus chunked:
+///   ./scripts/run-exploratory-corpus.sh
+///
+/// Default `dotnet test` skips this class (Trait("Category", "Exploratory")).
 /// </summary>
 [Trait("Category", "Exploratory")]
 public sealed class ExploratoryDifferentialTests
@@ -50,9 +53,18 @@ public sealed class ExploratoryDifferentialTests
         _output = output;
     }
 
+    /// <summary>
+    /// Force a full GC + finalizer flush every N iterations to keep
+    /// SkiaSharp's native allocations from outpacing the GC's reclaim
+    /// rate. Tuned empirically: at 10, the per-process peak stays
+    /// under ~600 MB on the smoke corpus; without this the process
+    /// grows monotonically.
+    /// </summary>
+    private const int GcEveryN = 10;
+
     [Fact]
     [Trait("Category", "Exploratory")]
-    public void GenerateCorpusReport()
+    public void GenerateCorpusReportChunk()
     {
         Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools to generate the exploratory report");
@@ -62,18 +74,66 @@ public sealed class ExploratoryDifferentialTests
         Skip.If(!Directory.Exists(corpus),
             "pdf.js corpus not downloaded — run scripts/download-pdfjs-corpus.sh");
 
-        var entries = new List<CorpusEntry>();
-        var pdfs = Directory.EnumerateFiles(corpus, "*.pdf").OrderBy(p => p).ToList();
-        _output.WriteLine($"Scanning {pdfs.Count} PDFs in {corpus}...");
+        // Chunking. Default is "single chunk = full corpus" so a one-off
+        // dev run still works (just budget the memory accordingly).
+        int chunkIndex = ParseEnvInt("PDFE_CHUNK_INDEX", defaultValue: 0);
+        int chunkTotal = ParseEnvInt("PDFE_CHUNK_TOTAL", defaultValue: 1);
+        if (chunkTotal < 1) chunkTotal = 1;
+        if (chunkIndex < 0 || chunkIndex >= chunkTotal)
+            throw new ArgumentOutOfRangeException(
+                nameof(chunkIndex),
+                $"PDFE_CHUNK_INDEX={chunkIndex} out of range for PDFE_CHUNK_TOTAL={chunkTotal}");
 
-        foreach (var pdf in pdfs)
+        var allPdfs = Directory.EnumerateFiles(corpus, "*.pdf").OrderBy(p => p).ToList();
+        // Stable assignment: PDF i goes into chunk i % chunkTotal. Using
+        // index modulo (rather than contiguous slicing) means the chunks
+        // are roughly equally weighted across whatever ordering quirks
+        // the directory has — no chunk gets all the slow PDFs.
+        var myPdfs = allPdfs
+            .Select((path, idx) => (path, idx))
+            .Where(t => t.idx % chunkTotal == chunkIndex)
+            .Select(t => t.path)
+            .ToList();
+
+        _output.WriteLine($"chunk {chunkIndex + 1}/{chunkTotal}: " +
+                          $"processing {myPdfs.Count} of {allPdfs.Count} PDFs");
+
+        var entries = new List<CorpusEntry>();
+        int processed = 0;
+        long peakBytes = 0;
+
+        foreach (var pdf in myPdfs)
         {
             var rel = Path.GetRelativePath(root, pdf);
             var entry = ScanOne(rel, pdf);
             entries.Add(entry);
+            processed++;
+
+            // Sample RSS every iteration so the chunk's peak measurement
+            // is honest even on very small chunks (where the GC interval
+            // below would otherwise never fire).
+            var rss = Environment.WorkingSet;
+            if (rss > peakBytes) peakBytes = rss;
+
+            // Force native finalization every N iterations. SkiaSharp
+            // SKBitmap uses unmanaged memory backed by SKObject's
+            // dispose chain; the .NET GC sees a small managed wrapper
+            // and doesn't urgency-collect it, leaving the native
+            // allocation alive until the next gen-2 collection. Forcing
+            // the cycle keeps per-process memory bounded.
+            if (processed % GcEveryN == 0)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
         }
 
-        // Tally + emit summary.
+        // Final GC before reporting so the peak is honest.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        // Tally + emit summary for this chunk.
         var counts = new Dictionary<string, int>();
         foreach (var e in entries)
         {
@@ -82,31 +142,41 @@ public sealed class ExploratoryDifferentialTests
         }
 
         _output.WriteLine("");
-        _output.WriteLine("=== Corpus report ===");
+        _output.WriteLine($"=== Chunk {chunkIndex + 1}/{chunkTotal} report ===");
         foreach (var kv in counts.OrderByDescending(kv => kv.Value))
             _output.WriteLine($"  {kv.Value,4}  {kv.Key}");
-        _output.WriteLine("");
-        _output.WriteLine($"  Total: {entries.Count}");
+        _output.WriteLine($"  total processed:  {entries.Count}");
+        _output.WriteLine($"  peak RSS observed: {peakBytes / 1024 / 1024} MB");
 
-        // Write the JSON report next to the test binary so a CI
-        // step can upload it as an artifact.
-        var reportPath = Path.Combine(AppContext.BaseDirectory, "exploratory-report.json");
+        // Per-chunk JSON file. The driver script merges all
+        // exploratory-chunk-*.json files into the final report.
+        var slicePath = Path.Combine(AppContext.BaseDirectory,
+            $"exploratory-chunk-{chunkIndex:D3}-of-{chunkTotal:D3}.json");
         var json = JsonSerializer.Serialize(new
         {
             generatedUtc = DateTime.UtcNow.ToString("o"),
             corpus = "test-pdfs/pdfjs",
+            chunkIndex,
+            chunkTotal,
             counts,
             total = entries.Count,
+            peakRssBytes = peakBytes,
             entries,
         }, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(reportPath, json);
-        _output.WriteLine($"  report: {reportPath}");
+        File.WriteAllText(slicePath, json);
+        _output.WriteLine($"  slice: {slicePath}");
 
-        // The report itself is the output. We assert only that the
-        // report was generated for at least 100 PDFs — anything below
-        // that means corpus discovery broke.
-        entries.Count.Should().BeGreaterThan(100,
-            "exploratory report should cover the full pdf.js corpus");
+        // The slice file is the output. We only sanity-assert that the
+        // chunk processed at least one PDF (otherwise the slicing math
+        // is broken).
+        entries.Count.Should().BeGreaterThan(0,
+            $"chunk {chunkIndex + 1}/{chunkTotal} should process at least one PDF");
+    }
+
+    private static int ParseEnvInt(string name, int defaultValue)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return int.TryParse(raw, out var v) ? v : defaultValue;
     }
 
     private CorpusEntry ScanOne(string rel, string pdfPath)
@@ -132,6 +202,7 @@ public sealed class ExploratoryDifferentialTests
             entry.Status = "PARSE_ERROR";
             entry.ErrorType = ex.GetType().Name;
             entry.ErrorMessage = Truncate(ex.Message, 200);
+            pdfeBitmap?.Dispose();
             return entry;
         }
 
@@ -142,17 +213,17 @@ public sealed class ExploratoryDifferentialTests
         }
 
         // Reference render via mutool.
-        var mutoolBitmap = MutoolReferenceRenderer.RenderPage(pdfPath, 1, 150);
-        if (mutoolBitmap == null)
-        {
-            entry.Status = "MUTOOL_REFUSED";
-            pdfeBitmap.Dispose();
-            return entry;
-        }
-
-        // Normalize dims if needed.
+        SKBitmap? mutoolBitmap = null;
         try
         {
+            mutoolBitmap = MutoolReferenceRenderer.RenderPage(pdfPath, 1, 150);
+            if (mutoolBitmap == null)
+            {
+                entry.Status = "MUTOOL_REFUSED";
+                return entry;
+            }
+
+            // Normalize dims if needed.
             if (pdfeBitmap.Width != mutoolBitmap.Width || pdfeBitmap.Height != mutoolBitmap.Height)
             {
                 using var resized = DifferentialMetrics.ResizeMatch(
@@ -164,7 +235,6 @@ public sealed class ExploratoryDifferentialTests
             var report = DifferentialMetrics.Compare(pdfeBitmap, mutoolBitmap);
             entry.DiffFraction = report.DifferingPixelFraction;
             entry.Mae = report.MeanAbsoluteError;
-            // Same thresholds as the gating harness.
             entry.Status = (report.DifferingPixelFraction <= 0.10
                          && report.MeanAbsoluteError <= 32.0)
                 ? "PASS"
@@ -179,7 +249,7 @@ public sealed class ExploratoryDifferentialTests
         finally
         {
             pdfeBitmap?.Dispose();
-            mutoolBitmap.Dispose();
+            mutoolBitmap?.Dispose();
         }
 
         return entry;
