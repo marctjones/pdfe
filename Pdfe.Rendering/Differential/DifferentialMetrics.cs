@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using SkiaSharp;
 
-namespace Pdfe.Rendering.Tests.Differential;
+namespace Pdfe.Rendering.Differential;
 
 /// <summary>
 /// Computes per-pixel diff statistics between two equally-sized bitmaps.
@@ -24,7 +24,7 @@ public sealed record DifferentialReport(
         $"max-pixel-Δ {MaxAbsoluteError:F0}/255";
 }
 
-internal static class DifferentialMetrics
+public static class DifferentialMetrics
 {
     /// <summary>
     /// Per-channel L1 threshold above which a pixel is considered to

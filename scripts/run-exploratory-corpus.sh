@@ -77,34 +77,41 @@ if [[ "$TINY" == "1" ]]; then
     echo "▶ tiny mode: corpus symlinked to $TINY_DIR ($(ls "$TINY_DIR" | wc -l) PDFs)"
 fi
 
-echo "▶ Building test project ($CONFIG)"
-dotnet build -c "$CONFIG" Pdfe.Rendering.Tests/Pdfe.Rendering.Tests.csproj >/dev/null
+echo "▶ Building Pdfe.Cli ($CONFIG)"
+# Build once. Each chunk then runs the published binary directly,
+# avoiding the ~3-min `dotnet test` VSTest startup tax per invocation.
+# Net effect: 14 chunks now take ~2 min total instead of 65+.
+dotnet build -c "$CONFIG" Pdfe.Cli/Pdfe.Cli.csproj >/dev/null
+PDFE_BIN="$ROOT/Pdfe.Cli/bin/$CONFIG/net10.0/pdfe"
+if [[ ! -x "$PDFE_BIN" ]]; then
+    echo "✗ pdfe binary not found at $PDFE_BIN" >&2
+    exit 1
+fi
 
-# Locate the test-binary directory so we can clean stale slices and
-# find the slice outputs after each chunk runs.
+# All slice JSONs land in a stable directory beside the test bin so
+# the merge step finds them.
 BIN_DIR="$ROOT/Pdfe.Rendering.Tests/bin/$CONFIG/net10.0"
+mkdir -p "$BIN_DIR"
 rm -f "$BIN_DIR"/exploratory-chunk-*.json "$BIN_DIR"/exploratory-report.json
 
 echo "▶ Running $CHUNKS chunks"
-echo "  (each chunk is a separate dotnet test process; per-process RSS is bounded)"
+echo "  (each chunk is a separate `pdfe corpus-scan` process — bounded RSS)"
 chunk_failures=0
+chunk_start=$(date +%s)
 for ((i=0; i<CHUNKS; i++)); do
     pct=$(( (i * 100) / CHUNKS ))
     printf "  chunk %d/%d (%d%%) " "$((i + 1))" "$CHUNKS" "$pct"
-    # The chunk's stdout (xunit summary) goes to the log; the test
-    # itself writes its slice JSON to bin/. We treat "slice JSON
-    # exists" as the success signal — more reliable than parsing xunit
-    # output, which hides ITestOutputHelper writes by default.
-    chunk_ok=0
-    PDFE_CHUNK_INDEX="$i" PDFE_CHUNK_TOTAL="$CHUNKS" \
-        dotnet test --no-build -c "$CONFIG" \
-            "$ROOT/Pdfe.Rendering.Tests/Pdfe.Rendering.Tests.csproj" \
-            --filter "FullyQualifiedName~ExploratoryDifferentialTests" \
-            > "/tmp/exploratory-chunk-$i.log" 2>&1 && chunk_ok=1 || true
-
     slice_path=$(printf '%s/exploratory-chunk-%03d-of-%03d.json' "$BIN_DIR" "$i" "$CHUNKS")
+
+    # Use a timeout as belt-and-suspenders.
+    chunk_ok=0
+    timeout 600 "$PDFE_BIN" corpus-scan "$CORPUS" \
+        --output "$slice_path" \
+        --chunk "$i" \
+        --total "$CHUNKS" \
+        > "/tmp/exploratory-chunk-$i.log" 2>&1 && chunk_ok=1 || true
+
     if [[ "$chunk_ok" == "1" && -f "$slice_path" ]]; then
-        # Pull peak/total stats from the JSON itself.
         stats=$(python3 -c "
 import json
 d=json.load(open('$slice_path'))
@@ -116,6 +123,8 @@ print(f'{d[\"total\"]} pdfs, peak {d[\"peakRssBytes\"]//1024//1024} MB')
         chunk_failures=$((chunk_failures + 1))
     fi
 done
+chunk_elapsed=$(( $(date +%s) - chunk_start ))
+echo "  total chunk runtime: ${chunk_elapsed}s"
 
 echo
 echo "▶ Merging $CHUNKS chunk reports → exploratory-report.json"

@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using Pdfe.Rendering.Differential;
 
 namespace Pdfe.Rendering.Tests.Differential;
 
