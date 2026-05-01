@@ -54,10 +54,16 @@ public sealed class TextExtractionDifferentialTests
     /// </summary>
     private const int MinReferenceTextLength = 32;
 
-    private static readonly (string Path, bool Gating)[] CorpusDirectories =
+    /// <summary>
+    /// Every corpus listed here gates the build. The pdf.js corpus is
+    /// intentionally NOT included — it surfaces real disagreements we
+    /// haven't fixed yet, and listing it here would either block CI or
+    /// require ~250 allowlist entries. Use <see cref="ExploratoryDifferentialTests"/>
+    /// to run it on demand.
+    /// </summary>
+    private static readonly string[] GatingCorpusDirectories =
     {
-        ("test-pdfs/smoke", Gating: true),
-        ("test-pdfs/pdfjs", Gating: false),
+        "test-pdfs/smoke",
     };
 
     /// <summary>
@@ -81,22 +87,22 @@ public sealed class TextExtractionDifferentialTests
 
     public static IEnumerable<object[]> CorpusPdfs() => Discover();
 
-    private static IEnumerable<object[]> Discover()
+    internal static IEnumerable<object[]> Discover()
     {
         var root = LocateRepoRoot();
         if (root == null) yield break;
-        foreach (var (sub, gating) in CorpusDirectories)
+        foreach (var sub in GatingCorpusDirectories)
         {
             var dir = Path.Combine(root, sub);
             if (!Directory.Exists(dir)) continue;
             foreach (var pdf in Directory.EnumerateFiles(dir, "*.pdf").OrderBy(p => p))
-                yield return new object[] { Path.GetRelativePath(root, pdf), gating };
+                yield return new object[] { Path.GetRelativePath(root, pdf) };
         }
     }
 
     [SkippableTheory]
     [MemberData(nameof(CorpusPdfs))]
-    public void TextMatchesMutool(string relativePath, bool gating)
+    public void TextMatchesMutool(string relativePath)
     {
         Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools");
@@ -141,13 +147,6 @@ public sealed class TextExtractionDifferentialTests
             _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {reason}");
             Skip.If(true, $"Known text-extraction failure for {relativePath}: {reason}");
         }
-        if (failed && !gating)
-        {
-            _output.WriteLine("  ⚑ best-effort corpus — disagreement reported but not gating");
-            Skip.If(true,
-                $"Best-effort text-extraction disagreement on {relativePath}: similarity {sim:F3} < {MinSimilarity}");
-        }
-
         sim.Should().BeGreaterOrEqualTo(MinSimilarity,
             $"{relativePath}: pdfe text-extraction differs from mutool. " +
             $"Bigram-Jaccard {sim:F3} < {MinSimilarity}.");

@@ -67,23 +67,24 @@ public sealed class DifferentialRenderingTests
     private const int RenderDpi = 150;
 
     /// <summary>
-    /// Corpora the harness picks up, with a per-corpus "gating" flag.
+    /// Corpora the harness picks up.
     ///
-    /// Gating corpora must agree with mutool — failures fail the build.
-    /// Use this for hand-curated, known-good fixtures where any
-    /// disagreement is news.
+    /// Every corpus listed here gates the build: a disagreement with
+    /// mutool fails the test. There used to be a "best-effort" mode
+    /// that converted disagreements to Skip — that's been removed
+    /// because it hid real failures behind a benign-looking Skip count.
+    /// If a PDF in a corpus diverges, either fix the renderer or
+    /// allowlist that PDF in <see cref="KnownDifferentialFailures"/>
+    /// with a documented reason.
     ///
-    /// Non-gating ("best-effort") corpora produce metrics + triptychs
-    /// for triage but are reported as Skipped on disagreement, so CI
-    /// stays green. Use this for large external corpora where many
-    /// entries are pathological-by-design or where pdfe is known to
-    /// have outstanding gaps. Improvements show up as more passes;
-    /// regressions don't break CI but are still visible in test output.
+    /// The pdf.js corpus is intentionally NOT included here — it
+    /// surfaces ~250+ disagreements that would block CI today. Run it
+    /// explicitly via <c>dotnet test --filter "Trait=Exploratory"</c>
+    /// (see <see cref="ExploratoryDifferentialTests"/>).
     /// </summary>
-    private static readonly (string Path, bool Gating)[] CorpusDirectories =
+    private static readonly string[] GatingCorpusDirectories =
     {
-        ("test-pdfs/smoke", Gating: true),
-        ("test-pdfs/pdfjs", Gating: false),
+        "test-pdfs/smoke",
     };
 
     /// <summary>
@@ -111,34 +112,33 @@ public sealed class DifferentialRenderingTests
 
     public static IEnumerable<object[]> CorpusPdfs() => DiscoverPdfs();
 
-    private static IEnumerable<object[]> DiscoverPdfs()
+    internal static IEnumerable<object[]> DiscoverPdfs()
     {
         var root = LocateRepoRoot();
         if (root == null) yield break;
 
-        foreach (var (sub, gating) in CorpusDirectories)
+        foreach (var sub in GatingCorpusDirectories)
         {
             var dir = Path.Combine(root, sub);
             if (!Directory.Exists(dir)) continue;
             foreach (var pdf in Directory.EnumerateFiles(dir, "*.pdf").OrderBy(p => p))
             {
                 var rel = Path.GetRelativePath(root, pdf);
-                // For each PDF, sample three pages: 1, ⌊n/2⌋, n.
-                // Deduped so single-page docs only emit one case.
-                // Discovering page count requires opening the doc, which
-                // is more expensive than we want for [MemberData]. Cheap
-                // fallback: hard-emit page 1, plus pages 2, 5, 20 as
-                // "if the doc has them"; the test itself bails when
-                // pageNumber > pageCount with a Skip.
+                // For each PDF, sample multiple pages so multi-page
+                // bugs (the kind page-1-only diff misses) get caught.
+                // Discovering page count for [MemberData] is more
+                // expensive than we want; we hard-emit pages 1/2/5/20
+                // and the test method skips with MISSING_PAGE when the
+                // doc doesn't have them.
                 foreach (var pageNumber in new[] { 1, 2, 5, 20 })
-                    yield return new object[] { rel, gating, pageNumber };
+                    yield return new object[] { rel, pageNumber };
             }
         }
     }
 
     [SkippableTheory]
     [MemberData(nameof(CorpusPdfs))]
-    public void RendersSimilarlyToMutool(string relativePath, bool gating, int pageNumber)
+    public void RendersSimilarlyToMutool(string relativePath, int pageNumber)
     {
         Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools to run the differential corpus");
@@ -230,19 +230,6 @@ public sealed class DifferentialRenderingTests
                 Skip.If(true,
                     $"Known differential failure for {relativePath} p.{pageNumber}: {knownReason}. " +
                     "Remove the entry from KnownDifferentialFailures once fixed.");
-            }
-
-            // Best-effort corpora: report metrics, write triptych, but
-            // skip rather than fail the test. The harness becomes a
-            // monitoring tool for these — improvements show up as more
-            // passes; regressions show up in the test output without
-            // blocking CI.
-            if (failed && !gating)
-            {
-                _output.WriteLine(
-                    "  ⚑ best-effort corpus — disagreement reported but not gating");
-                Skip.If(true,
-                    $"Best-effort corpus failure for {relativePath} p.{pageNumber}: {report}");
             }
 
             failed.Should().BeFalse(

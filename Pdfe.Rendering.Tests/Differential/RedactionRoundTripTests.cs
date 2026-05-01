@@ -54,10 +54,13 @@ public sealed class RedactionRoundTripTests
         _output = output;
     }
 
-    private static readonly (string Path, bool Gating)[] CorpusDirectories =
+    /// <summary>
+    /// Every corpus listed here gates the build. pdf.js is excluded —
+    /// see <see cref="ExploratoryDifferentialTests"/> for on-demand runs.
+    /// </summary>
+    private static readonly string[] GatingCorpusDirectories =
     {
-        ("test-pdfs/smoke", Gating: true),
-        ("test-pdfs/pdfjs", Gating: false),
+        "test-pdfs/smoke",
     };
 
     /// <summary>
@@ -85,22 +88,22 @@ public sealed class RedactionRoundTripTests
 
     public static IEnumerable<object[]> CorpusPdfs() => Discover();
 
-    private static IEnumerable<object[]> Discover()
+    internal static IEnumerable<object[]> Discover()
     {
         var root = LocateRepoRoot();
         if (root == null) yield break;
-        foreach (var (sub, gating) in CorpusDirectories)
+        foreach (var sub in GatingCorpusDirectories)
         {
             var dir = Path.Combine(root, sub);
             if (!Directory.Exists(dir)) continue;
             foreach (var pdf in Directory.EnumerateFiles(dir, "*.pdf").OrderBy(p => p))
-                yield return new object[] { Path.GetRelativePath(root, pdf), gating };
+                yield return new object[] { Path.GetRelativePath(root, pdf) };
         }
     }
 
     [SkippableTheory]
     [MemberData(nameof(CorpusPdfs))]
-    public void RedactedWordIsGoneAfterSaveAndReopen(string relativePath, bool gating)
+    public void RedactedWordIsGoneAfterSaveAndReopen(string relativePath)
     {
         var root = LocateRepoRoot()!;
         var pdfPath = Path.Combine(root, relativePath);
@@ -175,14 +178,6 @@ public sealed class RedactionRoundTripTests
             Skip.If(true,
                 $"Known redaction failure for {relativePath}: {reason}");
         }
-        if (stillContainsTarget && !gating)
-        {
-            _output.WriteLine("  ⚑ best-effort corpus — leak reported but not gating");
-            Skip.If(true,
-                $"Best-effort redaction round-trip leak on {relativePath}: " +
-                $"target '{target}' still extractable after redaction");
-        }
-
         stillContainsTarget.Should().BeFalse(
             $"SECURITY: redacted text leaked through save+reopen on {relativePath}. " +
             $"Target word '{target}' was removed from the source ({matchCount} matches) " +
