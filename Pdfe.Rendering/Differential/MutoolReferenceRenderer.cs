@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using SkiaSharp;
 
-namespace Pdfe.Rendering.Tests.Differential;
+namespace Pdfe.Rendering.Differential;
 
 /// <summary>
 /// Shells out to <c>mutool draw</c> (MuPDF) to render a page, providing a
@@ -19,7 +19,7 @@ namespace Pdfe.Rendering.Tests.Differential;
 /// to Skipped rather than fail in environments without it (CI windows-latest,
 /// for example).
 /// </summary>
-internal static class MutoolReferenceRenderer
+public static class MutoolReferenceRenderer
 {
     private static readonly Lazy<bool> _available = new(() =>
     {

@@ -34,7 +34,8 @@ class Program
             CreateAutodetectFieldsCommand(),
             CreateAuditCommand(),
             CreateOcrCommand(),
-            CreateDemoCommand()
+            CreateDemoCommand(),
+            CreateCorpusScanCommand(),
         };
 
         return rootCommand.InvokeAsync(args);
@@ -1068,5 +1069,233 @@ class Program
         writer.Flush();
 
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// pdfe corpus-scan &lt;corpus-dir&gt; --output out.json
+    ///                  [--chunk N] [--total M] [--dpi 150]
+    ///
+    /// Internal-use subcommand that powers the chunked exploratory
+    /// differential harness without the overhead of `dotnet test`.
+    /// Replaces the per-chunk dotnet test invocation
+    /// (~3 min startup × 14 chunks = 40+ min wasted) with a published
+    /// pdfe binary call (~500 ms startup × 14 = 7 sec).
+    ///
+    /// Renders page 1 of each PDF in the corpus's chunk-slice with
+    /// pdfe's SkiaRenderer and with `mutool draw`, computes diff
+    /// metrics, and writes a per-chunk JSON. The shell driver
+    /// scripts/run-exploratory-corpus.sh merges the slices.
+    ///
+    /// Memory budget: chunk index `i` mod total `M` selects the
+    /// chunk's PDFs; one process per chunk keeps SkiaSharp's native
+    /// allocations bounded by process exit.
+    /// </summary>
+    static Command CreateCorpusScanCommand()
+    {
+        var corpusArg = new Argument<DirectoryInfo>("corpus", "Directory of PDFs to scan");
+        var outputOption = new Option<FileInfo>("--output", "Output JSON path") { IsRequired = true };
+        var chunkOption = new Option<int>("--chunk", () => 0, "0-based chunk index");
+        var totalOption = new Option<int>("--total", () => 1, "Total number of chunks");
+        var dpiOption   = new Option<int>("--dpi", () => 150, "Render DPI");
+        var diffPctOption = new Option<double>("--max-diff-fraction", () => 0.10,
+            "Pass-fail threshold for differing-pixel fraction");
+        var maxMaeOption = new Option<double>("--max-mae", () => 32.0,
+            "Pass-fail threshold for mean-absolute-error per channel");
+
+        var command = new Command("corpus-scan",
+            "Render each PDF with pdfe + mutool, compute pixel-diff, write JSON report")
+        {
+            corpusArg, outputOption, chunkOption, totalOption, dpiOption, diffPctOption, maxMaeOption,
+        };
+
+        command.SetHandler(ctx =>
+        {
+            var corpus = ctx.ParseResult.GetValueForArgument(corpusArg);
+            var output = ctx.ParseResult.GetValueForOption(outputOption)!;
+            var chunk  = ctx.ParseResult.GetValueForOption(chunkOption);
+            var total  = ctx.ParseResult.GetValueForOption(totalOption);
+            var dpi    = ctx.ParseResult.GetValueForOption(dpiOption);
+            var diffPct = ctx.ParseResult.GetValueForOption(diffPctOption);
+            var maxMae  = ctx.ParseResult.GetValueForOption(maxMaeOption);
+
+            if (!corpus.Exists)
+            {
+                Console.Error.WriteLine($"Corpus not found: {corpus.FullName}");
+                Environment.ExitCode = 1; return;
+            }
+            if (total < 1 || chunk < 0 || chunk >= total)
+            {
+                Console.Error.WriteLine($"Bad chunk: --chunk {chunk} --total {total}");
+                Environment.ExitCode = 1; return;
+            }
+            if (!Pdfe.Rendering.Differential.MutoolReferenceRenderer.IsAvailable)
+            {
+                Console.Error.WriteLine("mutool not on PATH — install mupdf-tools");
+                Environment.ExitCode = 2; return;
+            }
+
+            try
+            {
+                var ok = RunCorpusScan(corpus.FullName, output.FullName, chunk, total, dpi, diffPct, maxMae);
+                Environment.ExitCode = ok ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        });
+
+        return command;
+    }
+
+    /// <summary>
+    /// Walk the corpus's chunk-slice, render each PDF with pdfe and
+    /// mutool, diff, and write a single JSON file. Mirrors
+    /// ExploratoryDifferentialTests.GenerateCorpusReportChunk minus
+    /// xunit overhead.
+    /// </summary>
+    internal static bool RunCorpusScan(
+        string corpusDir, string outputPath,
+        int chunkIndex, int chunkTotal,
+        int dpi, double maxDiffFraction, double maxMae)
+    {
+        var pdfs = Directory.EnumerateFiles(corpusDir, "*.pdf")
+            .OrderBy(p => p)
+            .Select((path, idx) => (path, idx))
+            .Where(t => t.idx % chunkTotal == chunkIndex)
+            .Select(t => t.path)
+            .ToList();
+
+        Console.Out.WriteLine($"chunk {chunkIndex + 1}/{chunkTotal}: scanning {pdfs.Count} PDFs in {corpusDir}");
+
+        var entries = new List<CorpusScanEntry>();
+        long peakBytes = 0;
+        int processed = 0;
+
+        foreach (var pdf in pdfs)
+        {
+            var rel = Path.GetFileName(pdf);
+            entries.Add(ScanOne(rel, pdf, dpi, maxDiffFraction, maxMae));
+            processed++;
+            // Sample RSS every iteration; it's cheap.
+            var rss = Environment.WorkingSet;
+            if (rss > peakBytes) peakBytes = rss;
+            // Force native finalization every 10 PDFs so SKBitmap's
+            // unmanaged backing allocations don't accumulate.
+            if (processed % 10 == 0)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+        }
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        var counts = new Dictionary<string, int>();
+        foreach (var e in entries)
+        {
+            counts.TryGetValue(e.status, out var c);
+            counts[e.status] = c + 1;
+        }
+
+        Console.Out.WriteLine();
+        foreach (var kv in counts.OrderByDescending(kv => kv.Value))
+            Console.Out.WriteLine($"  {kv.Value,4}  {kv.Key}");
+        Console.Out.WriteLine($"  total processed: {entries.Count}");
+        Console.Out.WriteLine($"  peak RSS: {peakBytes / 1024 / 1024} MB");
+
+        var report = new
+        {
+            generatedUtc = DateTime.UtcNow.ToString("o"),
+            corpus = corpusDir,
+            chunkIndex,
+            chunkTotal,
+            counts,
+            total = entries.Count,
+            peakRssBytes = peakBytes,
+            entries,
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(report,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        File.WriteAllText(outputPath, json);
+        Console.Out.WriteLine($"  wrote {outputPath}");
+        return true;
+    }
+
+    private static CorpusScanEntry ScanOne(
+        string relPath, string pdfPath, int dpi,
+        double maxDiffFraction, double maxMae)
+    {
+        var entry = new CorpusScanEntry { path = relPath };
+
+        SkiaSharp.SKBitmap? pdfeBmp = null;
+        SkiaSharp.SKBitmap? mutoolBmp = null;
+        try
+        {
+            try
+            {
+                using var doc = PdfDocument.Open(pdfPath);
+                entry.pageCount = doc.PageCount;
+                if (doc.PageCount == 0) { entry.status = "EMPTY_DOC"; return entry; }
+                var renderer = new SkiaRenderer();
+                pdfeBmp = renderer.RenderPage(doc.GetPage(1), new RenderOptions { Dpi = dpi });
+            }
+            catch (Exception ex)
+            {
+                entry.status = "PARSE_ERROR";
+                entry.errorType = ex.GetType().Name;
+                entry.errorMessage = Trunc(ex.Message, 200);
+                return entry;
+            }
+
+            if (pdfeBmp == null) { entry.status = "RENDER_NULL"; return entry; }
+
+            mutoolBmp = Pdfe.Rendering.Differential.MutoolReferenceRenderer.RenderPage(pdfPath, 1, dpi);
+            if (mutoolBmp == null) { entry.status = "MUTOOL_REFUSED"; return entry; }
+
+            if (pdfeBmp.Width != mutoolBmp.Width || pdfeBmp.Height != mutoolBmp.Height)
+            {
+                using var resized = Pdfe.Rendering.Differential.DifferentialMetrics
+                    .ResizeMatch(pdfeBmp, mutoolBmp.Width, mutoolBmp.Height);
+                pdfeBmp.Dispose();
+                pdfeBmp = resized.Copy();
+            }
+
+            var report = Pdfe.Rendering.Differential.DifferentialMetrics.Compare(pdfeBmp, mutoolBmp);
+            entry.diffFraction = report.DifferingPixelFraction;
+            entry.mae = report.MeanAbsoluteError;
+            entry.status = (report.DifferingPixelFraction <= maxDiffFraction
+                         && report.MeanAbsoluteError <= maxMae)
+                ? "PASS" : "DIFF";
+        }
+        catch (Exception ex)
+        {
+            entry.status = "COMPARE_ERROR";
+            entry.errorType = ex.GetType().Name;
+            entry.errorMessage = Trunc(ex.Message, 200);
+        }
+        finally
+        {
+            pdfeBmp?.Dispose();
+            mutoolBmp?.Dispose();
+        }
+        return entry;
+    }
+
+    private static string Trunc(string s, int n) =>
+        s.Length <= n ? s : s.Substring(0, n) + "…";
+
+    internal sealed class CorpusScanEntry
+    {
+        public string path { get; set; } = "";
+        public string status { get; set; } = "UNKNOWN";
+        public int pageCount { get; set; }
+        public double diffFraction { get; set; }
+        public double mae { get; set; }
+        public string? errorType { get; set; }
+        public string? errorMessage { get; set; }
     }
 }

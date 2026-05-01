@@ -7,6 +7,7 @@ using FluentAssertions;
 using Pdfe.Core.Document;
 using Xunit;
 using Xunit.Abstractions;
+using Pdfe.Rendering.Differential;
 
 namespace Pdfe.Rendering.Tests.Differential;
 

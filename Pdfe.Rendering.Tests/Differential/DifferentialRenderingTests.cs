@@ -8,6 +8,7 @@ using Pdfe.Rendering;
 using SkiaSharp;
 using Xunit;
 using Xunit.Abstractions;
+using Pdfe.Rendering.Differential;
 
 namespace Pdfe.Rendering.Tests.Differential;
 
