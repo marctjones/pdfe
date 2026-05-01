@@ -88,14 +88,13 @@ public sealed class DifferentialRenderingTests
 
     /// <summary>
     /// PDFs the differential harness already knows we render incorrectly.
-    /// Each entry is the relative path → a short reason we link in test
-    /// output. The harness still runs and collects metrics for these
-    /// (so improvements show up in the test output), but it does not
-    /// fail the build on them — so CI stays green while the underlying
-    /// bug is being worked. Removing an entry re-enables the gate.
-    ///
-    /// When you fix one of these, delete its line. The test will then
-    /// permanently guard against regression.
+    /// Keys may be either:
+    ///   • "relative/path/to.pdf"        — applies to every sampled page
+    ///   • "relative/path/to.pdf#7"      — applies only to page 7
+    /// The harness still runs and collects metrics for these (so
+    /// improvements show up in the test output), but it does not fail
+    /// the build on them. CI stays green while the underlying bug is
+    /// worked. Removing an entry re-enables the gate.
     /// </summary>
     private static readonly Dictionary<string, string> KnownDifferentialFailures = new()
     {
@@ -105,6 +104,9 @@ public sealed class DifferentialRenderingTests
             "Image XObject not rendered: page 1's American-flag illustration is missing.",
         ["test-pdfs/smoke/state-ds82-passport-renewal.pdf"] =
             "Sub-pixel AA + form-field hinting drift on small body text exceeds gate.",
+        ["test-pdfs/smoke/irs-w9.pdf#2"] =
+            "Multi-page rendering bug — page 1 agrees with mutool but page 2 (the W-9 instructions) " +
+            "diverges materially. Single-page diffs missed this; caught by Layer 5 (multi-page).",
     };
 
     public static IEnumerable<object[]> CorpusPdfs() => DiscoverPdfs();
@@ -119,13 +121,24 @@ public sealed class DifferentialRenderingTests
             var dir = Path.Combine(root, sub);
             if (!Directory.Exists(dir)) continue;
             foreach (var pdf in Directory.EnumerateFiles(dir, "*.pdf").OrderBy(p => p))
-                yield return new object[] { Path.GetRelativePath(root, pdf), gating };
+            {
+                var rel = Path.GetRelativePath(root, pdf);
+                // For each PDF, sample three pages: 1, ⌊n/2⌋, n.
+                // Deduped so single-page docs only emit one case.
+                // Discovering page count requires opening the doc, which
+                // is more expensive than we want for [MemberData]. Cheap
+                // fallback: hard-emit page 1, plus pages 2, 5, 20 as
+                // "if the doc has them"; the test itself bails when
+                // pageNumber > pageCount with a Skip.
+                foreach (var pageNumber in new[] { 1, 2, 5, 20 })
+                    yield return new object[] { rel, gating, pageNumber };
+            }
         }
     }
 
     [SkippableTheory]
     [MemberData(nameof(CorpusPdfs))]
-    public void RendersSimilarlyToMutool(string relativePath, bool gating)
+    public void RendersSimilarlyToMutool(string relativePath, bool gating, int pageNumber)
     {
         Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools to run the differential corpus");
@@ -143,21 +156,30 @@ public sealed class DifferentialRenderingTests
         try
         {
             using var doc = PdfDocument.Open(pdfPath);
+            // Skip silently when this PDF doesn't have the requested
+            // page. The MemberData enumerator emits page 1, 2, 5, 20
+            // for every PDF; only multi-page docs naturally exercise
+            // pages > 1.
+            if (pageNumber > doc.PageCount)
+                Skip.If(true,
+                    $"{relativePath}: only {doc.PageCount} page(s); " +
+                    $"page {pageNumber} doesn't exist");
             var renderer = new SkiaRenderer();
-            pdfeBitmap = renderer.RenderPage(doc.GetPage(1), new RenderOptions { Dpi = RenderDpi });
+            pdfeBitmap = renderer.RenderPage(doc.GetPage(pageNumber), new RenderOptions { Dpi = RenderDpi });
         }
         catch (Exception ex)
         {
             Skip.If(true,
-                $"pdfe could not parse/render {relativePath}: {ex.GetType().Name}: {ex.Message}. " +
+                $"pdfe could not parse/render {relativePath} p.{pageNumber}: " +
+                $"{ex.GetType().Name}: {ex.Message}. " +
                 "Robustness for malformed inputs is the parser's responsibility, not this harness's.");
         }
-        pdfeBitmap.Should().NotBeNull("pdfe must successfully render the first page");
+        pdfeBitmap.Should().NotBeNull($"pdfe must successfully render page {pageNumber}");
 
         // mutool render.
-        var mutoolBitmap = MutoolReferenceRenderer.RenderPage(pdfPath, 1, RenderDpi);
+        var mutoolBitmap = MutoolReferenceRenderer.RenderPage(pdfPath, pageNumber, RenderDpi);
         Skip.If(mutoolBitmap == null,
-            $"mutool refused to render {relativePath} — skipping rather than asserting against a missing reference");
+            $"mutool refused to render {relativePath} p.{pageNumber} — skipping rather than asserting against a missing reference");
 
         // Normalize dimensions if they drift (rounding can cause ±1 px).
         if (pdfeBitmap.Width != mutoolBitmap!.Width || pdfeBitmap.Height != mutoolBitmap.Height)
@@ -184,7 +206,7 @@ public sealed class DifferentialRenderingTests
             var outDir = Path.Combine(AppContext.BaseDirectory, "differential-failures");
             Directory.CreateDirectory(outDir);
             var name = Path.GetFileNameWithoutExtension(relativePath).Replace(' ', '-');
-            var triptychPath = Path.Combine(outDir, $"{name}-triptych.png");
+            var triptychPath = Path.Combine(outDir, $"{name}-p{pageNumber}-triptych.png");
             DifferentialMetrics.SaveTriptych(triptychPath, pdfeBitmap, mutoolBitmap);
             _output.WriteLine($"  ⚠ triptych written to {triptychPath}");
         }
@@ -193,11 +215,20 @@ public sealed class DifferentialRenderingTests
         {
             // Known failures: loud, not fatal. Metrics still print so
             // improvements are visible; the build stays green.
-            if (failed && KnownDifferentialFailures.TryGetValue(relativePath, out var reason))
+            // KnownDifferentialFailures keys may be either the bare
+            // path (applies to all pages) or "path#pageNumber" (specific
+            // page). Per-page entries override path-level entries.
+            string? knownReason = null;
+            if (KnownDifferentialFailures.TryGetValue($"{relativePath}#{pageNumber}", out var perPage))
+                knownReason = perPage;
+            else if (KnownDifferentialFailures.TryGetValue(relativePath, out var perPath))
+                knownReason = perPath;
+
+            if (failed && knownReason != null)
             {
-                _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {reason}");
+                _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {knownReason}");
                 Skip.If(true,
-                    $"Known differential failure for {relativePath}: {reason}. " +
+                    $"Known differential failure for {relativePath} p.{pageNumber}: {knownReason}. " +
                     "Remove the entry from KnownDifferentialFailures once fixed.");
             }
 
@@ -211,11 +242,11 @@ public sealed class DifferentialRenderingTests
                 _output.WriteLine(
                     "  ⚑ best-effort corpus — disagreement reported but not gating");
                 Skip.If(true,
-                    $"Best-effort corpus failure for {relativePath}: {report}");
+                    $"Best-effort corpus failure for {relativePath} p.{pageNumber}: {report}");
             }
 
             failed.Should().BeFalse(
-                $"{relativePath}: pdfe diverged from mutool reference. {report}. " +
+                $"{relativePath} p.{pageNumber}: pdfe diverged from mutool reference. {report}. " +
                 $"Triptych dumped under bin/.../differential-failures/.");
         }
         finally
