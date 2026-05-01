@@ -1278,12 +1278,13 @@ class Program
 
     private static CorpusScanEntry ScanOne(
         string relPath, string pdfPath, int dpi,
-        double maxDiffFraction, double maxMae, int mutoolTimeoutMs = 30_000)
+        double maxDiffFraction, double maxMae, int oracleTimeoutMs = 30_000)
     {
         var entry = new CorpusScanEntry { path = relPath };
 
         SkiaSharp.SKBitmap? pdfeBmp = null;
         SkiaSharp.SKBitmap? mutoolBmp = null;
+        SkiaSharp.SKBitmap? cairoBmp = null;
         try
         {
             try
@@ -1304,24 +1305,59 @@ class Program
 
             if (pdfeBmp == null) { entry.status = "RENDER_NULL"; return entry; }
 
+            // Two oracles: mutool (MuPDF) and pdftocairo (Poppler). pdfe
+            // is judged correct if it agrees with EITHER. A disagreement
+            // with both is a real bug; a disagreement with one but not
+            // the other is more likely a viewer-specific quirk.
             mutoolBmp = Pdfe.Rendering.Differential.MutoolReferenceRenderer.RenderPage(
-                pdfPath, 1, dpi, mutoolTimeoutMs);
-            if (mutoolBmp == null) { entry.status = "MUTOOL_REFUSED"; return entry; }
+                pdfPath, 1, dpi, oracleTimeoutMs);
+            cairoBmp = Pdfe.Rendering.Differential.PdftocairoReferenceRenderer.RenderPage(
+                pdfPath, 1, dpi, oracleTimeoutMs);
 
-            if (pdfeBmp.Width != mutoolBmp.Width || pdfeBmp.Height != mutoolBmp.Height)
+            if (mutoolBmp == null && cairoBmp == null)
             {
-                using var resized = Pdfe.Rendering.Differential.DifferentialMetrics
-                    .ResizeMatch(pdfeBmp, mutoolBmp.Width, mutoolBmp.Height);
-                pdfeBmp.Dispose();
-                pdfeBmp = resized.Copy();
+                entry.status = "ALL_ORACLES_REFUSED";
+                return entry;
             }
 
-            var report = Pdfe.Rendering.Differential.DifferentialMetrics.Compare(pdfeBmp, mutoolBmp);
-            entry.diffFraction = report.DifferingPixelFraction;
-            entry.mae = report.MeanAbsoluteError;
-            entry.status = (report.DifferingPixelFraction <= maxDiffFraction
-                         && report.MeanAbsoluteError <= maxMae)
-                ? "PASS" : "DIFF";
+            // Compute pdfe-vs-mutool and pdfe-vs-cairo separately,
+            // then take the BEST agreement (lowest diff). This is
+            // "best of two oracles" voting.
+            (double diff, double mae)? mutoolMetrics = null;
+            (double diff, double mae)? cairoMetrics = null;
+
+            if (mutoolBmp != null)
+            {
+                var (a, b) = MatchAndCompare(pdfeBmp, mutoolBmp);
+                mutoolMetrics = (a, b);
+                entry.diffFractionMutool = a;
+                entry.maeMutool = b;
+            }
+            if (cairoBmp != null)
+            {
+                var (a, b) = MatchAndCompare(pdfeBmp, cairoBmp);
+                cairoMetrics = (a, b);
+                entry.diffFractionCairo = a;
+                entry.maeCairo = b;
+            }
+
+            // Best-of-two: if pdfe agrees with either oracle within
+            // thresholds, that's a PASS. Take the better of the two
+            // for the headline diffFraction/mae fields.
+            double bestDiff = double.MaxValue, bestMae = double.MaxValue;
+            if (mutoolMetrics is var (md, mm)) { if (md < bestDiff) { bestDiff = md; bestMae = mm; } }
+            if (cairoMetrics  is var (cd, cm)) { if (cd < bestDiff) { bestDiff = cd; bestMae = cm; } }
+            entry.diffFraction = bestDiff;
+            entry.mae = bestMae;
+
+            bool passMutool = mutoolMetrics is var (md2, mm2)
+                && md2 <= maxDiffFraction && mm2 <= maxMae;
+            bool passCairo = cairoMetrics is var (cd2, cm2)
+                && cd2 <= maxDiffFraction && cm2 <= maxMae;
+
+            if (passMutool && passCairo)        entry.status = "PASS";
+            else if (passMutool || passCairo)   entry.status = "PASS_ONE";  // partial agreement
+            else                                entry.status = "DIFF";
         }
         catch (Exception ex)
         {
@@ -1333,8 +1369,36 @@ class Program
         {
             pdfeBmp?.Dispose();
             mutoolBmp?.Dispose();
+            cairoBmp?.Dispose();
         }
         return entry;
+    }
+
+    /// <summary>
+    /// Resize the first bitmap to match the second (if dimensions
+    /// disagree) and compute the diff metrics. Returns
+    /// (differingPixelFraction, meanAbsoluteError).
+    /// </summary>
+    private static (double diffFraction, double mae) MatchAndCompare(
+        SkiaSharp.SKBitmap pdfeBmp, SkiaSharp.SKBitmap reference)
+    {
+        SkiaSharp.SKBitmap probe = pdfeBmp;
+        bool needDispose = false;
+        if (pdfeBmp.Width != reference.Width || pdfeBmp.Height != reference.Height)
+        {
+            probe = Pdfe.Rendering.Differential.DifferentialMetrics
+                .ResizeMatch(pdfeBmp, reference.Width, reference.Height).Copy();
+            needDispose = true;
+        }
+        try
+        {
+            var report = Pdfe.Rendering.Differential.DifferentialMetrics.Compare(probe, reference);
+            return (report.DifferingPixelFraction, report.MeanAbsoluteError);
+        }
+        finally
+        {
+            if (needDispose) probe.Dispose();
+        }
     }
 
     private static string Trunc(string s, int n) =>
@@ -1345,8 +1409,17 @@ class Program
         public string path { get; set; } = "";
         public string status { get; set; } = "UNKNOWN";
         public int pageCount { get; set; }
+        // Best-of-two oracle metrics (pdfe vs whichever oracle pdfe
+        // agrees with most closely). Used by the gating logic.
         public double diffFraction { get; set; }
         public double mae { get; set; }
+        // Per-oracle metrics — null when that oracle refused. The
+        // distinction between PASS (both agree) and PASS_ONE (one
+        // agrees) lives here.
+        public double? diffFractionMutool { get; set; }
+        public double? maeMutool { get; set; }
+        public double? diffFractionCairo { get; set; }
+        public double? maeCairo { get; set; }
         public string? errorType { get; set; }
         public string? errorMessage { get; set; }
     }
