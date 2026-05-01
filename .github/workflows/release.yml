@@ -1,193 +1,263 @@
-name: Build and Release
+name: Build and release
 
+# Triggers:
+#   • A v* tag push  → automatic release (typical CLI release flow)
+#   • A GitHub Release published manually → attach installers
+#   • workflow_dispatch → manual rerun against an existing tag
 on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.0.0)'
+        description: 'Version (e.g. 2.1.0-rc8); only used for workflow_dispatch'
         required: true
-        default: 'v1.0.0'
+        default: '2.1.0-rc8'
 
 env:
-  DOTNET_VERSION: '8.0.x'
-  PROJECT_PATH: 'PdfEditor/PdfEditor.csproj'
+  DOTNET_VERSION: '10.0.x'
+
+# Lets the release job push installers as release assets.
+permissions:
+  contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            runtime: linux-x64
-            artifact_name: PdfEditor-linux-x64
-            executable: PdfEditor
-          - os: windows-latest
-            runtime: win-x64
-            artifact_name: PdfEditor-windows-x64
-            executable: PdfEditor.exe
-          - os: macos-latest
-            runtime: osx-x64
-            artifact_name: PdfEditor-macos-x64
-            executable: PdfEditor
-          - os: macos-latest
-            runtime: osx-arm64
-            artifact_name: PdfEditor-macos-arm64
-            executable: PdfEditor
-
-    runs-on: ${{ matrix.os }}
-
+  # ── 1. Build the Ubuntu .deb installer ───────────────────────────────
+  linux-deb:
+    name: Linux .deb (x64)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # so `git describe --tags` works
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore ${{ env.PROJECT_PATH }}
-
-      - name: Build and Publish
-        run: |
-          dotnet publish ${{ env.PROJECT_PATH }} \
-            -c Release \
-            -r ${{ matrix.runtime }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -o ./publish/${{ matrix.artifact_name }}
-
-      - name: Create archive (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          cd ./publish
-          tar -czvf ${{ matrix.artifact_name }}.tar.gz ${{ matrix.artifact_name }}
-
-      - name: Create archive (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd ./publish
-          Compress-Archive -Path ${{ matrix.artifact_name }} -DestinationPath ${{ matrix.artifact_name }}.zip
-
-      - name: Upload artifact (Linux/macOS)
-        if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
+      - name: Cache nuget
+        uses: actions/cache@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ./publish/${{ matrix.artifact_name }}.tar.gz
+          path: ~/.nuget/packages
+          key: nuget-linux-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-linux-
 
-      - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: ./publish/${{ matrix.artifact_name }}.zip
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-
-      - name: Get version
-        id: version
+      - name: Resolve version
+        id: ver
+        shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            v="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            v="${GITHUB_REF#refs/tags/}"
+            v="${v#v}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            v="${GITHUB_REF#refs/tags/}"
+            v="${v#v}"
           else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            v="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0)"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "▶ version: $v"
+
+      - name: Generate license manifest
+        run: ./scripts/generate-license-manifest.sh
+
+      - name: Build .deb
+        run: ./scripts/build-deb.sh --version "${{ steps.ver.outputs.version }}" --arch amd64 --output dist/
+
+      - name: Build portable tarball
+        # An unpacked, self-contained binary archive for users who don't
+        # want a system-wide install. Built from the same publish output
+        # the .deb just produced.
+        run: |
+          set -e
+          srcdir="artifacts/publish/linux-x64"
+          out="dist/pdfe-${{ steps.ver.outputs.version }}-linux-x64.tar.gz"
+          mkdir -p stage/pdfe
+          cp -a "$srcdir/gui/." stage/pdfe/
+          cp -a "$srcdir/cli/." stage/pdfe/
+          cp README.md LICENSE LICENSES.md stage/pdfe/ 2>/dev/null || true
+          tar -C stage -czf "$out" pdfe
+          rm -rf stage
+          ls -lh "$out"
+
+      - name: Compute checksums
+        working-directory: dist
+        run: |
+          for f in *.deb *.tar.gz; do
+            [ -f "$f" ] || continue
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: |
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
+  # ── 2. Build the Windows .exe installer (Inno Setup) ────────────────
+  windows-exe:
+    name: Windows .exe (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache nuget
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-windows-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-windows-
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+        shell: pwsh
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = ""
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") { $v = "${{ github.event.inputs.version }}" }
+          elseif ("${{ github.event_name }}" -eq "release") { $v = "${{ github.ref_name }}" -replace '^v',''  }
+          elseif ("${{ github.ref }}".StartsWith("refs/tags/")) { $v = "${{ github.ref_name }}" -replace '^v','' }
+          else {
+            try { $v = (& git describe --tags --abbrev=0 2>$null).TrimStart('v') } catch { }
+            if (-not $v) { $v = "0.0.0" }
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "▶ version: $v"
+
+      - name: Generate license manifest
+        shell: pwsh
+        run: |
+          # Re-use the bash script via Git Bash on the runner (always
+          # present on windows-latest).
+          & "C:\Program Files\Git\bin\bash.exe" ./scripts/generate-license-manifest.sh
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: pwsh ./scripts/build-windows-installer.ps1 -Version "${{ steps.ver.outputs.version }}" -OutputDir dist
+
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $src = "artifacts\publish\win-x64\gui"
+          $stage = "stage\pdfe"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "$src\*" $stage -Recurse -Force
+          Copy-Item README.md, LICENSE, LICENSES.md $stage -ErrorAction SilentlyContinue
+          $zip = "dist\pdfe-$v-win-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path stage\pdfe -DestinationPath $zip
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "$zip.sha256"
+          Get-ChildItem dist | Format-Table
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*.exe
+            dist/*.exe.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+  # ── 3. Attach installers to the GitHub release ──────────────────────
+  publish:
+    name: Attach to GitHub release
+    needs: [linux-deb, windows-exe]
+    runs-on: ubuntu-latest
+    # Only auto-create a release when the trigger was a tag push or a
+    # release event. workflow_dispatch reruns just produce artifacts you
+    # can download manually from the run page.
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f -exec ls -lh {} +
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: PdfEditor ${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: false
+          tag_name: ${{ steps.tag.outputs.tag }}
+          # If the release was just created by `gh release create`, this
+          # action attaches files; if it doesn't exist yet (tag-push
+          # path), it creates a draft release.
+          fail_on_unmatched_files: true
+          # Mark rc tags as pre-releases so they don't get the "Latest"
+          # badge on the releases page.
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-rc') || contains(steps.tag.outputs.tag, '-beta') || contains(steps.tag.outputs.tag, '-alpha') }}
+          generate_release_notes: true
+          files: |
+            artifacts/linux-installer/*
+            artifacts/windows-installer/*
           body: |
-            ## PdfEditor ${{ steps.version.outputs.version }}
+            ## Installers
 
-            Cross-platform PDF editor with TRUE content-level redaction.
+            | Platform        | Installer                                      |
+            |-----------------|------------------------------------------------|
+            | Ubuntu / Debian | `pdfe_<version>_amd64.deb`                     |
+            | Windows 10/11   | `pdfe-<version>-win-x64-setup.exe`             |
 
-            ### Downloads
+            Portable archives (`*.tar.gz`, `*.zip`) are also attached
+            for users who prefer to extract and run the binary directly.
+            Each artifact has a matching `.sha256` checksum file.
 
-            | Platform | File | Notes |
-            |----------|------|-------|
-            | **Windows (x64)** | `PdfEditor-windows-x64.zip` | Windows 10/11 |
-            | **Linux (x64)** | `PdfEditor-linux-x64.tar.gz` | Ubuntu, Debian, Fedora, etc. |
-            | **macOS (Intel)** | `PdfEditor-macos-x64.tar.gz` | macOS 10.15+ (Intel) |
-            | **macOS (Apple Silicon)** | `PdfEditor-macos-arm64.tar.gz` | macOS 11+ (M1/M2/M3) |
+            ### Install
 
-            ### Installation
-
-            **Windows:**
-            1. Download and extract `PdfEditor-windows-x64.zip`
-            2. Run `PdfEditor.exe`
-            3. (Optional) Create a shortcut to Start Menu
-
-            **Linux:**
+            **Ubuntu**
             ```bash
-            tar -xzvf PdfEditor-linux-x64.tar.gz
-            chmod +x PdfEditor-linux-x64/PdfEditor
-            ./PdfEditor-linux-x64/PdfEditor
+            sudo apt install ./pdfe_<version>_amd64.deb
             ```
 
-            **macOS:**
-            ```bash
-            tar -xzvf PdfEditor-macos-*.tar.gz
-            chmod +x PdfEditor-macos-*/PdfEditor
-            ./PdfEditor-macos-*/PdfEditor
+            **Windows**
+            Run `pdfe-<version>-win-x64-setup.exe` and follow the wizard,
+            or silently:
+            ```powershell
+            pdfe-<version>-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
             ```
-            Note: You may need to allow the app in System Preferences > Security & Privacy.
-
-            ### Features
-            - TRUE content-level PDF redaction (text removed from structure, not just hidden)
-            - PDF viewing with zoom, pan, and page navigation
-            - Page manipulation (add, remove, rotate)
-            - Text extraction and search with highlighting
-            - Export pages to images
 
             ### Verification
-            All builds are self-contained executables with no external dependencies required.
 
-          files: |
-            ./artifacts/PdfEditor-windows-x64/*.zip
-            ./artifacts/PdfEditor-linux-x64/*.tar.gz
-            ./artifacts/PdfEditor-macos-x64/*.tar.gz
-            ./artifacts/PdfEditor-macos-arm64/*.tar.gz
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build --no-restore
-
-      - name: Test
-        run: dotnet test --no-build --verbosity normal
+            All packages are self-contained — no .NET 10 runtime needed
+            on the target. The installer bundles the GUI editor
+            (`PdfEditor`) and the `pdfe` CLI. Third-party license
+            notices are visible in **Help → About PDF Editor** and at
+            `/usr/share/doc/pdfe/third-party-licenses.json` (Debian) or
+            inside the install directory (Windows).
