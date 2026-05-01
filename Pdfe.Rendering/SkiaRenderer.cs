@@ -2315,7 +2315,62 @@ internal class RenderContext
                 i++;
 
             if (i > tokenStart)
-                tokens.Add(content[tokenStart..i]);
+            {
+                var tok = content[tokenStart..i];
+                tokens.Add(tok);
+
+                // Inline image fast-skip: when we see the BI operator,
+                // scan forward to the matching EI marker (after the ID
+                // separator) and discard the binary image bytes between
+                // them. Without this, the tokenizer turns the raw image
+                // data into thousands of garbage tokens that the
+                // dispatcher then iterates over — visible as a
+                // multi-minute hang on PDFs with large inline images
+                // (e.g. SafeDocs issue14256.pdf, which has eight 20×10
+                // hex-encoded images totaling 13 KB of "operators"
+                // that aren't actually operators).
+                //
+                // The renderer doesn't currently rasterize inline
+                // images (RenderInlineImage is a stub) so dropping
+                // them entirely is the right move for now; the BI
+                // token alone is preserved so any future renderer
+                // hook can tell an inline image was present.
+                if (tok == "BI")
+                {
+                    // Find the ID marker (single token "ID" followed
+                    // by exactly one whitespace per spec).
+                    int idIdx = content.IndexOf("\nID", i);
+                    if (idIdx < 0) idIdx = content.IndexOf(" ID", i);
+                    if (idIdx < 0) idIdx = content.IndexOf("\rID", i);
+                    if (idIdx >= 0)
+                    {
+                        // Skip over the dict entries up to and including
+                        // ID + the one separator byte.
+                        int after = idIdx + 3;
+                        if (after < len && (content[after] == '\n' || content[after] == '\r' || content[after] == ' '))
+                            after++;
+                        // Now scan for "EI" at a word boundary.
+                        int eiIdx = -1;
+                        for (int j = after; j + 1 < len; j++)
+                        {
+                            if (content[j] == 'E' && content[j + 1] == 'I')
+                            {
+                                bool leftBoundary = j == 0 || char.IsWhiteSpace(content[j - 1]);
+                                bool rightBoundary = j + 2 >= len ||
+                                    char.IsWhiteSpace(content[j + 2]) ||
+                                    content[j + 2] == '/' || content[j + 2] == '<';
+                                if (leftBoundary && rightBoundary)
+                                {
+                                    eiIdx = j + 2;
+                                    break;
+                                }
+                            }
+                        }
+                        if (eiIdx > 0)
+                            i = eiIdx;
+                    }
+                }
+            }
         }
 
         return tokens;
