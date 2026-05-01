@@ -82,4 +82,108 @@ public class InlineImageTests
         result.Operators.Count(op => op.Name == "BI").Should()
             .Be(3, "three sequential inline images must each produce a BI operator");
     }
+
+    /// <summary>
+    /// PDF Association ruling (pdf-issues#3, errata to ISO 32000-2:2020):
+    /// when an inline image dict contains BOTH the abbreviated and the full
+    /// form of a key (e.g. /W AND /Width), the abbreviated form takes
+    /// precedence — regardless of the order they appear in the source.
+    /// Without this, parsers diverge on the SafeDocs `issue14256.pdf`
+    /// fixture and most of the time get out of sync trying to read the
+    /// wrong number of image-data bytes.
+    /// </summary>
+    [Fact]
+    public void Parse_InlineImage_AbbreviatedKeyTakesPrecedence_AbbreviatedFirst()
+    {
+        // /W 10 first, then /Width 999. Abbreviated wins regardless of order.
+        var content = "BI /W 10 /H 5 /Width 999 /Height 998 /BPC 1 /CS /G ID \xFF EI ";
+
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var bi = result.Operators.Single(op => op.Name == "BI");
+        var dict = (Pdfe.Core.Primitives.PdfDictionary)bi.Operands[0];
+        // Storage uses the abbreviated form regardless of source spelling.
+        dict.GetInt("W").Should().Be(10);
+        dict.GetInt("H").Should().Be(5);
+        // Full-form key must NOT be in the dict — the parser normalizes.
+        dict.ContainsKey("Width").Should().BeFalse();
+        dict.ContainsKey("Height").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Parse_InlineImage_AbbreviatedKeyTakesPrecedence_FullFirst()
+    {
+        // /Width 999 first, then /W 10. Abbreviated still wins.
+        var content = "BI /Width 999 /Height 998 /W 10 /H 5 /BPC 1 /CS /G ID \xFF EI ";
+
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var bi = result.Operators.Single(op => op.Name == "BI");
+        var dict = (Pdfe.Core.Primitives.PdfDictionary)bi.Operands[0];
+        dict.GetInt("W").Should().Be(10);
+        dict.GetInt("H").Should().Be(5);
+        dict.ContainsKey("Width").Should().BeFalse();
+        dict.ContainsKey("Height").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Parse_InlineImage_FullFormKeysNormalizedToAbbreviated()
+    {
+        // Only full-form keys; parser must store under the abbreviated names
+        // so downstream consumers only ever see one spelling.
+        var content = "BI /Width 7 /Height 3 /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter /ASCII85Decode ID \xFF EI ";
+
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var bi = result.Operators.Single(op => op.Name == "BI");
+        var dict = (Pdfe.Core.Primitives.PdfDictionary)bi.Operands[0];
+        dict.GetInt("W").Should().Be(7);
+        dict.GetInt("H").Should().Be(3);
+        dict.GetInt("BPC").Should().Be(8);
+        dict.GetNameOrNull("CS").Should().Be("DeviceGray");
+        dict.GetNameOrNull("F").Should().Be("ASCII85Decode");
+        // None of the long forms should leak through.
+        dict.ContainsKey("Width").Should().BeFalse();
+        dict.ContainsKey("Height").Should().BeFalse();
+        dict.ContainsKey("BitsPerComponent").Should().BeFalse();
+        dict.ContainsKey("ColorSpace").Should().BeFalse();
+        dict.ContainsKey("Filter").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Parse_InlineImage_AllTable91KeysCovered()
+    {
+        // Every full↔abbreviated pair from ISO 32000-2 Table 91 (excluding
+        // /DecodeParms, which has a dict value the content-stream parser
+        // skips by design). Abbreviated wins regardless of source order.
+        var content = "BI " +
+            "/Width 999 /W 1 " +
+            "/Height 998 /H 2 " +
+            "/BitsPerComponent 4 /BPC 8 " +
+            "/ColorSpace /Wrong /CS /DeviceGray " +
+            "/Filter /Wrong /F /ASCII85Decode " +
+            "/Decode [9 9] /D [0 1] " +
+            "/ImageMask false /IM true " +
+            "/Interpolate true /I false " +
+            "/Length 999 /L 4 " +
+            "ID XXXX EI ";
+
+        var result = new ContentStreamParser(Encoding.ASCII.GetBytes(content)).Parse();
+
+        var bi = result.Operators.Single(op => op.Name == "BI");
+        var dict = (Pdfe.Core.Primitives.PdfDictionary)bi.Operands[0];
+        dict.GetInt("W").Should().Be(1);
+        dict.GetInt("H").Should().Be(2);
+        dict.GetInt("BPC").Should().Be(8);
+        dict.GetNameOrNull("CS").Should().Be("DeviceGray");
+        dict.GetNameOrNull("F").Should().Be("ASCII85Decode");
+        dict.GetArrayOrNull("D").Should().NotBeNull();
+        dict.GetBool("IM").Should().BeTrue();
+        dict.GetBool("I").Should().BeFalse();
+        dict.GetInt("L").Should().Be(4);
+        // Full-form keys must be normalized away.
+        dict.ContainsKey("Width").Should().BeFalse();
+        dict.ContainsKey("ImageMask").Should().BeFalse();
+        dict.ContainsKey("Interpolate").Should().BeFalse();
+    }
 }

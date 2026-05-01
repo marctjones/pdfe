@@ -1101,11 +1101,16 @@ class Program
             "Pass-fail threshold for differing-pixel fraction");
         var maxMaeOption = new Option<double>("--max-mae", () => 32.0,
             "Pass-fail threshold for mean-absolute-error per channel");
+        var parallelOption = new Option<int>("--parallel", () => 0,
+            "Concurrent PDFs within this chunk. 0 = auto (ProcessorCount/2).");
+        var perPdfTimeoutOption = new Option<int>("--pdf-timeout-ms", () => 15_000,
+            "Mutool timeout per PDF render. Lower = skip slow PDFs faster.");
 
         var command = new Command("corpus-scan",
             "Render each PDF with pdfe + mutool, compute pixel-diff, write JSON report")
         {
-            corpusArg, outputOption, chunkOption, totalOption, dpiOption, diffPctOption, maxMaeOption,
+            corpusArg, outputOption, chunkOption, totalOption,
+            dpiOption, diffPctOption, maxMaeOption, parallelOption, perPdfTimeoutOption,
         };
 
         command.SetHandler(ctx =>
@@ -1117,6 +1122,10 @@ class Program
             var dpi    = ctx.ParseResult.GetValueForOption(dpiOption);
             var diffPct = ctx.ParseResult.GetValueForOption(diffPctOption);
             var maxMae  = ctx.ParseResult.GetValueForOption(maxMaeOption);
+            var parallel = ctx.ParseResult.GetValueForOption(parallelOption);
+            var pdfTimeoutMs = ctx.ParseResult.GetValueForOption(perPdfTimeoutOption);
+
+            if (parallel <= 0) parallel = Math.Max(1, Environment.ProcessorCount / 2);
 
             if (!corpus.Exists)
             {
@@ -1136,7 +1145,8 @@ class Program
 
             try
             {
-                var ok = RunCorpusScan(corpus.FullName, output.FullName, chunk, total, dpi, diffPct, maxMae);
+                var ok = RunCorpusScan(corpus.FullName, output.FullName,
+                    chunk, total, dpi, diffPct, maxMae, parallel, pdfTimeoutMs);
                 Environment.ExitCode = ok ? 0 : 1;
             }
             catch (Exception ex)
@@ -1158,7 +1168,8 @@ class Program
     internal static bool RunCorpusScan(
         string corpusDir, string outputPath,
         int chunkIndex, int chunkTotal,
-        int dpi, double maxDiffFraction, double maxMae)
+        int dpi, double maxDiffFraction, double maxMae,
+        int parallel, int pdfTimeoutMs)
     {
         var pdfs = Directory.EnumerateFiles(corpusDir, "*.pdf")
             .OrderBy(p => p)
@@ -1167,29 +1178,66 @@ class Program
             .Select(t => t.path)
             .ToList();
 
-        Console.Out.WriteLine($"chunk {chunkIndex + 1}/{chunkTotal}: scanning {pdfs.Count} PDFs in {corpusDir}");
+        Console.Out.WriteLine(
+            $"chunk {chunkIndex + 1}/{chunkTotal}: scanning {pdfs.Count} PDFs in {corpusDir} " +
+            $"({parallel}-way parallel, {pdfTimeoutMs}ms mutool timeout)");
 
-        var entries = new List<CorpusScanEntry>();
+        // Use a thread-safe collector. Order in the final JSON is
+        // restored by sort-on-write since Parallel.ForEach completion
+        // order is non-deterministic.
+        var entries = new System.Collections.Concurrent.ConcurrentBag<CorpusScanEntry>();
         long peakBytes = 0;
         int processed = 0;
 
-        foreach (var pdf in pdfs)
+        var po = new ParallelOptions { MaxDegreeOfParallelism = parallel };
+        Parallel.ForEach(pdfs, po, pdf =>
         {
             var rel = Path.GetFileName(pdf);
-            entries.Add(ScanOne(rel, pdf, dpi, maxDiffFraction, maxMae));
-            processed++;
-            // Sample RSS every iteration; it's cheap.
+            // Wall-clock budget covers pdfe's render (no internal
+            // timeout) AND mutool's render together. Some pdf.js
+            // fixtures have pathological pdfe-side rendering that
+            // would otherwise grind chunks for minutes per PDF.
+            // Budget is 2× the mutool timeout — generous for normal
+            // PDFs, hard cap on the bad ones.
+            var wallBudgetMs = pdfTimeoutMs * 2;
+            CorpusScanEntry entry;
+            var task = Task.Run(() => ScanOne(rel, pdf, dpi, maxDiffFraction, maxMae, pdfTimeoutMs));
+            if (task.Wait(wallBudgetMs))
+            {
+                entry = task.Result;
+            }
+            else
+            {
+                entry = new CorpusScanEntry
+                {
+                    path = rel,
+                    status = "TIMEOUT",
+                    errorType = "WallClockTimeout",
+                    errorMessage = $"Per-PDF budget {wallBudgetMs}ms exceeded — pdfe or mutool got stuck.",
+                };
+                // Note: the underlying ScanOne task may keep running
+                // until the process exits. That's acceptable here:
+                // we're not sharing state, and process exit at chunk
+                // end reaps the orphan.
+            }
+            entries.Add(entry);
+            int n = System.Threading.Interlocked.Increment(ref processed);
+
+            // Cheap RSS sample.
             var rss = Environment.WorkingSet;
-            if (rss > peakBytes) peakBytes = rss;
-            // Force native finalization every 10 PDFs so SKBitmap's
-            // unmanaged backing allocations don't accumulate.
-            if (processed % 10 == 0)
+            if (rss > System.Threading.Interlocked.Read(ref peakBytes))
+                System.Threading.Interlocked.Exchange(ref peakBytes, rss);
+
+            // Periodic GC to keep SkiaSharp's native memory bounded.
+            // Less aggressive than the serial version because parallel
+            // workers naturally interleave finalization.
+            if (n % 20 == 0)
             {
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
-                GC.Collect();
             }
-        }
+        });
+
         GC.Collect();
         GC.WaitForPendingFinalizers();
 
@@ -1206,6 +1254,9 @@ class Program
         Console.Out.WriteLine($"  total processed: {entries.Count}");
         Console.Out.WriteLine($"  peak RSS: {peakBytes / 1024 / 1024} MB");
 
+        // Sort entries by path so parallel completion order doesn't make
+        // diffs noisy across runs.
+        var sortedEntries = entries.OrderBy(e => e.path).ToList();
         var report = new
         {
             generatedUtc = DateTime.UtcNow.ToString("o"),
@@ -1215,7 +1266,7 @@ class Program
             counts,
             total = entries.Count,
             peakRssBytes = peakBytes,
-            entries,
+            entries = sortedEntries,
         };
         var json = System.Text.Json.JsonSerializer.Serialize(report,
             new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
@@ -1227,7 +1278,7 @@ class Program
 
     private static CorpusScanEntry ScanOne(
         string relPath, string pdfPath, int dpi,
-        double maxDiffFraction, double maxMae)
+        double maxDiffFraction, double maxMae, int mutoolTimeoutMs = 30_000)
     {
         var entry = new CorpusScanEntry { path = relPath };
 
@@ -1253,7 +1304,8 @@ class Program
 
             if (pdfeBmp == null) { entry.status = "RENDER_NULL"; return entry; }
 
-            mutoolBmp = Pdfe.Rendering.Differential.MutoolReferenceRenderer.RenderPage(pdfPath, 1, dpi);
+            mutoolBmp = Pdfe.Rendering.Differential.MutoolReferenceRenderer.RenderPage(
+                pdfPath, 1, dpi, mutoolTimeoutMs);
             if (mutoolBmp == null) { entry.status = "MUTOOL_REFUSED"; return entry; }
 
             if (pdfeBmp.Width != mutoolBmp.Width || pdfeBmp.Height != mutoolBmp.Height)
