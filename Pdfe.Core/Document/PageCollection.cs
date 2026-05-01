@@ -46,14 +46,36 @@ public class PageCollection : IReadOnlyList<PdfPage>
     private void LoadPages()
     {
         _pages.Clear();
-        LoadPagesRecursive(_pagesDict, 0);
+        var visited = new HashSet<PdfDictionary>(ReferenceEqualityComparer.Instance);
+        LoadPagesRecursive(_pagesDict, 0, visited, depth: 0);
     }
 
     /// <summary>
-    /// Recursively load pages from a Pages node.
+    /// Maximum legal /Pages tree depth. PDF 2.0 doesn't impose a hard
+    /// limit but real documents rarely exceed depth 4–6; anything above
+    /// 32 is almost certainly a malformed or malicious file. We bail
+    /// rather than let a pathologically-deep tree consume stack.
     /// </summary>
-    private int LoadPagesRecursive(PdfDictionary node, int pageNumber)
+    private const int MaxPageTreeDepth = 32;
+
+    /// <summary>
+    /// Recursively load pages from a Pages node. Defended against
+    /// circular references (a Pages dict whose /Kids points back to
+    /// itself or an ancestor) and depth-exhaustion attacks via a
+    /// reference-equality visited-set + a hard depth limit.
+    ///
+    /// Pre-this-fix, a circular page tree caused a stack overflow that
+    /// crashed the test host — caught by the differential corpus run
+    /// against pdf.js's regression PDFs, which include exactly this
+    /// shape of malformed input.
+    /// </summary>
+    private int LoadPagesRecursive(
+        PdfDictionary node, int pageNumber,
+        HashSet<PdfDictionary> visited, int depth)
     {
+        if (depth > MaxPageTreeDepth) return 0;
+        if (!visited.Add(node)) return 0; // cycle — already on this path
+
         var type = node.GetNameOrNull("Type");
 
         if (type == "Page")
@@ -83,7 +105,7 @@ public class PageCollection : IReadOnlyList<PdfPage>
             };
             if (kid == null) continue;
 
-            count += LoadPagesRecursive(kid, pageNumber + count);
+            count += LoadPagesRecursive(kid, pageNumber + count, visited, depth + 1);
         }
 
         return count;
