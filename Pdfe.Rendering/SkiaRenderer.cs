@@ -75,6 +75,19 @@ internal class RenderContext
     private SKTypeface? _currentTypeface;
     private string _currentFontEncoding;
 
+    // Form-XObject recursion guards. PDF allows Form XObjects to invoke
+    // each other via the `Do` operator, and a malformed file can have
+    // a cycle (form A → form B → form A). Without protection that
+    // recurses until the stack overflows and SIGABRTs the process —
+    // observed on a pdf.js corpus fixture during the differential
+    // run on 2026-05-01. The visited-set tracks the call stack so
+    // a Do-cycle skips the recursive call; the depth counter is a
+    // backstop for pathologically deep but acyclic nests.
+    private readonly HashSet<Pdfe.Core.Primitives.PdfStream> _formXObjectStack =
+        new(ReferenceEqualityComparer.Instance);
+    private int _formXObjectDepth;
+    private const int MaxFormXObjectDepth = 16;
+
     // Glyph widths parsed from the current font dictionary's /Widths array.
     // Null when unavailable (e.g. standard 14 fonts that omit /Widths), in which
     // case we fall back to Skia's MeasureText on the system typeface.
@@ -1868,6 +1881,30 @@ internal class RenderContext
     }
 
     private void RenderFormXObject(Pdfe.Core.Primitives.PdfStream formStream)
+    {
+        // Cycle detection: a Form XObject that ends up invoking itself
+        // (transitively) would otherwise recurse until the .NET stack
+        // overflows, which is uncatchable and aborts the whole process.
+        if (!_formXObjectStack.Add(formStream)) return;
+        if (_formXObjectDepth >= MaxFormXObjectDepth)
+        {
+            _formXObjectStack.Remove(formStream);
+            return;
+        }
+        _formXObjectDepth++;
+
+        try
+        {
+            RenderFormXObjectInner(formStream);
+        }
+        finally
+        {
+            _formXObjectStack.Remove(formStream);
+            _formXObjectDepth--;
+        }
+    }
+
+    private void RenderFormXObjectInner(Pdfe.Core.Primitives.PdfStream formStream)
     {
         // Form XObjects contain their own content stream
         // Get the form's content and render it recursively
