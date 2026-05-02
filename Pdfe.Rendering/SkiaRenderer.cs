@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Pdfe.Core.ColorSpaces;
 using Pdfe.Core.Document;
+using Pdfe.Rendering.Fonts;
 using SkiaSharp;
 
 namespace Pdfe.Rendering;
@@ -111,6 +112,17 @@ internal class RenderContext
     // name (e.g. "TT0") so repeated SetFont calls for the same font within a
     // page don't re-parse. Disposed at the end of Render().
     private readonly Dictionary<string, SKTypeface> _embeddedTypefaces = new();
+
+    // Per-font byte→glyphId map extracted from a format-0 cmap subtable when
+    // the typeface has no Unicode-mapped subtable Skia's shaper can use
+    // (Mac Roman / format-0 subsets from veraPDF Test Builder, LibreOffice
+    // and Office). When non-null for the active font, RenderText draws via
+    // SKTextEncoding.GlyphId with explicit glyph IDs. Otherwise text would
+    // shape to all-.notdef and the page would render blank, even though the
+    // parser correctly extracts the Unicode text via /ToUnicode.
+    // Cache value of null = "checked, not needed" so we don't re-probe.
+    private readonly Dictionary<string, ushort[]?> _embeddedTypefaceByteToGlyph = new();
+    private ushort[]? _currentByteToGlyph;
 
     // Type0 / CID font state. Type0 fonts use 2-byte-per-character codes and
     // index a descendant font's /W array for widths (different format from the
@@ -756,6 +768,9 @@ internal class RenderContext
         var embedded = TryLoadEmbeddedTypeface(fontName, fontDict);
         _currentFontHasEmbeddedProgram = embedded != null;
         _currentTypeface = embedded ?? GetTypeface(baseFont);
+        _currentByteToGlyph = embedded != null
+            && _embeddedTypefaceByteToGlyph.TryGetValue(fontName, out var btg)
+            ? btg : null;
 
         // Type0 (composite CID) fonts need a completely different content-stream
         // parse (2 bytes per character, widths indexed via /W not /Widths).
@@ -926,7 +941,45 @@ internal class RenderContext
         }
 
         _embeddedTypefaces[fontName] = typeface;
+        _embeddedTypefaceByteToGlyph[fontName] = ResolveByteCodeCmap(typeface, fontDict);
         return typeface;
+    }
+
+    /// <summary>
+    /// Detect typefaces that need the byte-coded glyph-ID draw path because
+    /// Skia's shaper can't read their cmap, and pre-compute the
+    /// byte→glyphId lookup once.
+    ///
+    /// We probe Skia first: if <c>SKFont.GetGlyph((int)c)</c> resolves
+    /// common Unicode codepoints to real glyphs, the font has Unicode
+    /// coverage Skia can shape and we don't need the workaround. Otherwise
+    /// we read any format-0 subtable from the cmap. Returns null when no
+    /// override is needed (the common case for modern Type 0 / CID fonts
+    /// with Identity-H or Unicode-mapped cmaps).
+    /// </summary>
+    private static ushort[]? ResolveByteCodeCmap(
+        SKTypeface typeface,
+        Pdfe.Core.Primitives.PdfDictionary? fontDict)
+    {
+        // Type0 (CID) fonts go through a separate draw path that already
+        // walks bytes 2 at a time and resolves through the descendant font;
+        // the format-0 workaround would double-encode.
+        if (fontDict?.GetNameOrNull("Subtype") == "Type0") return null;
+
+        using var probe = new SKFont(typeface, 12f);
+        int[] unicodeProbe = { 'A', 'a', 'M', 'e', '0', ' ', 'i' };
+        foreach (var cp in unicodeProbe)
+        {
+            if (probe.GetGlyph(cp) != 0)
+            {
+                // Skia can shape this font directly via its cmap.
+                return null;
+            }
+        }
+
+        // No Unicode coverage Skia can see — fall back to the format-0
+        // subtable if present.
+        return CmapFormat0Table.TryRead(typeface);
     }
 
     private static bool ProducesGlyphOutlines(SKTypeface typeface)
@@ -1324,6 +1377,18 @@ internal class RenderContext
                 cursor += (w / 1000f + spacing) * effectiveSize * th;
             }
         }
+        else if (_currentByteToGlyph != null && sourceBytes != null)
+        {
+            // The active typeface's cmap is byte-coded (Mac Roman / format-0)
+            // and Skia's shaper can't read it. Look each PDF byte code up in
+            // the parsed cmap and dispatch via SKTextEncoding.GlyphId so Skia
+            // draws the explicit glyph indices we already resolved. Without
+            // this branch every glyph would render as .notdef and the page
+            // would be blank.
+            paint.TextEncoding = SKTextEncoding.GlyphId;
+            var glyphBytes = BuildGlyphIdBytes(sourceBytes, _currentByteToGlyph);
+            _canvas.DrawText(glyphBytes, 0, 0, paint);
+        }
         else
         {
             _canvas.DrawText(text, 0, 0, paint);
@@ -1348,6 +1413,14 @@ internal class RenderContext
         if (advanceFromPdfWidths)
         {
             widthInFontUnits = SumPdfWidths(sourceBytes!) * effectiveSize;
+        }
+        else if (_currentByteToGlyph != null && sourceBytes != null)
+        {
+            // Same byte-coded glyph-ID path as the draw branch above. The
+            // paint already has TextEncoding=GlyphId from the draw call;
+            // measuring the same bytes returns Skia's hmtx-based advance.
+            var glyphBytes = BuildGlyphIdBytes(sourceBytes, _currentByteToGlyph);
+            widthInFontUnits = paint.MeasureText(glyphBytes);
         }
         else
         {
@@ -1397,6 +1470,21 @@ internal class RenderContext
             total += w / 1000f;
         }
         return total;
+    }
+
+    // Pack PDF byte codes into a native-endian ushort buffer of glyph IDs
+    // for SKTextEncoding.GlyphId. Used for simple fonts whose embedded
+    // typeface has only a format-0 cmap; the byte→glyph map was parsed
+    // once at typeface-load time. Same encoding the Type0 path uses
+    // below (Buffer.BlockCopy on little-endian).
+    private static byte[] BuildGlyphIdBytes(byte[] sourceBytes, ushort[] byteToGlyph)
+    {
+        var gids = new ushort[sourceBytes.Length];
+        for (int i = 0; i < sourceBytes.Length; i++)
+            gids[i] = byteToGlyph[sourceBytes[i]];
+        var glyphBytes = new byte[gids.Length * 2];
+        Buffer.BlockCopy(gids, 0, glyphBytes, 0, glyphBytes.Length);
+        return glyphBytes;
     }
 
     // Type0 rendering path. Content-stream bytes come in 2-at-a-time as
