@@ -30,12 +30,18 @@ cd "$ROOT"
 CHUNKS=14
 CONFIG="Debug"
 TINY=0
+PER_CHUNK_PARALLEL="0"        # 0 = pdfe auto-picks (ProcessorCount/2)
+PDF_TIMEOUT_MS="15000"        # mutool per-page timeout
+CHUNK_PARALLEL="4"            # how many chunks to run concurrently
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --chunks)   CHUNKS="$2"; shift 2 ;;
-        --release)  CONFIG="Release"; shift ;;
-        --tiny)     TINY=1; shift ;;
+        --chunks)            CHUNKS="$2"; shift 2 ;;
+        --release)           CONFIG="Release"; shift ;;
+        --tiny)              TINY=1; shift ;;
+        --per-chunk-parallel) PER_CHUNK_PARALLEL="$2"; shift 2 ;;
+        --pdf-timeout-ms)    PDF_TIMEOUT_MS="$2"; shift 2 ;;
+        --chunk-parallel)    CHUNK_PARALLEL="$2"; shift 2 ;;
         --help|-h)
             sed -n '2,18p' "$0"; exit 0 ;;
         *)
@@ -94,35 +100,53 @@ BIN_DIR="$ROOT/Pdfe.Rendering.Tests/bin/$CONFIG/net10.0"
 mkdir -p "$BIN_DIR"
 rm -f "$BIN_DIR"/exploratory-chunk-*.json "$BIN_DIR"/exploratory-report.json
 
-echo "▶ Running $CHUNKS chunks"
-echo "  (each chunk is a separate `pdfe corpus-scan` process — bounded RSS)"
+echo "▶ Running $CHUNKS chunks ($CHUNK_PARALLEL chunks concurrent, each $PER_CHUNK_PARALLEL-way internally parallel)"
 chunk_failures=0
 chunk_start=$(date +%s)
-for ((i=0; i<CHUNKS; i++)); do
-    pct=$(( (i * 100) / CHUNKS ))
-    printf "  chunk %d/%d (%d%%) " "$((i + 1))" "$CHUNKS" "$pct"
-    slice_path=$(printf '%s/exploratory-chunk-%03d-of-%03d.json' "$BIN_DIR" "$i" "$CHUNKS")
 
-    # Use a timeout as belt-and-suspenders.
-    chunk_ok=0
+# Single-chunk runner — used by xargs -P below.
+run_one_chunk() {
+    local i="$1"
+    local slice_path
+    slice_path=$(printf '%s/exploratory-chunk-%03d-of-%03d.json' "$BIN_DIR" "$i" "$CHUNKS")
     timeout 600 "$PDFE_BIN" corpus-scan "$CORPUS" \
         --output "$slice_path" \
         --chunk "$i" \
         --total "$CHUNKS" \
-        > "/tmp/exploratory-chunk-$i.log" 2>&1 && chunk_ok=1 || true
-
-    if [[ "$chunk_ok" == "1" && -f "$slice_path" ]]; then
+        --parallel "$PER_CHUNK_PARALLEL" \
+        --pdf-timeout-ms "$PDF_TIMEOUT_MS" \
+        > "/tmp/exploratory-chunk-$i.log" 2>&1
+    local rc=$?
+    if [[ "$rc" == "0" && -f "$slice_path" ]]; then
+        local stats
         stats=$(python3 -c "
 import json
 d=json.load(open('$slice_path'))
 print(f'{d[\"total\"]} pdfs, peak {d[\"peakRssBytes\"]//1024//1024} MB')
 " 2>/dev/null || echo "ok")
-        echo "✓ $stats"
+        printf '  ✓ chunk %d/%d  %s\n' "$((i + 1))" "$CHUNKS" "$stats"
+        return 0
     else
-        echo "✗ failed — see /tmp/exploratory-chunk-$i.log"
-        chunk_failures=$((chunk_failures + 1))
+        printf '  ✗ chunk %d/%d failed (rc=%d) — see /tmp/exploratory-chunk-%d.log\n' "$((i + 1))" "$CHUNKS" "$rc" "$i"
+        return 1
     fi
+}
+export -f run_one_chunk
+export PDFE_BIN CORPUS BIN_DIR CHUNKS PER_CHUNK_PARALLEL PDF_TIMEOUT_MS
+
+# xargs -P runs CHUNK_PARALLEL chunks concurrently. -I {} substitutes
+# the chunk index. The bash -c wrapper is needed because run_one_chunk
+# is a bash function (which we exported) — xargs can't call it directly.
+seq 0 $((CHUNKS - 1)) | xargs -n1 -P"$CHUNK_PARALLEL" -I{} bash -c 'run_one_chunk "$@"' _ {}
+
+# Count chunks where the slice JSON wasn't produced — that's the
+# real failure signal (a chunk could log "✓" then segfault later).
+chunk_failures=0
+for ((i=0; i<CHUNKS; i++)); do
+    sp=$(printf '%s/exploratory-chunk-%03d-of-%03d.json' "$BIN_DIR" "$i" "$CHUNKS")
+    [[ -f "$sp" ]] || chunk_failures=$((chunk_failures + 1))
 done
+
 chunk_elapsed=$(( $(date +%s) - chunk_start ))
 echo "  total chunk runtime: ${chunk_elapsed}s"
 
