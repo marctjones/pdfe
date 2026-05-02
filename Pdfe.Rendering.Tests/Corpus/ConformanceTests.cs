@@ -185,12 +185,17 @@ public class ConformanceTests
     }
 
     /// <summary>
-    /// Samples sparse grid of pixels and returns true if any non-white pixels found.
-    /// Avoids full scan on large bitmaps (slow) and handles anti-aliased text.
+    /// Samples a dense grid of pixels and returns true if any non-white
+    /// pixels are found. The grid is dense enough (200×200 sample
+    /// points = ~40 000 pixels checked, ~3-pixel stride at 600×800)
+    /// to reliably detect thin single-line text — the original 32×32
+    /// sampler missed widget appearances and other narrow content
+    /// where pdfe's render visibly matched mutool's at 95-100% pixel
+    /// parity, conflating real renderer gaps with sparse-grid bad luck.
     /// </summary>
     private static bool HasNonTrivialContent(SKBitmap bitmap)
     {
-        const int samples = 32;
+        const int samples = 200;
         var stepX = Math.Max(1, bitmap.Width / samples);
         var stepY = Math.Max(1, bitmap.Height / samples);
 
