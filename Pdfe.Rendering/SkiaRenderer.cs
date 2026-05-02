@@ -2412,6 +2412,30 @@ internal class RenderContext
     }
 
     /// <summary>
+    /// Resolve and cache the AcroForm <c>/DR</c> resources dict (where
+    /// the document's interactive form keeps its default fonts) plus
+    /// the AcroForm <c>/DA</c> default-appearance string. Both are used
+    /// when a widget annotation lacks its own <c>/AP</c> and falls back
+    /// to drawing the field value through the variable-text path.
+    /// Cached per-render-context so we don't re-resolve per widget.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfDictionary? _acroFormDr;
+    private string? _acroFormDa;
+    private bool _acroFormResolved;
+    private void ResolveAcroFormResources()
+    {
+        if (_acroFormResolved) return;
+        _acroFormResolved = true;
+        var afObj = _page.Document.Catalog.GetOptional("AcroForm");
+        if (afObj == null) return;
+        if (_page.Document.Resolve(afObj) is not Pdfe.Core.Primitives.PdfDictionary af) return;
+        _acroFormDa = af.GetStringOrNull("DA");
+        var drObj = af.GetOptional("DR");
+        if (drObj == null) return;
+        _acroFormDr = _page.Document.Resolve(drObj) as Pdfe.Core.Primitives.PdfDictionary;
+    }
+
+    /// <summary>
     /// Render a default appearance for a Widget annotation that lacks
     /// <c>/AP</c>. Two distinct cases:
     ///
@@ -2442,6 +2466,24 @@ internal class RenderContext
         var bcColor = mk != null ? ParseColorArray(mk.GetOptional("BC")) : null;
         bool isSignature = fieldType == "Sig";
         bool hasExplicitStyle = bgColor.HasValue || bcColor.HasValue;
+
+        // Text fields with a value /V should render the value even
+        // without /AP — common in unflattened filled forms (Acrobat,
+        // Foxit and mutool all do this). Pull /V and route through the
+        // variable-text path before falling back to the empty-field
+        // policy.
+        if (fieldType == "Tx")
+        {
+            var rawV = annot.RawDictionary.GetOptional("V");
+            string? value = rawV != null
+                ? ExtractStringFromObject(_page.Document.Resolve(rawV))
+                : null;
+            if (!string.IsNullOrEmpty(value))
+            {
+                RenderTextFieldValue(annot, rect, value!);
+                if (!hasExplicitStyle) return;
+            }
+        }
 
         // Only signature fields get a synthesized "sign here" placeholder
         // border. Text / button / choice widgets in unfilled forms are
@@ -2549,6 +2591,190 @@ internal class RenderContext
         }
         catch { }
         return null;
+    }
+
+    /// <summary>
+    /// Render the <c>/V</c> value of a text field widget that has no
+    /// <c>/AP /N</c> to fall back on. Mirrors the variable-text
+    /// algorithm from PDF 32000-2 §12.7.4.3:
+    ///
+    /// <list type="number">
+    /// <item>Pick a default-appearance string — widget's <c>/DA</c> if
+    ///   set, else the AcroForm-level <c>/DA</c>.</item>
+    /// <item>Push the AcroForm <c>/DR</c> resources so font names in
+    ///   <c>/DA</c> resolve (the widget's own /Resources are usually
+    ///   empty for unfilled fields).</item>
+    /// <item>Tokenize <c>/DA</c> and execute its operators against a
+    ///   fresh text state — sets the active font, size, fill colour.</item>
+    /// <item>Position the value text inside the rect with horizontal
+    ///   alignment from <c>/Q</c> (0=left, 1=center, 2=right) and
+    ///   vertical centering.</item>
+    /// <item>Draw the string via the regular RenderText path so font
+    ///   substitution / cmap / CID handling all share the same code.</item>
+    /// </list>
+    /// </summary>
+    private void RenderTextFieldValue(
+        Pdfe.Core.Document.PdfAnnotation annot, SKRect rect, string value)
+    {
+        ResolveAcroFormResources();
+
+        var da = annot.RawDictionary.GetStringOrNull("DA") ?? _acroFormDa;
+        if (string.IsNullOrEmpty(da)) return;
+
+        // Auto-size 0 in /DA means "fit text to height" per spec; pick a
+        // pragmatic default (75% of rect height, capped at 16pt) so the
+        // value is at least visible. Real Acrobat does iterative fitting
+        // — we approximate.
+        float autoSize = Math.Min(rect.Height * 0.75f, 16f);
+        if (autoSize < 4f) autoSize = 4f;
+
+        _resourcesStack.Push(_acroFormDr);
+        _canvas.Save();
+        try
+        {
+            // Save and reset the text state so /DA's Tf / g / rg etc.
+            // don't leak back into the page-level text state we've been
+            // accumulating.
+            var savedTextState = CloneTextState();
+            var savedFillColor = _state.FillColor;
+            var savedStrokeColor = _state.StrokeColor;
+            var savedTypeface = _currentTypeface;
+            var savedFontHasEmbeddedProgram = _currentFontHasEmbeddedProgram;
+            var savedByteToGlyph = _currentByteToGlyph;
+            var savedCffCidToGlyph = _currentCffCidToGlyph;
+            var savedCidToGidMap = _currentCidToGidMap;
+            var savedFontIsType0 = _currentFontIsType0;
+            var savedCidWidths = _currentCidWidths;
+            var savedCurrentFontWidths = _currentFontWidths;
+            var savedFontFirstChar = _currentFontFirstChar;
+            var savedFontMissingWidth = _currentFontMissingWidth;
+            var savedFontEncoding = _currentFontEncoding;
+            var savedCodeToUnicode = _currentCodeToUnicode;
+            var savedUnicodeToCode = _currentUnicodeToCode;
+            try
+            {
+                _textState = new TextState();
+
+                // Run /DA — sets _textState.FontName/FontSize, fill colour, etc.
+                var tokens = Tokenize(da!);
+                var operands = new List<string>();
+                foreach (var token in tokens)
+                {
+                    if (IsOperator(token))
+                    {
+                        ExecuteOperator(token, operands);
+                        operands.Clear();
+                    }
+                    else operands.Add(token);
+                }
+
+                float fontSize = _textState.FontSize > 0.001f
+                    ? _textState.FontSize : autoSize;
+                if (_currentTypeface == null)
+                    _currentTypeface = GetTypeface("Helvetica");
+
+                // Measure text to compute alignment. Use the active
+                // typeface so the width matches what we're about to draw.
+                using var measurePaint = new SKPaint(new SKFont(_currentTypeface, fontSize));
+                float textWidth = measurePaint.MeasureText(value);
+
+                int q = annot.RawDictionary.GetInt("Q", 0);
+                const float padX = 2f;
+                float textX;
+                if (q == 1)      textX = rect.Left + (rect.Width - textWidth) * 0.5f;
+                else if (q == 2) textX = rect.Right - textWidth - padX;
+                else             textX = rect.Left + padX;
+
+                // Vertical baseline: center the cap-height inside the
+                // rect. fontSize × 0.3 puts the baseline below center
+                // by roughly the descender's worth, which looks about
+                // right for typical fonts at typical sizes.
+                float textY = rect.Top + (rect.Height + fontSize * 0.7f) * 0.5f
+                              - fontSize * 0.5f;
+
+                // Drive RenderText through the standard text-block path.
+                _inTextBlock = true;
+                _textState.TextMatrixA = 1; _textState.TextMatrixB = 0;
+                _textState.TextMatrixC = 0; _textState.TextMatrixD = 1;
+                _textState.TextMatrixE = textX;
+                _textState.TextMatrixF = textY;
+                _textState.LineMatrixE = textX;
+                _textState.LineMatrixF = textY;
+                _textState.FontSize = fontSize;
+
+                // Latin-1 round-trip into bytes — same shape as a Tj
+                // operand. RenderText then handles cmap / encoding for
+                // the resolved typeface.
+                var bytes = Encoding.Latin1.GetBytes(value);
+                RenderText(value, bytes);
+                _inTextBlock = false;
+            }
+            finally
+            {
+                _textState = savedTextState;
+                _state.FillColor = savedFillColor;
+                _state.StrokeColor = savedStrokeColor;
+                _currentTypeface = savedTypeface;
+                _currentFontHasEmbeddedProgram = savedFontHasEmbeddedProgram;
+                _currentByteToGlyph = savedByteToGlyph;
+                _currentCffCidToGlyph = savedCffCidToGlyph;
+                _currentCidToGidMap = savedCidToGidMap;
+                _currentFontIsType0 = savedFontIsType0;
+                _currentCidWidths = savedCidWidths;
+                _currentFontWidths = savedCurrentFontWidths;
+                _currentFontFirstChar = savedFontFirstChar;
+                _currentFontMissingWidth = savedFontMissingWidth;
+                _currentFontEncoding = savedFontEncoding;
+                _currentCodeToUnicode = savedCodeToUnicode;
+                _currentUnicodeToCode = savedUnicodeToCode;
+            }
+        }
+        catch
+        {
+            // A malformed /DA shouldn't kill the rest of the page; the
+            // widget just stays unrendered.
+        }
+        finally
+        {
+            _canvas.Restore();
+            _resourcesStack.Pop();
+        }
+    }
+
+    /// <summary>
+    /// Pull a string out of a /V or similar value object — handles both
+    /// PDF string literals (most common) and PDF names (rare).
+    /// </summary>
+    private static string? ExtractStringFromObject(Pdfe.Core.Primitives.PdfObject? obj)
+    {
+        return obj switch
+        {
+            Pdfe.Core.Primitives.PdfString s => s.Value,
+            Pdfe.Core.Primitives.PdfName n => n.Value,
+            _ => null,
+        };
+    }
+
+    private TextState CloneTextState()
+    {
+        return new TextState
+        {
+            FontName = _textState.FontName,
+            FontSize = _textState.FontSize,
+            CharSpacing = _textState.CharSpacing,
+            WordSpacing = _textState.WordSpacing,
+            HorizontalScale = _textState.HorizontalScale,
+            TextLeading = _textState.TextLeading,
+            TextRise = _textState.TextRise,
+            TextMatrixA = _textState.TextMatrixA,
+            TextMatrixB = _textState.TextMatrixB,
+            TextMatrixC = _textState.TextMatrixC,
+            TextMatrixD = _textState.TextMatrixD,
+            TextMatrixE = _textState.TextMatrixE,
+            TextMatrixF = _textState.TextMatrixF,
+            LineMatrixE = _textState.LineMatrixE,
+            LineMatrixF = _textState.LineMatrixF,
+        };
     }
 
     private void RenderFormXObject(Pdfe.Core.Primitives.PdfStream formStream)
