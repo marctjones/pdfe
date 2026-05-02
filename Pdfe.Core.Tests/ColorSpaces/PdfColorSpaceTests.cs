@@ -1,5 +1,5 @@
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.ColorSpaces;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;

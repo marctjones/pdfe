@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using PdfEditor.Models;
 using PdfEditor.Tests.Utilities;

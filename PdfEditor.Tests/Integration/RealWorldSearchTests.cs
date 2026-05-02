@@ -1,6 +1,6 @@
 using System.IO;
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pdfe.Core.Document;
 using PdfEditor.Services;
@@ -95,8 +95,8 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
         var sensitiveLower = svc.Search(doc, "open", caseSensitive: true);
 
         // Same letter sequence — case-insensitive sums upper + lower.
-        insensitive.Count.Should().BeGreaterOrEqualTo(sensitiveUpper.Count);
-        insensitive.Count.Should().BeGreaterOrEqualTo(sensitiveLower.Count);
+        insensitive.Count.Should().BeGreaterThanOrEqualTo(sensitiveUpper.Count);
+        insensitive.Count.Should().BeGreaterThanOrEqualTo(sensitiveLower.Count);
         sensitiveUpper.Should().NotBeEmpty("'Open' (capital O) must appear");
         sensitiveLower.Should().NotBeEmpty("'open' (lowercase o) must appear");
     }

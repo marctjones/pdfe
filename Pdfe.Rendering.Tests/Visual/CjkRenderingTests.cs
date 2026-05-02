@@ -1,5 +1,5 @@
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using SkiaSharp;
 using Xunit;

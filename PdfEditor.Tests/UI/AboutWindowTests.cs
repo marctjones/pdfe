@@ -1,7 +1,7 @@
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using SkiaSharp;
 using System;
 using System.IO;
@@ -164,7 +164,7 @@ public static class VisualAssertionExtensions
                 Console.WriteLine($"Visual difference detected. Diff saved to: {saveDiffTo}");
             }
 
-            difference.Should().BeLessOrEqualTo(maxDifferencePercent,
+            difference.Should().BeLessThanOrEqualTo(maxDifferencePercent,
                 $"image should visually match baseline (actual difference: {difference:P2})");
         }
         finally

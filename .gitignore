@@ -82,3 +82,16 @@ screenshots/
 # Coverage reports and results (generated artifacts, not source)
 coverage-report/
 coverage-results/
+
+# Build artifacts and worktrees
+artifacts/
+coverage/
+dist/
+tools/
+.idlergear/
+.claude/worktrees/
+.wiki/
+pdfe.sh
+
+# Auto-generated test JSON
+**/*.cs.json

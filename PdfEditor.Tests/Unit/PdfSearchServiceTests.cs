@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using PdfEditor.Services;
@@ -85,7 +85,7 @@ public class PdfSearchServiceTests : IDisposable
         var results = _searchService.Search(repeatedPdfPath, "test", caseSensitive: false);
 
         // Assert
-        results.Should().HaveCountGreaterOrEqualTo(3); // "test", "Test", "Testing", "test"
+        results.Should().HaveCountGreaterThanOrEqualTo(3); // "test", "Test", "Testing", "test"
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class PdfSearchServiceTests : IDisposable
         var results = _searchService.Search(duplicatePdfPath, "CITY", caseSensitive: true, wholeWordsOnly: true);
 
         // Assert: Should find 5 occurrences (each "CITY" is a whole word)
-        results.Should().HaveCountGreaterOrEqualTo(3, "Should find multiple CITY occurrences");
+        results.Should().HaveCountGreaterThanOrEqualTo(3, "Should find multiple CITY occurrences");
 
         // Each result should have a distinct position (X or Y)
         // If bounding boxes are all the same, that's the bug from #96
@@ -160,7 +160,7 @@ public class PdfSearchServiceTests : IDisposable
 
         // At minimum, the X positions should vary for words on the same line
         var distinctXPositions = results.Select(r => r.X).Distinct().Count();
-        distinctXPositions.Should().BeGreaterOrEqualTo(2,
+        distinctXPositions.Should().BeGreaterThanOrEqualTo(2,
             "Different occurrences of CITY should have different X positions (issue #96 fix)");
     }
 

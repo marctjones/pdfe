@@ -6,7 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Controls;
 using PdfEditor.Tests.Utilities;
 using Xunit;

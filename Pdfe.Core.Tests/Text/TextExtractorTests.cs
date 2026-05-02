@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
 using Pdfe.Core.Text;
@@ -81,7 +81,7 @@ public class TextExtractorTests
 
         // Assert
         letters.Should().NotBeEmpty();
-        letters.Should().HaveCountGreaterOrEqualTo(3);
+        letters.Should().HaveCountGreaterThanOrEqualTo(3);
         var text = string.Concat(letters.Select(l => l.Value));
         text.Should().Contain("ABC");
     }
@@ -278,7 +278,7 @@ public class TextExtractorTests
         var letters = extractor.ExtractLetters();
 
         // Assert
-        letters.Should().HaveCountGreaterOrEqualTo(2);
+        letters.Should().HaveCountGreaterThanOrEqualTo(2);
         var aLetter = letters.FirstOrDefault(l => l.Value == "A");
         var bLetter = letters.FirstOrDefault(l => l.Value == "B");
         aLetter.Should().NotBeNull();
@@ -515,7 +515,7 @@ public class TextExtractorTests
 
         // Assert
         words.Should().NotBeEmpty();
-        words.Should().HaveCountGreaterOrEqualTo(1);
+        words.Should().HaveCountGreaterThanOrEqualTo(1);
     }
 
     [Fact]
@@ -532,7 +532,7 @@ public class TextExtractorTests
         var words = extractor.ExtractWords();
 
         // Assert
-        words.Count.Should().BeGreaterOrEqualTo(1);
+        words.Count.Should().BeGreaterThanOrEqualTo(1);
     }
 
     [Fact]
@@ -860,7 +860,7 @@ public class TextExtractorTests
         var letters = extractor.ExtractLetters();
 
         // Assert
-        letters.Should().HaveCountGreaterOrEqualTo(2);
+        letters.Should().HaveCountGreaterThanOrEqualTo(2);
         var aLetter = letters.FirstOrDefault(l => l.Value == "A");
         var bLetter = letters.FirstOrDefault(l => l.Value == "B");
         aLetter.Should().NotBeNull();
@@ -1015,7 +1015,7 @@ public class TextExtractorTests
         var letters = extractor.ExtractLetters();
 
         // Assert
-        letters.Count.Should().BeGreaterOrEqualTo(3);
+        letters.Count.Should().BeGreaterThanOrEqualTo(3);
     }
 
     #endregion
@@ -1639,7 +1639,7 @@ public class TextExtractorTests
 
         var letters = extractor.ExtractLetters();
 
-        letters.Count.Should().BeGreaterOrEqualTo(2);
+        letters.Count.Should().BeGreaterThanOrEqualTo(2);
         var text = string.Concat(letters.Select(l => l.Value));
         text.Should().Contain("A");
         text.Should().Contain("B");

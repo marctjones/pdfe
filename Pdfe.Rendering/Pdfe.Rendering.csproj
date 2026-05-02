@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.7" />
   </ItemGroup>
 
   <ItemGroup>
