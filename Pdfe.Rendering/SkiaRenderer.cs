@@ -2386,22 +2386,45 @@ internal class RenderContext
     }
 
     /// <summary>
-    /// Render the standard "interactive form field" highlight for a
-    /// Widget annotation that lacks a baked appearance. Background fill
-    /// from <c>/MK /BG</c>, border from <c>/MK /BC</c> + <c>/BS /W</c>,
-    /// otherwise a light-blue rectangle similar to what Acrobat draws for
-    /// unfilled fields.
+    /// Render a default appearance for a Widget annotation that lacks
+    /// <c>/AP</c>. Two distinct cases:
+    ///
+    /// <list type="number">
+    /// <item><b>Signature widgets (<c>/FT /Sig</c>):</b> draw a visible
+    ///   placeholder border so the user can see "sign here." This
+    ///   matches mutool's behaviour and what every commercial viewer
+    ///   does for unsigned signature fields. Color comes from
+    ///   <c>/MK /BC</c> when set, falling back to a neutral border
+    ///   tone that's visible against white but not jarring.</item>
+    /// <item><b>Other widgets (<c>/Tx</c>, <c>/Btn</c>, <c>/Ch</c>) with
+    ///   <c>/MK</c> styling:</b> render background and/or border using
+    ///   the explicitly-supplied colors. Skip when no /MK is set —
+    ///   text fields in unfilled forms (IRS-1040, passport renewals,
+    ///   etc.) are intentionally invisible at print time and adding
+    ///   our own borders here makes pdfe's output diverge from mutool
+    ///   by ~10% on real-world form PDFs.</item>
+    /// </list>
     /// </summary>
     private void RenderWidgetDefault(Pdfe.Core.Document.PdfAnnotation annot, SKRect rect)
     {
+        var fieldType = annot.RawDictionary.GetNameOrNull("FT");
         var mk = annot.RawDictionary.GetOptional("MK") is { } mkObj
             ? _page.Document.Resolve(mkObj) as Pdfe.Core.Primitives.PdfDictionary
             : null;
 
         var bgColor = mk != null ? ParseColorArray(mk.GetOptional("BG")) : null;
         var bcColor = mk != null ? ParseColorArray(mk.GetOptional("BC")) : null;
-        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+        bool isSignature = fieldType == "Sig";
+        bool hasExplicitStyle = bgColor.HasValue || bcColor.HasValue;
 
+        // Only signature fields get a synthesized "sign here" placeholder
+        // border. Text / button / choice widgets in unfilled forms are
+        // routinely emitted without /AP and are intentionally invisible
+        // until filled — mutool, Poppler and Foxit all leave them blank
+        // unless the author opted into /MK styling.
+        if (!isSignature && !hasExplicitStyle) return;
+
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
         _canvas.Save();
         try
         {
@@ -2414,11 +2437,10 @@ internal class RenderContext
                 _canvas.DrawRect(rect, paint);
             }
 
-            // The border color, when /MK /BC isn't supplied, defaults to a
-            // light-blue field highlight (#A6CFFF-ish at 50% alpha) — this
-            // is what users expect: "there's a fillable field here." Real
-            // viewers vary (Acrobat blue, Foxit gray, mutool orange),
-            // anything visible is better than nothing.
+            // Border: use /MK /BC when supplied. For signature fields
+            // without /MK, fall back to a neutral medium-blue tone —
+            // the goal is "user can see the field exists," not pixel
+            // parity with any specific viewer.
             paint.Style = SKPaintStyle.Stroke;
             paint.StrokeWidth = borderWidth;
             paint.Color = bcColor ?? new SKColor(0x66, 0x99, 0xFF, 0xFF);
