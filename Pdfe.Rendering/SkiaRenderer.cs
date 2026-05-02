@@ -108,10 +108,16 @@ internal class RenderContext
     private Dictionary<char, byte>? _currentUnicodeToCode;
 
     // Typefaces loaded from the PDF's own embedded font streams
-    // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). Keyed by resource
-    // name (e.g. "TT0") so repeated SetFont calls for the same font within a
-    // page don't re-parse. Disposed at the end of Render().
-    private readonly Dictionary<string, SKTypeface> _embeddedTypefaces = new();
+    // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). Keyed by the
+    // resolved /Font dictionary's reference identity (PdfDocument.Resolve
+    // caches by object number, so two ResolveFontFromActiveResources calls
+    // for the same indirect ref return the same C# instance). Keying by
+    // the dict instead of the resource name correctly distinguishes two
+    // different physical fonts that share the same logical name (e.g.
+    // /F0) in different /Resources scopes — common in widget annotation
+    // appearances where each appearance dict's /Resources defines its
+    // own /F0. Disposed at the end of Render().
+    private readonly Dictionary<Pdfe.Core.Primitives.PdfDictionary, SKTypeface> _embeddedTypefaces = new();
 
     // Per-font byte→glyphId map extracted from a format-0 cmap subtable when
     // the typeface has no Unicode-mapped subtable Skia's shaper can use
@@ -121,7 +127,10 @@ internal class RenderContext
     // shape to all-.notdef and the page would render blank, even though the
     // parser correctly extracts the Unicode text via /ToUnicode.
     // Cache value of null = "checked, not needed" so we don't re-probe.
-    private readonly Dictionary<string, ushort[]?> _embeddedTypefaceByteToGlyph = new();
+    // Keyed by the same fontDict reference as _embeddedTypefaces so two
+    // appearance-scoped /F0 entries that point to different fonts get
+    // independent byte-cmap probes.
+    private readonly Dictionary<Pdfe.Core.Primitives.PdfDictionary, ushort[]?> _embeddedTypefaceByteToGlyph = new();
     private ushort[]? _currentByteToGlyph;
 
     // Stack of /Resources dictionaries currently active. The page's own
@@ -147,6 +156,16 @@ internal class RenderContext
     private bool _currentFontHasEmbeddedProgram;
     private Dictionary<int, float>? _currentCidWidths;
     private float _currentCidDefaultWidth = 1000f;
+
+    // CID → glyph-id mapping for the active CIDFontType2 font, when a
+    // non-identity /CIDToGIDMap stream is present. ushort.MaxValue at
+    // index N means "this CID is unmapped". Null means /CIDToGIDMap is
+    // absent or /Identity, so CID == GID and RenderCidBytes draws CIDs
+    // straight. Subset CIDFontType2 fonts (NotoSans, Noto* family) ship
+    // a stream remapping each used CID to its small subset glyph index;
+    // skipping the remap draws .notdef for every glyph and the page
+    // appears blank.
+    private ushort[]? _currentCidToGidMap;
 
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
@@ -792,11 +811,11 @@ internal class RenderContext
         // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). When no embedded
         // data is present or the format isn't SkiaSharp-loadable (e.g. /FontFile
         // is raw Type1 PostScript), fall through to the system-font mapping.
-        var embedded = TryLoadEmbeddedTypeface(fontName, fontDict);
+        var embedded = TryLoadEmbeddedTypeface(fontDict);
         _currentFontHasEmbeddedProgram = embedded != null;
         _currentTypeface = embedded ?? GetTypeface(baseFont);
-        _currentByteToGlyph = embedded != null
-            && _embeddedTypefaceByteToGlyph.TryGetValue(fontName, out var btg)
+        _currentByteToGlyph = embedded != null && fontDict != null
+            && _embeddedTypefaceByteToGlyph.TryGetValue(fontDict, out var btg)
             ? btg : null;
 
         // Type0 (composite CID) fonts need a completely different content-stream
@@ -804,6 +823,7 @@ internal class RenderContext
         _currentFontIsType0 = fontDict?.GetNameOrNull("Subtype") == "Type0";
         _currentCidWidths = null;
         _currentCidDefaultWidth = 1000f;
+        _currentCidToGidMap = null;
         if (_currentFontIsType0 && fontDict != null)
         {
             var descendants = ResolveArray(fontDict, "DescendantFonts");
@@ -814,6 +834,31 @@ internal class RenderContext
                 var w = ResolveArray(cidFont, "W");
                 if (w != null)
                     _currentCidWidths = ParseWArray(w);
+
+                // /CIDToGIDMap is /Identity (or absent) for most modern Type0
+                // fonts and CID == GID. Subset CIDFontType2 fonts produced by
+                // veraPDF Test Builder, Word, etc. ship a remapping stream
+                // (2-byte big-endian uint16 per CID); without applying it,
+                // glyph IDs miss every glyph in the subset and pages render
+                // .notdef-only blanks.
+                var cidToGidObj = cidFont.GetOptional("CIDToGIDMap");
+                if (cidToGidObj != null)
+                {
+                    var resolved = _page.Document.Resolve(cidToGidObj);
+                    if (resolved is Pdfe.Core.Primitives.PdfStream cidStream)
+                    {
+                        try
+                        {
+                            var data = cidStream.DecodedData;
+                            int count = data.Length / 2;
+                            var map = new ushort[count];
+                            for (int i = 0; i < count; i++)
+                                map[i] = (ushort)((data[i * 2] << 8) | data[i * 2 + 1]);
+                            _currentCidToGidMap = map;
+                        }
+                        catch { _currentCidToGidMap = null; }
+                    }
+                }
             }
         }
     }
@@ -883,14 +928,13 @@ internal class RenderContext
 
     // Load the font's embedded file (TrueType or OpenType/CFF) as an SKTypeface
     // so glyphs render in the face the PDF actually specifies, with the widths
-    // and kerning the PDF's /Widths table was authored against. Cached per-font
-    // for the life of this RenderContext; disposed at end of Render().
-    private SKTypeface? TryLoadEmbeddedTypeface(string fontName, Pdfe.Core.Primitives.PdfDictionary? fontDict)
+    // and kerning the PDF's /Widths table was authored against. Cached per-
+    // dict for the life of this RenderContext; disposed at end of Render().
+    private SKTypeface? TryLoadEmbeddedTypeface(Pdfe.Core.Primitives.PdfDictionary? fontDict)
     {
-        if (_embeddedTypefaces.TryGetValue(fontName, out var cached))
-            return cached;
-
         if (fontDict == null) return null;
+        if (_embeddedTypefaces.TryGetValue(fontDict, out var cached))
+            return cached;
 
         // Handle both simple and Type0 (CID) fonts: Type0 carries the embedded
         // file inside its /DescendantFonts[0]/FontDescriptor, not on itself.
@@ -967,8 +1011,8 @@ internal class RenderContext
             }
         }
 
-        _embeddedTypefaces[fontName] = typeface;
-        _embeddedTypefaceByteToGlyph[fontName] = ResolveByteCodeCmap(typeface, fontDict);
+        _embeddedTypefaces[fontDict] = typeface;
+        _embeddedTypefaceByteToGlyph[fontDict] = ResolveByteCodeCmap(typeface, fontDict);
         return typeface;
     }
 
@@ -1524,9 +1568,21 @@ internal class RenderContext
             return;
 
         var count = bytes.Length / 2;
+        // Two parallel arrays: CIDs (used for /W width lookup, which is
+        // keyed by CID per spec) and GIDs (what Skia actually draws). For
+        // /CIDToGIDMap = /Identity these are the same buffer; for subset
+        // CIDFontType2 the GID map sends each CID to a small glyph index
+        // inside the subset.
         var cids = new ushort[count];
+        var gids = new ushort[count];
         for (int i = 0; i < count; i++)
-            cids[i] = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+        {
+            ushort cid = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+            cids[i] = cid;
+            gids[i] = _currentCidToGidMap != null && cid < _currentCidToGidMap.Length
+                ? _currentCidToGidMap[cid]
+                : cid;
+        }
 
         var effectiveSize = GetEffectiveFontSize();
         var xyRatio = GetTextMatrixXYRatio();
@@ -1550,8 +1606,10 @@ internal class RenderContext
 
         // SKTextEncoding.GlyphId reads the byte buffer as native-endian ushort
         // glyph IDs. BlockCopy gives us exactly that on little-endian machines.
-        var glyphBytes = new byte[cids.Length * 2];
-        Buffer.BlockCopy(cids, 0, glyphBytes, 0, glyphBytes.Length);
+        // Pass the GID array (already remapped through /CIDToGIDMap when
+        // present), not the raw CIDs.
+        var glyphBytes = new byte[gids.Length * 2];
+        Buffer.BlockCopy(gids, 0, glyphBytes, 0, glyphBytes.Length);
         _canvas.DrawText(glyphBytes, 0, 0, paint);
 
         _canvas.Restore();
