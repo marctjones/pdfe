@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Models;
 using PdfEditor.Services;
 using System;

@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Tests.Utilities;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;

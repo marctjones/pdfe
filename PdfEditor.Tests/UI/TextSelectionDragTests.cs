@@ -10,7 +10,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using PdfEditor.Controls;
@@ -66,7 +66,7 @@ public class TextSelectionDragTests
         // Pick a page with plenty of body text — page 15 in this book
         // is well into prose, no figures, predictable reading order.
         const int targetPageNumber = 15;
-        targetPageNumber.Should().BeLessOrEqualTo(vm.TotalPages);
+        targetPageNumber.Should().BeLessThanOrEqualTo(vm.TotalPages);
 
         var page = vm.PdfCoreDocument!.GetPage(targetPageNumber);
         var letters = page.Letters?.ToList() ?? new System.Collections.Generic.List<Letter>();

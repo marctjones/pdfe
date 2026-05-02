@@ -9,7 +9,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Models;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;

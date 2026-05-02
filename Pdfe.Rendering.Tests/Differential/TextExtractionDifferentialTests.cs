@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
 using Xunit.Abstractions;
@@ -148,7 +148,7 @@ public sealed class TextExtractionDifferentialTests
             _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {reason}");
             Skip.If(true, $"Known text-extraction failure for {relativePath}: {reason}");
         }
-        sim.Should().BeGreaterOrEqualTo(MinSimilarity,
+        sim.Should().BeGreaterThanOrEqualTo(MinSimilarity,
             $"{relativePath}: pdfe text-extraction differs from mutool. " +
             $"Bigram-Jaccard {sim:F3} < {MinSimilarity}.");
     }

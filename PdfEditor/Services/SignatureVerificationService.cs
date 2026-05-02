@@ -183,12 +183,18 @@ public class SignatureVerificationService
         try
         {
             var cms = new CmsSignedData(signatureBytes);
-            var store = cms.GetCertificates("Collection");
+            // BouncyCastle.Cryptography 2.x dropped the legacy
+            // `GetCertificates("Collection")` overload and the
+            // IStore.GetMatches(selector) API. The new shape is
+            // CmsSignedData.GetCertificates() returning IStore<X509Certificate>,
+            // queried via EnumerateMatches(selector). selector=null returns
+            // every certificate in the bundle.
+            var store = cms.GetCertificates();
             var signers = cms.GetSignerInfos();
 
             foreach (SignerInformation signer in signers.GetSigners())
             {
-                var certCollection = store.GetMatches(signer.SignerID);
+                var certCollection = store.EnumerateMatches(signer.SignerID);
                 foreach (X509Certificate cert in certCollection)
                 {
                     result.SignedBy = cert.SubjectDN.ToString();

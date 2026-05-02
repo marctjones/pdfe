@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- System.CommandLine 2.0.0 GA was a substantial API rewrite
+         (handlers, argument constructors, IsRequired moved). The
+         migration is large enough to warrant its own commit; for
+         now stay on the beta we built against. -->
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="2.88.9" />

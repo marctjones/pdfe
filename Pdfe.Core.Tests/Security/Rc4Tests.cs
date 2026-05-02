@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Security;
 using Xunit;
 

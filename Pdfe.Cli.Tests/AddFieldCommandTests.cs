@@ -1,6 +1,6 @@
 using System.IO;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Cli;
 using Pdfe.Core.Document;
 using Xunit;

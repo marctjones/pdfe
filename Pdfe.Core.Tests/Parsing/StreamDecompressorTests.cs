@@ -1,6 +1,6 @@
 using System.IO.Compression;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Parsing;
 using Pdfe.Core.Primitives;
 using Xunit;

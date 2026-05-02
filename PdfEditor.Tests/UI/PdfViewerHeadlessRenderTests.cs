@@ -2,7 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Controls;
 using SkiaSharp;
 using System;

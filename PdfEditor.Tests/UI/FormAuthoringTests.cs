@@ -6,7 +6,7 @@ using System.Reactive.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using PdfEditor.Controls;
 using PdfEditor.ViewModels;

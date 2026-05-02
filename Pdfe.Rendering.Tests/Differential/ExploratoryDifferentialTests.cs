@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Rendering;
 using SkiaSharp;

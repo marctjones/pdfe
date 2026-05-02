@@ -1,5 +1,5 @@
 using Xunit;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.ViewModels;
 using System.Reflection;
 

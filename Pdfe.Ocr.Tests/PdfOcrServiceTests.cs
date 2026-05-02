@@ -1,5 +1,5 @@
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
 using Pdfe.Ocr;
