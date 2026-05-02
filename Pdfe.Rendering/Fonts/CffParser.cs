@@ -15,6 +15,8 @@ internal static class CffParser
         public short XMin, YMin, XMax, YMax;
         public Dictionary<string, int> GlyphNameToIndex = new();
         public string[] GlyphNames = Array.Empty<string>();
+        public bool IsCidKeyed;
+        public Dictionary<int, int>? CidToGlyph;
 
         // Conversion from core to rendering namespace
         internal static CffFontInfo From(CoreCffParser.CffFontInfo core)
@@ -28,6 +30,8 @@ internal static class CffParser
                 YMax = core.YMax,
                 GlyphNameToIndex = core.GlyphNameToIndex,
                 GlyphNames = core.GlyphNames,
+                IsCidKeyed = core.IsCidKeyed,
+                CidToGlyph = core.CidToGlyph,
             };
         }
     }

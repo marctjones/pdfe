@@ -175,6 +175,20 @@ internal class RenderContext
     // appears blank.
     private ushort[]? _currentCidToGidMap;
 
+    // CID → glyph-index mapping for the active CIDFontType0 (CFF-based)
+    // font, derived from the /ROS-marked CFF's charset table. Same
+    // purpose as _currentCidToGidMap, but for CFF-keyed CID fonts where
+    // the mapping lives inside the embedded CFF rather than alongside
+    // it as /CIDToGIDMap. Subset Adobe-Japan1 fonts (KozMinPro,
+    // YuMincho, Source Han Sans, etc.) reach this path; without it,
+    // every CJK glyph resolves to .notdef and Japanese / Chinese /
+    // Korean PDFs render as blank pages.
+    private Dictionary<int, int>? _currentCffCidToGlyph;
+    // Per-fontDict cache for the above, keyed the same way as
+    // _embeddedTypefaces so two different /Font dicts with the same
+    // resource name but different physical fonts don't collide.
+    private readonly Dictionary<Pdfe.Core.Primitives.PdfDictionary, Dictionary<int, int>?> _embeddedCffCidToGlyph = new();
+
     // Side-table for inline images. The tokenizer captures the dict
     // header text and the raw data bytes between BI/ID/EI as we scan
     // (where the bytes can be binary and not safe to round-trip through
@@ -848,6 +862,9 @@ internal class RenderContext
         _currentByteToGlyph = embedded != null && fontDict != null
             && _embeddedTypefaceByteToGlyph.TryGetValue(fontDict, out var btg)
             ? btg : null;
+        _currentCffCidToGlyph = embedded != null && fontDict != null
+            && _embeddedCffCidToGlyph.TryGetValue(fontDict, out var cffMap)
+            ? cffMap : null;
 
         // Type0 (composite CID) fonts need a completely different content-stream
         // parse (2 bytes per character, widths indexed via /W not /Widths).
@@ -1010,10 +1027,15 @@ internal class RenderContext
         // so Skia can load it. The wrapper's cmap has been independently verified
         // (CffWrapperTests.Wrapped_CffSkiaCanResolveKnownGlyphs) — Skia resolves
         // every Unicode char to the correct CFF glyph index.
+        // For CID-keyed CFF (Adobe-Japan1 etc.) the wrapper produces a minimal
+        // cmap and returns the CID → glyph index map via cffCidToGlyph; the
+        // renderer threads that through SetFont so RenderCidBytes can dispatch
+        // glyph IDs directly.
         byte[] loadableBytes = fontBytes;
+        Dictionary<int, int>? cffCidToGlyph = null;
         if (isCff)
         {
-            var wrapped = TryWrapCffAsOpenType(fontBytes, fontDict, descriptor);
+            var wrapped = TryWrapCffAsOpenType(fontBytes, fontDict, descriptor, out cffCidToGlyph);
             if (wrapped != null) loadableBytes = wrapped;
         }
 
@@ -1044,6 +1066,7 @@ internal class RenderContext
 
         _embeddedTypefaces[fontDict] = typeface;
         _embeddedTypefaceByteToGlyph[fontDict] = ResolveByteCodeCmap(typeface, fontDict);
+        _embeddedCffCidToGlyph[fontDict] = cffCidToGlyph;
         return typeface;
     }
 
@@ -1105,33 +1128,51 @@ internal class RenderContext
     private byte[]? TryWrapCffAsOpenType(
         byte[] cff,
         Pdfe.Core.Primitives.PdfDictionary fontDict,
-        Pdfe.Core.Primitives.PdfDictionary descriptor)
+        Pdfe.Core.Primitives.PdfDictionary descriptor,
+        out Dictionary<int, int>? cffCidToGlyph)
     {
+        cffCidToGlyph = null;
         var cffInfo = Fonts.CffParser.Parse(cff);
         if (cffInfo == null) return null;
 
-        // Build Unicode → glyph-index map and glyph-index → PDF-width map.
-        // Both derive from walking the PDF's character codes 0..255, resolving
-        // each to (Unicode, glyph name) and then looking up the glyph index in
-        // the CFF charset.
         var unicodeToGlyph = new Dictionary<char, int>(256);
         var glyphWidths = new Dictionary<int, ushort>(256);
-        for (int code = 0; code < 256; code++)
+
+        if (cffInfo.IsCidKeyed)
         {
-            char unicode = GetUnicodeForCode((byte)code);
-            if (unicode == '\0') continue;
-            if (!AdobeGlyphList.TryGetName(unicode, out var glyphName)) continue;
-            if (!cffInfo.GlyphNameToIndex.TryGetValue(glyphName, out var glyphIndex)) continue;
-
-            if (!unicodeToGlyph.ContainsKey(unicode))
-                unicodeToGlyph[unicode] = glyphIndex;
-
-            // If /Widths covers this code, use it as the per-glyph hmtx width.
-            if (_currentFontWidths != null)
+            // CID-keyed CFF (Adobe-Japan1 / Adobe-CNS1 / Adobe-Korea1). The
+            // CFF charset stores CIDs, not glyph names, so the AdobeGlyphList
+            // path doesn't apply — there's no Unicode → name → glyph chain
+            // to walk. Skip cmap construction and rely on the renderer
+            // dispatching glyphs via SKTextEncoding.GlyphId; CFF glyph
+            // ordering is preserved by the wrapper, so the OpenType glyph
+            // index Skia ultimately uses == the CFF glyph index ==
+            // CidToGlyph[cid] from the descendant font's CFF.
+            cffCidToGlyph = cffInfo.CidToGlyph;
+        }
+        else
+        {
+            // Build Unicode → glyph-index map and glyph-index → PDF-width map.
+            // Both derive from walking the PDF's character codes 0..255, resolving
+            // each to (Unicode, glyph name) and then looking up the glyph index in
+            // the CFF charset.
+            for (int code = 0; code < 256; code++)
             {
-                int idx = code - _currentFontFirstChar;
-                if (idx >= 0 && idx < _currentFontWidths.Length)
-                    glyphWidths[glyphIndex] = (ushort)Math.Clamp(_currentFontWidths[idx], 0, 65535);
+                char unicode = GetUnicodeForCode((byte)code);
+                if (unicode == '\0') continue;
+                if (!AdobeGlyphList.TryGetName(unicode, out var glyphName)) continue;
+                if (!cffInfo.GlyphNameToIndex.TryGetValue(glyphName, out var glyphIndex)) continue;
+
+                if (!unicodeToGlyph.ContainsKey(unicode))
+                    unicodeToGlyph[unicode] = glyphIndex;
+
+                // If /Widths covers this code, use it as the per-glyph hmtx width.
+                if (_currentFontWidths != null)
+                {
+                    int idx = code - _currentFontFirstChar;
+                    if (idx >= 0 && idx < _currentFontWidths.Length)
+                        glyphWidths[glyphIndex] = (ushort)Math.Clamp(_currentFontWidths[idx], 0, 65535);
+                }
             }
         }
 
@@ -1613,19 +1654,30 @@ internal class RenderContext
 
         var count = bytes.Length / 2;
         // Two parallel arrays: CIDs (used for /W width lookup, which is
-        // keyed by CID per spec) and GIDs (what Skia actually draws). For
-        // /CIDToGIDMap = /Identity these are the same buffer; for subset
-        // CIDFontType2 the GID map sends each CID to a small glyph index
-        // inside the subset.
+        // keyed by CID per spec) and GIDs (what Skia actually draws). The
+        // CID → GID resolution depends on the descendant font subtype:
+        //   - CIDFontType2 with /CIDToGIDMap stream → _currentCidToGidMap
+        //     is the array indexed by CID (handles Word / NotoSans / Office
+        //     subsets).
+        //   - CIDFontType0 (CFF-keyed, Adobe-Japan1 etc.) → the mapping is
+        //     inside the embedded CFF charset; CffCidToGlyph holds it.
+        //   - CIDFontType2 with /CIDToGIDMap = /Identity (or absent) → CID
+        //     equals GID and we draw straight through.
         var cids = new ushort[count];
         var gids = new ushort[count];
         for (int i = 0; i < count; i++)
         {
             ushort cid = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
             cids[i] = cid;
-            gids[i] = _currentCidToGidMap != null && cid < _currentCidToGidMap.Length
-                ? _currentCidToGidMap[cid]
-                : cid;
+            ushort gid;
+            if (_currentCidToGidMap != null && cid < _currentCidToGidMap.Length)
+                gid = _currentCidToGidMap[cid];
+            else if (_currentCffCidToGlyph != null
+                     && _currentCffCidToGlyph.TryGetValue(cid, out var cffGid))
+                gid = (ushort)cffGid;
+            else
+                gid = cid;
+            gids[i] = gid;
         }
 
         var effectiveSize = GetEffectiveFontSize();
