@@ -87,7 +87,15 @@ internal class RenderContext
     private readonly HashSet<Pdfe.Core.Primitives.PdfStream> _formXObjectStack =
         new(ReferenceEqualityComparer.Instance);
     private int _formXObjectDepth;
-    private const int MaxFormXObjectDepth = 16;
+    // Form XObject nesting cap. Has to be high enough to satisfy PDF/A-1
+    // §6.1.12's "implementation limits" conformance fixtures — those
+    // specifically chain a long ladder of Form XObjects to test that a
+    // reader supports deep nesting (the spec says 28+ levels of graphic
+    // state nesting must work). 64 is still well below any plausible
+    // .NET stack overflow point and is the same neighbourhood that
+    // mutool / Poppler use; cycle detection via _formXObjectStack
+    // catches genuine self-reference loops independently.
+    private const int MaxFormXObjectDepth = 64;
 
     // Glyph widths parsed from the current font dictionary's /Widths array.
     // Null when unavailable (e.g. standard 14 fonts that omit /Widths), in which
@@ -1419,10 +1427,20 @@ internal class RenderContext
         //         Y-down glyph drawing, which the outer flip turns into Y-up
         //         on screen exactly as the PDF intends.
         // Without this, browser-flipped text (and most CJK) renders upside-down.
+        //
+        // Per PDF 32000-2 §9.4.4 the text rendering matrix multiplies the
+        // X axis by Th (= Tz / 100). Tz=100 is the default and the no-op,
+        // but conformance fixtures use Tz=300, Tz=30000 etc. to test wide
+        // / condensed text. Without folding Th into this Scale the glyph
+        // itself is drawn at native width while the cursor advances by
+        // Th×width, leaving microscopic letters with huge gaps between
+        // them (visible as pdfe rendering only ~5% of the expected pixel
+        // count on TWG A001 / 6-1-12-t02 fixtures).
         float ySign = _textState.TextMatrixD >= 0 ? -1f : 1f;
+        float th = _textState.HorizontalScale / 100.0f;
         _canvas.Save();
         _canvas.Translate(x, y);
-        _canvas.Scale(xyRatio, ySign);
+        _canvas.Scale(xyRatio * th, ySign);
 
         bool drawWithPdfWidths =
             !_currentFontHasEmbeddedProgram &&
@@ -1456,10 +1474,13 @@ internal class RenderContext
             // With Tf=1 and Tm scale = effectiveSize, Tm_scale = effectiveSize.
             // Multiplying everything together puts cursor in the canvas frame
             // we just set up with Scale(xyRatio, -1).
+            // The outer Scale already folded Th into the canvas X axis, so
+            // cursor advances in the *pre-Th* frame: (w/1000 + spacing) * Tfs.
+            // Multiplying by Th again here would double-apply the horizontal
+            // scale and over-shoot per-glyph spacing under any non-default Tz.
             float cursor = 0f;
             float tc = _textState.CharSpacing;
             float tw = _textState.WordSpacing;
-            float th = _textState.HorizontalScale / 100.0f;
             for (int i = 0; i < sourceBytes!.Length; i++)
             {
                 _canvas.DrawText(text[i].ToString(), cursor, 0, paint);
@@ -1468,7 +1489,7 @@ internal class RenderContext
                     ? _currentFontWidths[idx]
                     : _currentFontMissingWidth;
                 float spacing = tc + (sourceBytes[i] == 0x20 ? tw : 0f);
-                cursor += (w / 1000f + spacing) * effectiveSize * th;
+                cursor += (w / 1000f + spacing) * effectiveSize;
             }
         }
         else if (_currentByteToGlyph != null && sourceBytes != null)
