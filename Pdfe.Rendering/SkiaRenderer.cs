@@ -2209,7 +2209,18 @@ internal class RenderContext
                 continue;
 
             var appearance = ResolveAppearanceN(annot);
-            if (appearance == null) continue;
+            if (appearance == null)
+            {
+                // No baked /AP /N stream — synthesize a minimal default
+                // appearance for the subtypes commercial viewers
+                // routinely show (interactive widgets, link rectangles,
+                // shape annotations). Without this, signature widgets
+                // and unfilled form fields are invisible and PDFs look
+                // visibly less complete than in Acrobat / Preview /
+                // Chrome.
+                RenderDefaultAppearance(annot);
+                continue;
+            }
 
             // Appearance bbox + matrix.
             if (appearance.GetOptional("BBox") is not Pdfe.Core.Primitives.PdfArray bboxArr ||
@@ -2324,6 +2335,171 @@ internal class RenderContext
                     return s;
             }
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Synthesize a minimum-viable visual for an annotation without
+    /// <c>/AP /N</c>. Modeled after what Acrobat / Preview / Chrome show
+    /// for interactive PDFs — a colored rectangle around the field —
+    /// not a full reproduction of the field's would-be value (we don't
+    /// interpret /DA + /V here; that's a substantial separate feature).
+    /// Covers:
+    /// <list type="bullet">
+    /// <item><c>/Widget</c>: form-field highlight rectangle (background
+    ///   from <c>/MK /BG</c> if present, border from <c>/MK /BC</c>
+    ///   plus the <c>/BS</c> width, falling back to a neutral
+    ///   light-blue field highlight similar to Acrobat's default).</item>
+    /// <item><c>/Link</c>: thin border using the annotation's <c>/C</c>
+    ///   color when present (links without /C are intentionally
+    ///   invisible in print, matching every commercial viewer).</item>
+    /// <item><c>/Square</c> / <c>/Circle</c>: stroked rectangle / ellipse
+    ///   using <c>/C</c> + <c>/BS</c>.</item>
+    /// </list>
+    /// </summary>
+    private void RenderDefaultAppearance(Pdfe.Core.Document.PdfAnnotation annot)
+    {
+        // PDF Y-up Rect; normalize so min < max.
+        float rx1 = (float)Math.Min(annot.Rect.Left, annot.Rect.Right);
+        float ry1 = (float)Math.Min(annot.Rect.Bottom, annot.Rect.Top);
+        float rx2 = (float)Math.Max(annot.Rect.Left, annot.Rect.Right);
+        float ry2 = (float)Math.Max(annot.Rect.Bottom, annot.Rect.Top);
+        if (rx2 - rx1 < 0.5f || ry2 - ry1 < 0.5f) return;
+
+        var rect = new SKRect(rx1, ry1, rx2, ry2);
+
+        switch (annot.Subtype)
+        {
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Widget:
+                RenderWidgetDefault(annot, rect);
+                break;
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Link:
+                RenderLinkDefault(annot, rect);
+                break;
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Square:
+                RenderShapeDefault(annot, rect, isEllipse: false);
+                break;
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Circle:
+                RenderShapeDefault(annot, rect, isEllipse: true);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Render the standard "interactive form field" highlight for a
+    /// Widget annotation that lacks a baked appearance. Background fill
+    /// from <c>/MK /BG</c>, border from <c>/MK /BC</c> + <c>/BS /W</c>,
+    /// otherwise a light-blue rectangle similar to what Acrobat draws for
+    /// unfilled fields.
+    /// </summary>
+    private void RenderWidgetDefault(Pdfe.Core.Document.PdfAnnotation annot, SKRect rect)
+    {
+        var mk = annot.RawDictionary.GetOptional("MK") is { } mkObj
+            ? _page.Document.Resolve(mkObj) as Pdfe.Core.Primitives.PdfDictionary
+            : null;
+
+        var bgColor = mk != null ? ParseColorArray(mk.GetOptional("BG")) : null;
+        var bcColor = mk != null ? ParseColorArray(mk.GetOptional("BC")) : null;
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+
+        _canvas.Save();
+        try
+        {
+            using var paint = new SKPaint { IsAntialias = _options.AntiAlias };
+
+            if (bgColor.HasValue)
+            {
+                paint.Style = SKPaintStyle.Fill;
+                paint.Color = bgColor.Value;
+                _canvas.DrawRect(rect, paint);
+            }
+
+            // The border color, when /MK /BC isn't supplied, defaults to a
+            // light-blue field highlight (#A6CFFF-ish at 50% alpha) — this
+            // is what users expect: "there's a fillable field here." Real
+            // viewers vary (Acrobat blue, Foxit gray, mutool orange),
+            // anything visible is better than nothing.
+            paint.Style = SKPaintStyle.Stroke;
+            paint.StrokeWidth = borderWidth;
+            paint.Color = bcColor ?? new SKColor(0x66, 0x99, 0xFF, 0xFF);
+            _canvas.DrawRect(rect, paint);
+        }
+        finally
+        {
+            _canvas.Restore();
+        }
+    }
+
+    /// <summary>
+    /// Stroke a thin border around a /Link annotation when /C is set —
+    /// mimics Acrobat's "show all link borders" default. Without /C the
+    /// link is invisible in print, which matches every commercial viewer.
+    /// </summary>
+    private void RenderLinkDefault(Pdfe.Core.Document.PdfAnnotation annot, SKRect rect)
+    {
+        if (annot.Color is not { } color) return;
+        var (r, g, b) = color;
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = _options.AntiAlias,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = borderWidth,
+            Color = RgbToColor(r, g, b),
+        };
+        _canvas.DrawRect(rect, paint);
+    }
+
+    /// <summary>
+    /// Stroke a Square or Circle annotation outline using its /C color
+    /// and /BS width. These annotations are rare without /AP — most
+    /// authoring tools bake an appearance — but the few that don't
+    /// fall back here.
+    /// </summary>
+    private void RenderShapeDefault(
+        Pdfe.Core.Document.PdfAnnotation annot, SKRect rect, bool isEllipse)
+    {
+        if (annot.Color is not { } color) return;
+        var (r, g, b) = color;
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = _options.AntiAlias,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = borderWidth,
+            Color = RgbToColor(r, g, b),
+        };
+        if (isEllipse) _canvas.DrawOval(rect, paint);
+        else _canvas.DrawRect(rect, paint);
+    }
+
+    /// <summary>
+    /// Parse a PDF color array (1, 3, or 4 components — gray / RGB /
+    /// CMYK) into an SKColor. Returns null when the value isn't a valid
+    /// array of numbers.
+    /// </summary>
+    private SKColor? ParseColorArray(Pdfe.Core.Primitives.PdfObject? obj)
+    {
+        if (obj == null) return null;
+        var resolved = _page.Document.Resolve(obj);
+        if (resolved is not Pdfe.Core.Primitives.PdfArray arr || arr.Count == 0) return null;
+        try
+        {
+            switch (arr.Count)
+            {
+                case 1:
+                    return GrayToColor(arr.GetNumber(0));
+                case 3:
+                    return RgbToColor(arr.GetNumber(0), arr.GetNumber(1), arr.GetNumber(2));
+                case 4:
+                    return CmykToColor(
+                        arr.GetNumber(0), arr.GetNumber(1),
+                        arr.GetNumber(2), arr.GetNumber(3));
+            }
+        }
+        catch { }
         return null;
     }
 
