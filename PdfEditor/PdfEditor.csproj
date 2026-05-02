@@ -46,6 +46,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+
+    <!-- Pin transitive Tmds.DBus.Protocol above the GHSA-xrw6-gwf8-vvr9
+         vulnerable range (< 0.92.0). Avalonia 11.2.5 brings in 0.20.0,
+         which fails NU1903 with a high-severity advisory. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.92.0" />
   </ItemGroup>
 
   <ItemGroup>
