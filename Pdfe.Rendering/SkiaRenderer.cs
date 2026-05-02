@@ -124,6 +124,16 @@ internal class RenderContext
     private readonly Dictionary<string, ushort[]?> _embeddedTypefaceByteToGlyph = new();
     private ushort[]? _currentByteToGlyph;
 
+    // Stack of /Resources dictionaries currently active. The page's own
+    // /Resources is the bottom; entering a Form XObject pushes its own
+    // /Resources (or null when absent — we still push so push/pop pair).
+    // Font and XObject lookups walk top-down, falling back to page
+    // resources at the bottom of the stack. Without this, annotation
+    // appearances and nested Form XObjects can't see the fonts and
+    // images defined in their own /Resources, so text in /AP /N streams
+    // either rendered with wrong fonts or not at all.
+    private readonly Stack<Pdfe.Core.Primitives.PdfDictionary?> _resourcesStack = new();
+
     // Type0 / CID font state. Type0 fonts use 2-byte-per-character codes and
     // index a descendant font's /W array for widths (different format from the
     // simple-font /Widths). When _currentFontIsType0 is true, content-stream
@@ -157,29 +167,44 @@ internal class RenderContext
     {
         try
         {
+            // Page resources sit at the bottom of the stack. Form XObjects
+            // (incl. annotation appearances) push their own /Resources on
+            // top of this when entered; lookups fall back to the page when
+            // a name isn't defined locally.
+            _resourcesStack.Push(_page.Resources);
+
             var contentBytes = _page.GetContentStreamBytes();
-            if (contentBytes.Length == 0)
-                return;
-
-            var content = Encoding.Latin1.GetString(contentBytes);
-            var tokens = Tokenize(content);
-            var operands = new List<string>();
-
-            foreach (var token in tokens)
+            if (contentBytes.Length > 0)
             {
-                if (IsOperator(token))
+                var content = Encoding.Latin1.GetString(contentBytes);
+                var tokens = Tokenize(content);
+                var operands = new List<string>();
+
+                foreach (var token in tokens)
                 {
-                    ExecuteOperator(token, operands);
-                    operands.Clear();
-                }
-                else
-                {
-                    operands.Add(token);
+                    if (IsOperator(token))
+                    {
+                        ExecuteOperator(token, operands);
+                        operands.Clear();
+                    }
+                    else
+                    {
+                        operands.Add(token);
+                    }
                 }
             }
+
+            // Annotations render on top of page content — sticky notes,
+            // FreeText callouts, Widget appearances, etc. live in the
+            // page's /Annots array as separate Form XObjects rather than
+            // in the content stream. Without this pass, pages where the
+            // visible text is entirely in annotations (a common veraPDF
+            // PDF/UA fixture pattern) come out blank.
+            RenderAnnotations();
         }
         finally
         {
+            _resourcesStack.Clear();
             foreach (var typeface in _embeddedTypefaces.Values)
                 typeface.Dispose();
             _embeddedTypefaces.Clear();
@@ -715,8 +740,10 @@ internal class RenderContext
         _textState.FontName = fontName;
         _textState.FontSize = (float)fontSize;
 
-        // Try to get the font from page resources to determine the base font and encoding
-        var fontDict = _page.GetFont(fontName);
+        // Try to get the font from the active resources (innermost Form
+        // XObject's /Resources, falling back to the page) to determine the
+        // base font and encoding.
+        var fontDict = ResolveFontFromActiveResources(fontName);
         var baseFont = fontDict?.GetNameOrNull("BaseFont") ?? "Helvetica";
 
         // /Encoding can be either a Name (e.g. /WinAnsiEncoding) or a Dictionary
@@ -1781,7 +1808,7 @@ internal class RenderContext
     {
         // Remove leading / if present
         var name = nameOperand.TrimStart('/');
-        var xobj = _page.GetXObject(name);
+        var xobj = ResolveXObjectFromActiveResources(name);
         if (xobj == null)
             return;
 
@@ -1998,6 +2025,154 @@ internal class RenderContext
         return bmp;
     }
 
+    /// <summary>
+    /// Render every visible annotation on the page on top of the main
+    /// content. Each annotation's <c>/AP /N</c> stream is a Form XObject
+    /// in the appearance's own coordinate space; we compute the matrix
+    /// that maps its <c>/BBox</c> (transformed by /Matrix) onto the
+    /// annotation's <c>/Rect</c> per ISO 32000-2 §12.5.5, then dispatch
+    /// the appearance through the existing Form XObject pipeline.
+    /// Annotations without an /AP entry are skipped — synthesizing a
+    /// default appearance from /Subtype-specific properties (sticky-note
+    /// icon, link rectangles, etc.) is handled separately, if at all.
+    /// </summary>
+    private void RenderAnnotations()
+    {
+        IReadOnlyList<Pdfe.Core.Document.PdfAnnotation> annots;
+        try { annots = _page.GetAnnotations(); }
+        catch { return; }
+        if (annots.Count == 0) return;
+
+        foreach (var annot in annots)
+        {
+            // Skip annotations the spec says shouldn't be displayed.
+            // Print=4 is fine — that's an opt-in for *also* including
+            // the annotation in printed output, not a "screen only" flag.
+            var f = annot.Flags;
+            if ((f & (Pdfe.Core.Document.PdfAnnotationFlags.Hidden
+                    | Pdfe.Core.Document.PdfAnnotationFlags.NoView
+                    | Pdfe.Core.Document.PdfAnnotationFlags.Invisible)) != 0)
+                continue;
+
+            var appearance = ResolveAppearanceN(annot);
+            if (appearance == null) continue;
+
+            // Appearance bbox + matrix.
+            if (appearance.GetOptional("BBox") is not Pdfe.Core.Primitives.PdfArray bboxArr ||
+                bboxArr.Count < 4) continue;
+            float bx1 = (float)bboxArr.GetNumber(0);
+            float by1 = (float)bboxArr.GetNumber(1);
+            float bx2 = (float)bboxArr.GetNumber(2);
+            float by2 = (float)bboxArr.GetNumber(3);
+            float bMinX = Math.Min(bx1, bx2);
+            float bMinY = Math.Min(by1, by2);
+            float bMaxX = Math.Max(bx1, bx2);
+            float bMaxY = Math.Max(by1, by2);
+
+            var formMatrix = SKMatrix.Identity;
+            if (appearance.GetOptional("Matrix") is Pdfe.Core.Primitives.PdfArray mArr && mArr.Count >= 6)
+            {
+                formMatrix = new SKMatrix(
+                    (float)mArr.GetNumber(0), (float)mArr.GetNumber(2), (float)mArr.GetNumber(4),
+                    (float)mArr.GetNumber(1), (float)mArr.GetNumber(3), (float)mArr.GetNumber(5),
+                    0, 0, 1);
+            }
+
+            // Transform the four bbox corners through the form's /Matrix
+            // and take the axis-aligned bounding box of the result. Spec
+            // step from §12.5.5: "a quadrilateral whose corners are the
+            // four corners of BBox transformed by Matrix … then the
+            // smallest rectangle enclosing those four points."
+            var p1 = formMatrix.MapPoint(new SKPoint(bMinX, bMinY));
+            var p2 = formMatrix.MapPoint(new SKPoint(bMaxX, bMinY));
+            var p3 = formMatrix.MapPoint(new SKPoint(bMaxX, bMaxY));
+            var p4 = formMatrix.MapPoint(new SKPoint(bMinX, bMaxY));
+            float bbMinX = Math.Min(Math.Min(p1.X, p2.X), Math.Min(p3.X, p4.X));
+            float bbMinY = Math.Min(Math.Min(p1.Y, p2.Y), Math.Min(p3.Y, p4.Y));
+            float bbMaxX = Math.Max(Math.Max(p1.X, p2.X), Math.Max(p3.X, p4.X));
+            float bbMaxY = Math.Max(Math.Max(p1.Y, p2.Y), Math.Max(p3.Y, p4.Y));
+            if (bbMaxX <= bbMinX || bbMaxY <= bbMinY) continue;
+
+            // Annotation /Rect (PDF stores [llx lly urx ury], but some
+            // producers swap pairs — normalize both ways).
+            float rx1 = (float)Math.Min(annot.Rect.Left, annot.Rect.Right);
+            float ry1 = (float)Math.Min(annot.Rect.Bottom, annot.Rect.Top);
+            float rx2 = (float)Math.Max(annot.Rect.Left, annot.Rect.Right);
+            float ry2 = (float)Math.Max(annot.Rect.Bottom, annot.Rect.Top);
+            if (rx2 <= rx1 || ry2 <= ry1) continue;
+
+            // A = scale + translate that maps the AABB of the transformed
+            // bbox onto Rect. RenderFormXObject will additionally concat
+            // the form's own Matrix, so the final on-page transform is
+            // A · Matrix, which by construction takes BBox → Rect.
+            float sx = (rx2 - rx1) / (bbMaxX - bbMinX);
+            float sy = (ry2 - ry1) / (bbMaxY - bbMinY);
+            float tx = rx1 - bbMinX * sx;
+            float ty = ry1 - bbMinY * sy;
+            var fitMatrix = new SKMatrix(sx, 0, tx, 0, sy, ty, 0, 0, 1);
+
+            _canvas.Save();
+            try
+            {
+                _canvas.Concat(ref fitMatrix);
+                RenderFormXObject(appearance);
+            }
+            catch
+            {
+                // Never let one malformed annotation kill the rest of
+                // the page; it's strictly an overlay on top of content
+                // we've already successfully rendered.
+            }
+            finally
+            {
+                _canvas.Restore();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolve <paramref name="annot"/>'s normal appearance to a Form
+    /// XObject stream. <c>/AP /N</c> is either:
+    /// <list type="bullet">
+    /// <item>a single stream — used regardless of state, or</item>
+    /// <item>a dictionary keyed by state name (Off / Yes / etc.) where
+    ///   <c>/AS</c> picks the active entry — Widget annotations and
+    ///   appearance-stateful ones use this.</item>
+    /// </list>
+    /// Returns null when no usable appearance is present.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfStream? ResolveAppearanceN(Pdfe.Core.Document.PdfAnnotation annot)
+    {
+        var apObj = annot.RawDictionary.GetOptional("AP");
+        if (apObj == null) return null;
+        if (_page.Document.Resolve(apObj) is not Pdfe.Core.Primitives.PdfDictionary ap) return null;
+        var nObj = ap.GetOptional("N");
+        if (nObj == null) return null;
+        var resolved = _page.Document.Resolve(nObj);
+
+        if (resolved is Pdfe.Core.Primitives.PdfStream stream)
+            return stream;
+
+        if (resolved is Pdfe.Core.Primitives.PdfDictionary stateDict)
+        {
+            var stateName = annot.RawDictionary.GetNameOrNull("AS");
+            if (stateName != null)
+            {
+                var stateObj = stateDict.GetOptional(stateName);
+                if (stateObj != null &&
+                    _page.Document.Resolve(stateObj) is Pdfe.Core.Primitives.PdfStream s)
+                    return s;
+            }
+            // No /AS or unknown state — fall through to first usable entry.
+            foreach (var kvp in stateDict)
+            {
+                if (_page.Document.Resolve(kvp.Value) is Pdfe.Core.Primitives.PdfStream s)
+                    return s;
+            }
+        }
+        return null;
+    }
+
     private void RenderFormXObject(Pdfe.Core.Primitives.PdfStream formStream)
     {
         // Cycle detection: a Form XObject that ends up invoking itself
@@ -2032,39 +2207,56 @@ internal class RenderContext
 
         _canvas.Save();
 
-        // Apply the form's transformation matrix if present
-        var matrixArray = formStream.GetOptional("Matrix") as Pdfe.Core.Primitives.PdfArray;
-        if (matrixArray != null && matrixArray.Count >= 6)
+        // Push the form's own /Resources so font / XObject lookups inside
+        // its content stream resolve against the form's resource dict
+        // first (with fallback to outer scopes via the resources stack).
+        // PDF 32000-2 §7.8.3: a Form XObject inherits resources from its
+        // page, so falling through is required for forms that omit names
+        // their content references.
+        var formResources = formStream.GetOptional("Resources") is { } resObj
+            ? _page.Document.Resolve(resObj) as Pdfe.Core.Primitives.PdfDictionary
+            : null;
+        _resourcesStack.Push(formResources);
+
+        try
         {
-            var a = (float)matrixArray.GetNumber(0);
-            var b = (float)matrixArray.GetNumber(1);
-            var c = (float)matrixArray.GetNumber(2);
-            var d = (float)matrixArray.GetNumber(3);
-            var e = (float)matrixArray.GetNumber(4);
-            var f = (float)matrixArray.GetNumber(5);
-            var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
-            _canvas.Concat(ref matrix);
+            // Apply the form's transformation matrix if present
+            var matrixArray = formStream.GetOptional("Matrix") as Pdfe.Core.Primitives.PdfArray;
+            if (matrixArray != null && matrixArray.Count >= 6)
+            {
+                var a = (float)matrixArray.GetNumber(0);
+                var b = (float)matrixArray.GetNumber(1);
+                var c = (float)matrixArray.GetNumber(2);
+                var d = (float)matrixArray.GetNumber(3);
+                var e = (float)matrixArray.GetNumber(4);
+                var f = (float)matrixArray.GetNumber(5);
+                var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
+                _canvas.Concat(ref matrix);
+            }
+
+            // Parse and render the form's content stream
+            var content = Encoding.Latin1.GetString(formContent);
+            var tokens = Tokenize(content);
+            var operands = new List<string>();
+
+            foreach (var token in tokens)
+            {
+                if (IsOperator(token))
+                {
+                    ExecuteOperator(token, operands);
+                    operands.Clear();
+                }
+                else
+                {
+                    operands.Add(token);
+                }
+            }
         }
-
-        // Parse and render the form's content stream
-        var content = Encoding.Latin1.GetString(formContent);
-        var tokens = Tokenize(content);
-        var operands = new List<string>();
-
-        foreach (var token in tokens)
+        finally
         {
-            if (IsOperator(token))
-            {
-                ExecuteOperator(token, operands);
-                operands.Clear();
-            }
-            else
-            {
-                operands.Add(token);
-            }
+            _resourcesStack.Pop();
+            _canvas.Restore();
         }
-
-        _canvas.Restore();
     }
 
     #endregion
@@ -2352,6 +2544,50 @@ internal class RenderContext
         if (csObj != null)
             return PdfColorSpace.Parse(csObj, _page.Document);
 
+        return null;
+    }
+
+    /// <summary>
+    /// Walk the resources stack top-down looking for a font definition.
+    /// The innermost Form XObject's /Resources wins; we fall through to
+    /// outer XObjects and finally the page when the name isn't defined
+    /// locally — matches the "inherit if not found" rule from PDF 32000-2
+    /// §7.8.3 for Form XObject resource resolution.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfDictionary? ResolveFontFromActiveResources(string fontName)
+    {
+        foreach (var resources in _resourcesStack)
+        {
+            if (resources == null) continue;
+            var fontsObj = resources.GetOptional("Font");
+            if (fontsObj == null) continue;
+            if (_page.Document.Resolve(fontsObj) is not Pdfe.Core.Primitives.PdfDictionary fonts)
+                continue;
+            var fontObj = fonts.GetOptional(fontName);
+            if (fontObj == null) continue;
+            return _page.Document.Resolve(fontObj) as Pdfe.Core.Primitives.PdfDictionary;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Stack-aware XObject lookup, same fallback rule as
+    /// <see cref="ResolveFontFromActiveResources"/>. Returns the resolved
+    /// XObject (typically a stream); caller checks /Subtype.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfObject? ResolveXObjectFromActiveResources(string name)
+    {
+        foreach (var resources in _resourcesStack)
+        {
+            if (resources == null) continue;
+            var xobjsObj = resources.GetOptional("XObject");
+            if (xobjsObj == null) continue;
+            if (_page.Document.Resolve(xobjsObj) is not Pdfe.Core.Primitives.PdfDictionary xobjs)
+                continue;
+            var x = xobjs.GetOptional(name);
+            if (x == null) continue;
+            return _page.Document.Resolve(x);
+        }
         return null;
     }
 
