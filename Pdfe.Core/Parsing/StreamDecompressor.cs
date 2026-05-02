@@ -46,9 +46,26 @@ public class StreamDecompressor
             "JPXDecode" => data, // JPEG2000 - pass through
             "CCITTFaxDecode" or "CCF" => DecodeCCITTFax(data, parms),
             "JBIG2Decode" => data, // JBIG2 - pass through for now
+            "BrotliDecode" => DecodeBrotli(data),
             "Crypt" => data, // Encryption handled separately
             _ => throw new NotSupportedException($"Unknown filter: {filterName}")
         };
+    }
+
+    /// <summary>
+    /// Decompress a Brotli-encoded stream. PDF 2.0 added /BrotliDecode
+    /// as an experimental filter; pdf.js's <c>Brotli-Prototype-FileA.pdf</c>
+    /// fixture exercises this path. .NET's BrotliStream gives us the
+    /// decoder for free — same shape as DecodeFlateDecode.
+    /// </summary>
+    private static byte[] DecodeBrotli(byte[] data)
+    {
+        using var input = new MemoryStream(data);
+        using var brotli = new System.IO.Compression.BrotliStream(
+            input, System.IO.Compression.CompressionMode.Decompress, leaveOpen: false);
+        using var output = new MemoryStream();
+        brotli.CopyTo(output);
+        return output.ToArray();
     }
 
     /// <summary>

@@ -1731,13 +1731,20 @@ internal class RenderContext
             var filters = imageStream.Filters;
             if (filters.Contains("DCTDecode"))
             {
-                // JPEG data - decode directly
-                bitmap = SKBitmap.Decode(imageStream.EncodedData);
+                // JPEG data - decode directly. SafeDecode null-guards
+                // the encoded bytes and swallows SkiaSharp internal
+                // exceptions (ArgumentNullException 'codec', etc.) on
+                // malformed inputs so a single bad image doesn't kill
+                // the whole page.
+                bitmap = SafeDecode(imageStream.EncodedData);
             }
             else if (filters.Contains("JPXDecode"))
             {
-                // JPEG 2000 data - try platform codec, fall back to placeholder
-                bitmap = SKBitmap.Decode(imageStream.EncodedData);
+                // JPEG 2000 data — SkiaSharp's stock build has no JPX
+                // codec on Linux, so SKBitmap.Decode returns null or
+                // throws ArgumentNullException with codec=null. Either
+                // way we fall back to the placeholder.
+                bitmap = SafeDecode(imageStream.EncodedData);
                 if (bitmap == null && width > 0 && height > 0)
                     bitmap = CreatePlaceholderBitmap(width, height);
             }
@@ -1871,6 +1878,29 @@ internal class RenderContext
         }
 
         return bitmap;
+    }
+
+    /// <summary>
+    /// Wrap SKBitmap.Decode so any exception (ArgumentNullException
+    /// when SkiaSharp can't find a codec for this image format,
+    /// AccessViolationException on truncated/corrupt input, etc.)
+    /// returns null instead of propagating up and crashing the
+    /// page render. Found by the pdf.js corpus differential —
+    /// 8 fixtures with JPEG2000 inline images caused
+    /// "Value cannot be null. (Parameter 'codec')" because
+    /// SkiaSharp's Linux build ships without a JPX codec.
+    /// </summary>
+    private static SKBitmap? SafeDecode(byte[]? bytes)
+    {
+        if (bytes == null || bytes.Length == 0) return null;
+        try
+        {
+            return SKBitmap.Decode(bytes);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static SKBitmap CreatePlaceholderBitmap(int width, int height)
