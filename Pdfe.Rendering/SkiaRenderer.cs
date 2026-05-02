@@ -619,37 +619,63 @@ internal class RenderContext
 
     private void ApplyTransform(List<string> operands)
     {
-        var a = (float)ParseNumber(operands[0]);
-        var b = (float)ParseNumber(operands[1]);
-        var c = (float)ParseNumber(operands[2]);
-        var d = (float)ParseNumber(operands[3]);
-        var e = (float)ParseNumber(operands[4]);
-        var f = (float)ParseNumber(operands[5]);
+        // Clamp matrix components to PDF 32000-2 §6.1.12's
+        // "implementation limit" range. Values larger than ±32767 are
+        // outside the spec's guaranteed range and either cause Skia's
+        // accumulated CTM to overflow into NaN/Inf (so subsequent draws
+        // collapse to nothing) or push content astronomically far
+        // off-page. Real PDFs never have values this big; conformance
+        // tests like A019-pdfa2-pass-* use ±FLT_MAX to verify the
+        // reader degrades gracefully. Clamping matches mutool's policy.
+        var a = ClampMatrix(ParseNumber(operands[0]));
+        var b = ClampMatrix(ParseNumber(operands[1]));
+        var c = ClampMatrix(ParseNumber(operands[2]));
+        var d = ClampMatrix(ParseNumber(operands[3]));
+        var e = ClampMatrix(ParseNumber(operands[4]));
+        var f = ClampMatrix(ParseNumber(operands[5]));
 
         var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
         _canvas.Concat(ref matrix);
+    }
+
+    private const float MatrixComponentMax = 32767f;
+    private static float ClampMatrix(double v)
+    {
+        if (double.IsNaN(v) || double.IsInfinity(v)) return 0f;
+        if (v > MatrixComponentMax) return MatrixComponentMax;
+        if (v < -MatrixComponentMax) return -MatrixComponentMax;
+        return (float)v;
     }
 
     #endregion
 
     #region Path Construction
 
+    // Path coordinates are subject to the same PDF 32000-2 §6.1.12
+    // implementation-limit as matrix components. Conformance fixtures
+    // (A019-pdfa2-pass-*) put ±FLT_MAX in `l` to verify the reader
+    // doesn't crash or freeze; clamping keeps the path representable
+    // in Skia's float matrix without overflowing. Real PDFs always
+    // stay within page bounds (typically <5000 pt).
     private void MoveTo(double x, double y)
     {
         _currentPath ??= new SKPath();
-        _currentPath.MoveTo((float)x, (float)y);
+        _currentPath.MoveTo(ClampMatrix(x), ClampMatrix(y));
     }
 
     private void LineTo(double x, double y)
     {
         _currentPath ??= new SKPath();
-        _currentPath.LineTo((float)x, (float)y);
+        _currentPath.LineTo(ClampMatrix(x), ClampMatrix(y));
     }
 
     private void CurveTo(double x1, double y1, double x2, double y2, double x3, double y3)
     {
         _currentPath ??= new SKPath();
-        _currentPath.CubicTo((float)x1, (float)y1, (float)x2, (float)y2, (float)x3, (float)y3);
+        _currentPath.CubicTo(
+            ClampMatrix(x1), ClampMatrix(y1),
+            ClampMatrix(x2), ClampMatrix(y2),
+            ClampMatrix(x3), ClampMatrix(y3));
     }
 
     private void CurveToV(double x2, double y2, double x3, double y3)
