@@ -243,6 +243,15 @@ public class PdfSearchService
             {
                 matches.AddRange(SearchSubstring(pageText, words, searchTerm, pageIndex, caseSensitive));
             }
+
+            // Annotation text (sticky-note bodies, free-text callouts,
+            // filled form-field values) lives outside the page content
+            // stream and is invisible to page.Text / page.GetWords().
+            // Without this scan, find-in-document silently misses every
+            // comment and form value — exactly the case the renderer
+            // started covering once /AP / /Contents / /V got wired in.
+            matches.AddRange(SearchAnnotations(page, searchTerm, pageIndex,
+                caseSensitive, wholeWordsOnly, useRegex));
         }
         catch (Exception ex)
         {
@@ -251,6 +260,150 @@ public class PdfSearchService
         }
 
         return matches;
+    }
+
+    /// <summary>
+    /// Walk a page's <c>/Annots</c> array and search the body text
+    /// fields users expect to be searchable: <c>/Contents</c> for
+    /// markup annotations (Text, FreeText, Highlight, Stamp, etc.) and
+    /// <c>/V</c> for filled form-field widgets. Each match is reported
+    /// at the annotation's <c>/Rect</c> — granular per-glyph positions
+    /// aren't available without parsing the appearance stream, and the
+    /// rect is what users want to highlight anyway.
+    /// </summary>
+    private IEnumerable<SearchMatch> SearchAnnotations(
+        PdfPage page,
+        string searchTerm,
+        int pageIndex,
+        bool caseSensitive,
+        bool wholeWordsOnly,
+        bool useRegex)
+    {
+        IReadOnlyList<PdfAnnotation> annots;
+        try { annots = page.GetAnnotations(); }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GetAnnotations failed on page {PageIndex}", pageIndex);
+            yield break;
+        }
+
+        foreach (var annot in annots)
+        {
+            // /Contents — body text for sticky notes, FreeText callouts,
+            // markup tooltips, etc.
+            var contents = annot.Contents;
+            if (!string.IsNullOrEmpty(contents))
+            {
+                foreach (var m in MatchAnnotationText(
+                    contents!, annot, pageIndex, "annotation",
+                    searchTerm, caseSensitive, wholeWordsOnly, useRegex))
+                    yield return m;
+            }
+
+            // /V — current value of a form widget. Pull a string out of
+            // the raw dict (annot.V isn't exposed on PdfAnnotation since
+            // it's field-level, but the underlying RawDictionary keeps it).
+            var vObj = annot.RawDictionary.GetOptional("V");
+            if (vObj is Pdfe.Core.Primitives.PdfString vStr)
+            {
+                if (!string.IsNullOrEmpty(vStr.Value))
+                {
+                    foreach (var m in MatchAnnotationText(
+                        vStr.Value, annot, pageIndex, "form value",
+                        searchTerm, caseSensitive, wholeWordsOnly, useRegex))
+                        yield return m;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Apply the same matching mode (substring / whole-word / regex)
+    /// the page-content path uses, but on a single annotation-text
+    /// blob. Each match emits a SearchMatch positioned at the
+    /// annotation's rect (caller doesn't have per-character positions
+    /// in this text source).
+    /// </summary>
+    private IEnumerable<SearchMatch> MatchAnnotationText(
+        string text,
+        PdfAnnotation annot,
+        int pageIndex,
+        string source,
+        string searchTerm,
+        bool caseSensitive,
+        bool wholeWordsOnly,
+        bool useRegex)
+    {
+        var rect = annot.Rect;
+        StringComparison cmp = caseSensitive
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
+
+        if (useRegex)
+        {
+            Regex regex;
+            try
+            {
+                regex = new Regex(searchTerm,
+                    caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
+            }
+            catch (ArgumentException) { yield break; }
+            foreach (Match match in regex.Matches(text))
+            {
+                yield return BuildAnnotationMatch(rect, pageIndex, match.Value, text, match.Index, match.Length, source);
+            }
+            yield break;
+        }
+
+        if (wholeWordsOnly)
+        {
+            // Word boundaries via regex with the literal term escaped.
+            var pattern = $@"\b{Regex.Escape(searchTerm)}\b";
+            var regex = new Regex(pattern,
+                caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
+            foreach (Match match in regex.Matches(text))
+            {
+                yield return BuildAnnotationMatch(rect, pageIndex, match.Value, text, match.Index, match.Length, source);
+            }
+            yield break;
+        }
+
+        // Substring search.
+        int startIndex = 0;
+        while (startIndex < text.Length)
+        {
+            int found = text.IndexOf(searchTerm, startIndex, cmp);
+            if (found < 0) break;
+            yield return BuildAnnotationMatch(
+                rect, pageIndex,
+                text.Substring(found, searchTerm.Length),
+                text, found, searchTerm.Length, source);
+            startIndex = found + Math.Max(1, searchTerm.Length);
+        }
+    }
+
+    private SearchMatch BuildAnnotationMatch(
+        Pdfe.Core.Document.PdfRectangle rect,
+        int pageIndex,
+        string matched,
+        string fullText,
+        int matchIndex,
+        int matchLength,
+        string source)
+    {
+        return new SearchMatch
+        {
+            PageIndex = pageIndex,
+            MatchedText = matched,
+            // Position: the annotation's /Rect (PDF Y-up). Normalize
+            // so X/Y are the lower-left corner regardless of how the
+            // PDF stored the rect ordering.
+            X = Math.Min(rect.Left, rect.Right),
+            Y = Math.Min(rect.Bottom, rect.Top),
+            Width = Math.Abs(rect.Right - rect.Left),
+            Height = Math.Abs(rect.Top - rect.Bottom),
+            Context = GetContext(fullText, matchIndex, matchLength) + $" [in {source}]",
+        };
     }
 
     /// <summary>
