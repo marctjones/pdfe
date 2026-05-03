@@ -174,13 +174,18 @@ public class AutomationScriptTests
         _output.WriteLine("Known words correctly redacted from known PDF");
     }
 
-    [Fact(Skip = "Requires corpus download - run ./scripts/download-test-pdfs.sh first")]
+    [Fact]
     public async Task AutomationScript_VeraPdfCorpusSample_ExecutesSuccessfully()
     {
-        // Test redaction across diverse PDF standards from veraPDF corpus
-        // Note: This test requires:
-        // 1. veraPDF corpus downloaded via ./scripts/download-test-pdfs.sh
-        // 2. GUI scripting redaction to work with diverse PDF structures
+        // Test redaction across diverse PDF standards from veraPDF corpus.
+        //
+        // The unconditional [Fact(Skip = ...)] this test used to carry made it
+        // impossible to enable even when the corpus IS present locally. The
+        // companion .csx (automation-scripts/test-verapdf-corpus-sample.csx)
+        // already self-skips by returning 0 with a "veraPDF corpus not found"
+        // message when test-pdfs/verapdf-corpus is missing — that's the
+        // single source of truth for the corpus-presence gate. No need to
+        // duplicate it as an attribute Skip.
         //
         // Issue #190 FIX: Now uses file-based TextRedactor API (like CLI)
         // which bypasses coordinate conversion issues.
