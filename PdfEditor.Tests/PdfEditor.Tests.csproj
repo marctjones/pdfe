@@ -4,7 +4,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <NoWarn>CA1416</NoWarn>
+    <!-- CA1416: platform-specific API warnings — irrelevant for the
+         cross-platform PDF rendering test surface.
+         xUnit1051: nudges to thread TestContext.Current.CancellationToken
+         into every CT-accepting overload. The test responsiveness payoff is
+         marginal here (most tests are sub-second) and rolling it across the
+         600+ test methods would be churn for very little signal. -->
+    <NoWarn>$(NoWarn);CA1416;xUnit1051</NoWarn>
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>

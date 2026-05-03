@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
@@ -34,7 +35,7 @@ public class RevealHiddenTextTests : IDisposable
         => new Pdfe.Ocr.PdfOcrService().IsAvailable();
 
     [Fact]
-    public void RevealToggle_FlushesHighlightsForHiddenText()
+    public async Task RevealToggle_FlushesHighlightsForHiddenText()
     {
         // Arrange: build a PDF with "SECRET INFO 12345" covered by a
         // black rectangle drawn on top (classic bad redaction).
@@ -45,7 +46,7 @@ public class RevealHiddenTextTests : IDisposable
         var vm = new MainWindowViewModel();
 
         // Act: simulate the user's workflow — load the PDF, flip the toggle.
-        vm.LoadDocumentCommand(path).GetAwaiter().GetResult();
+        await vm.LoadDocumentCommand(path);
         vm.CurrentPageIndex = 0;
         vm.RevealHiddenText.Should().BeFalse("default off");
         vm.HiddenTextHighlights.Should().BeEmpty("nothing populated until revealed");
@@ -69,17 +70,17 @@ public class RevealHiddenTextTests : IDisposable
         vm.HiddenTextHighlights.Should().BeEmpty();
     }
 
-    [SkippableFact]
-    public void RevealRasterizedHidden_FindsTextHiddenByOverlayInsideImage()
+    [Fact]
+    public async Task RevealRasterizedHidden_FindsTextHiddenByOverlayInsideImage()
     {
-        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+        Assert.SkipUnless(TesseractAvailable, "tesseract CLI not installed");
 
         var path = Path.Combine(Path.GetTempPath(), $"raster-reveal-{Guid.NewGuid():N}.pdf");
         _tempFiles.Add(path);
         File.WriteAllBytes(path, BuildRasterWithOverlayPdf());
 
         var vm = new MainWindowViewModel();
-        vm.LoadDocumentCommand(path).GetAwaiter().GetResult();
+        await vm.LoadDocumentCommand(path);
         vm.CurrentPageIndex = 0;
 
         // Structural-only — should find nothing because the text only

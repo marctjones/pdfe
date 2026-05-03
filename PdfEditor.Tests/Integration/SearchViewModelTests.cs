@@ -6,8 +6,6 @@ using Avalonia.Headless.XUnit;
 using AwesomeAssertions;
 using PdfEditor.ViewModels;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.Integration;
 
 /// <summary>

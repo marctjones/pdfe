@@ -3,8 +3,6 @@ using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Core.Tests.Document;
 
 /// <summary>

@@ -14,7 +14,6 @@
         Icon="/Assets/pdfe_logo_256.png"
         Width="1200" Height="800"
         ExtendClientAreaToDecorationsHint="True"
-        ExtendClientAreaChromeHints="PreferSystemChrome"
         ExtendClientAreaTitleBarHeightHint="40"
         Background="{DynamicResource AppBackgroundBrush}">
 
@@ -156,7 +155,7 @@
         </Menu>
 
         <!-- Toast Notification InfoBar -->
-        <ui:InfoBar x:Name="ToastInfoBar" Grid.Row="1" IsOpen="False" IsClosable="True" Margin="0"/>
+        <ui:FAInfoBar x:Name="ToastInfoBar" Grid.Row="1" IsOpen="False" IsClosable="True" Margin="0"/>
 
         <!-- Modern Title Bar Area -->
         <Grid Grid.Row="2" Height="40" Background="{DynamicResource ToolbarBackgroundBrush}"
@@ -334,7 +333,7 @@
                 <TextBox x:Name="SearchTextBox"
                          Grid.Column="1"
                          Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                         Watermark="Search text… (auto-searches as you type, or press Enter)"
+                         PlaceholderText="Search text… (auto-searches as you type, or press Enter)"
                          MinWidth="300"
                          Margin="0,0,8,0"
                          KeyDown="OnSearchTextBoxKeyDown"

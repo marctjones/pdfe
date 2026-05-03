@@ -72,7 +72,6 @@ internal class RenderContext
     private SKPath? _currentPath;
     private TextState _textState;
     private bool _inTextBlock;
-    private bool _inCompatibilitySection;
     private SKTypeface? _currentTypeface;
     private string _currentFontEncoding;
 
@@ -586,12 +585,10 @@ internal class RenderContext
                 }
                 break;
 
-            // Compatibility operators
+            // Compatibility operators (BX/EX) — accepted as no-ops so the
+            // dispatcher consumes them without flagging them as unknown.
             case "BX":
-                _inCompatibilitySection = true;
-                break;
             case "EX":
-                _inCompatibilitySection = false;
                 break;
 
             // Ignore unknown operators
@@ -635,7 +632,7 @@ internal class RenderContext
         var f = ClampMatrix(ParseNumber(operands[5]));
 
         var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
-        _canvas.Concat(ref matrix);
+        _canvas.Concat(in matrix);
     }
 
     private const float MatrixComponentMax = 32767f;
@@ -1471,8 +1468,10 @@ internal class RenderContext
         var effectiveSize = GetEffectiveFontSize();
         var xyRatio = GetTextMatrixXYRatio();
 
+        // SkiaSharp 3 separated SKPaint and SKFont — draw calls now take
+        // both arguments rather than a paint that wraps a font.
         using var font = new SKFont(_currentTypeface, effectiveSize);
-        using var paint = new SKPaint(font)
+        using var paint = new SKPaint
         {
             Color = _state.FillColor,
             BlendMode = _state.BlendMode,
@@ -1550,7 +1549,7 @@ internal class RenderContext
             float tw = _textState.WordSpacing;
             for (int i = 0; i < sourceBytes!.Length; i++)
             {
-                _canvas.DrawText(text[i].ToString(), cursor, 0, paint);
+                _canvas.DrawText(text[i].ToString(), cursor, 0, font, paint);
                 int idx = sourceBytes[i] - _currentFontFirstChar;
                 float w = idx >= 0 && idx < _currentFontWidths!.Length
                     ? _currentFontWidths[idx]
@@ -1563,17 +1562,18 @@ internal class RenderContext
         {
             // The active typeface's cmap is byte-coded (Mac Roman / format-0)
             // and Skia's shaper can't read it. Look each PDF byte code up in
-            // the parsed cmap and dispatch via SKTextEncoding.GlyphId so Skia
-            // draws the explicit glyph indices we already resolved. Without
-            // this branch every glyph would render as .notdef and the page
-            // would be blank.
-            paint.TextEncoding = SKTextEncoding.GlyphId;
-            var glyphBytes = BuildGlyphIdBytes(sourceBytes, _currentByteToGlyph);
-            _canvas.DrawText(glyphBytes, 0, 0, paint);
+            // the parsed cmap and dispatch via SKTextBlob with explicit
+            // glyph IDs (SkiaSharp 3 dropped the DrawText(byte[], …)
+            // overload — SKTextBlob is the supported entry point).
+            // Without this branch every glyph would render as .notdef and
+            // the page would be blank.
+            var gids = BuildGlyphIds(sourceBytes, _currentByteToGlyph);
+            using var blob = BuildGlyphBlob(gids, font);
+            if (blob != null) _canvas.DrawText(blob, 0, 0, paint);
         }
         else
         {
-            _canvas.DrawText(text, 0, 0, paint);
+            _canvas.DrawText(text, 0, 0, font, paint);
         }
         _canvas.Restore();
 
@@ -1598,15 +1598,15 @@ internal class RenderContext
         }
         else if (_currentByteToGlyph != null && sourceBytes != null)
         {
-            // Same byte-coded glyph-ID path as the draw branch above. The
-            // paint already has TextEncoding=GlyphId from the draw call;
-            // measuring the same bytes returns Skia's hmtx-based advance.
-            var glyphBytes = BuildGlyphIdBytes(sourceBytes, _currentByteToGlyph);
-            widthInFontUnits = paint.MeasureText(glyphBytes);
+            // Same byte-coded glyph-ID path as the draw branch above —
+            // SkiaSharp 3 moved MeasureText off SKPaint, the glyph-id
+            // overload now lives on SKFont.
+            var gids = BuildGlyphIds(sourceBytes, _currentByteToGlyph);
+            widthInFontUnits = font.MeasureText(new ReadOnlySpan<ushort>(gids), paint);
         }
         else
         {
-            widthInFontUnits = paint.MeasureText(text);
+            widthInFontUnits = font.MeasureText(text, paint);
         }
 
         var width = widthInFontUnits * xyRatio;
@@ -1654,19 +1654,36 @@ internal class RenderContext
         return total;
     }
 
-    // Pack PDF byte codes into a native-endian ushort buffer of glyph IDs
-    // for SKTextEncoding.GlyphId. Used for simple fonts whose embedded
-    // typeface has only a format-0 cmap; the byte→glyph map was parsed
-    // once at typeface-load time. Same encoding the Type0 path uses
-    // below (Buffer.BlockCopy on little-endian).
-    private static byte[] BuildGlyphIdBytes(byte[] sourceBytes, ushort[] byteToGlyph)
+    // Map PDF byte codes through the format-0 cmap into glyph IDs.
+    // Used for simple fonts whose embedded typeface has only a
+    // format-0 cmap; the byte→glyph map was parsed once at
+    // typeface-load time. SkiaSharp 3 routes glyph IDs through
+    // SKTextBlob (BuildGlyphBlob below) — the v2 byte-array
+    // SKTextEncoding.GlyphId path was removed.
+    private static ushort[] BuildGlyphIds(byte[] sourceBytes, ushort[] byteToGlyph)
     {
         var gids = new ushort[sourceBytes.Length];
         for (int i = 0; i < sourceBytes.Length; i++)
             gids[i] = byteToGlyph[sourceBytes[i]];
-        var glyphBytes = new byte[gids.Length * 2];
-        Buffer.BlockCopy(gids, 0, glyphBytes, 0, glyphBytes.Length);
-        return glyphBytes;
+        return gids;
+    }
+
+    /// <summary>
+    /// Wrap a glyph-id array in an <see cref="SKTextBlob"/> for
+    /// dispatch through <see cref="SKCanvas.DrawText(SKTextBlob,float,float,SKPaint)"/>.
+    /// SkiaSharp 3 dropped <c>SKCanvas.DrawText(byte[], …)</c>, and
+    /// <see cref="SKTextBlob.Create"/> has no <c>ReadOnlySpan&lt;ushort&gt;</c>
+    /// overload — only <c>SKTextBlobBuilder.AddRun</c> takes glyph IDs.
+    /// Origin (0, 0) since the caller has already concatenated the
+    /// right Translate/Scale onto the canvas; per-glyph advance comes
+    /// from the font's hmtx via the run's default positioning.
+    /// </summary>
+    private static SKTextBlob? BuildGlyphBlob(ushort[] gids, SKFont font)
+    {
+        if (gids.Length == 0) return null;
+        using var builder = new SKTextBlobBuilder();
+        builder.AddRun(new ReadOnlySpan<ushort>(gids), font, SKPoint.Empty);
+        return builder.Build();
     }
 
     // Type0 rendering path. Content-stream bytes come in 2-at-a-time as
@@ -1709,13 +1726,15 @@ internal class RenderContext
         var effectiveSize = GetEffectiveFontSize();
         var xyRatio = GetTextMatrixXYRatio();
 
+        // SkiaSharp 3: SKPaint no longer carries the font or text encoding;
+        // SKTextBlob (built below) embeds glyph IDs natively, so DrawText
+        // doesn't need a paint-side encoding hint anymore.
         using var font = new SKFont(_currentTypeface, effectiveSize);
-        using var paint = new SKPaint(font)
+        using var paint = new SKPaint
         {
             Color = _state.FillColor,
             BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias,
-            TextEncoding = SKTextEncoding.GlyphId,
         };
 
         // Match RenderText's Tm.d-aware Y-flip — without this, all CJK text
@@ -1726,13 +1745,12 @@ internal class RenderContext
         _canvas.Translate(_textState.TextMatrixE, _textState.TextMatrixF + _textState.TextRise);
         _canvas.Scale(xyRatio, ySign);
 
-        // SKTextEncoding.GlyphId reads the byte buffer as native-endian ushort
-        // glyph IDs. BlockCopy gives us exactly that on little-endian machines.
-        // Pass the GID array (already remapped through /CIDToGIDMap when
-        // present), not the raw CIDs.
-        var glyphBytes = new byte[gids.Length * 2];
-        Buffer.BlockCopy(gids, 0, glyphBytes, 0, glyphBytes.Length);
-        _canvas.DrawText(glyphBytes, 0, 0, paint);
+        // Build a glyph-id text blob — SkiaSharp 3 routes glyph IDs
+        // through SKTextBlob (the v2 byte[] overload was removed). The
+        // GID array was already remapped through /CIDToGIDMap (or
+        // CFF charset) above, so we feed it straight in.
+        using var blob = BuildGlyphBlob(gids, font);
+        if (blob != null) _canvas.DrawText(blob, 0, 0, paint);
 
         _canvas.Restore();
 
@@ -2305,7 +2323,7 @@ internal class RenderContext
             _canvas.Save();
             try
             {
-                _canvas.Concat(ref fitMatrix);
+                _canvas.Concat(in fitMatrix);
                 RenderFormXObject(appearance);
             }
             catch
@@ -2675,8 +2693,9 @@ internal class RenderContext
 
                 // Measure text to compute alignment. Use the active
                 // typeface so the width matches what we're about to draw.
-                using var measurePaint = new SKPaint(new SKFont(_currentTypeface, fontSize));
-                float textWidth = measurePaint.MeasureText(value);
+                using var measureFont = new SKFont(_currentTypeface, fontSize);
+                using var measurePaint = new SKPaint();
+                float textWidth = measureFont.MeasureText(value, measurePaint);
 
                 int q = annot.RawDictionary.GetInt("Q", 0);
                 const float padX = 2f;
@@ -2835,7 +2854,7 @@ internal class RenderContext
                 var e = (float)matrixArray.GetNumber(4);
                 var f = (float)matrixArray.GetNumber(5);
                 var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
-                _canvas.Concat(ref matrix);
+                _canvas.Concat(in matrix);
             }
 
             // Parse and render the form's content stream

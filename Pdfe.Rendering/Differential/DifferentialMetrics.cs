@@ -97,7 +97,10 @@ public static class DifferentialMetrics
     {
         if (src.Width == targetW && src.Height == targetH)
             return src.Copy();
-        return src.Resize(new SKImageInfo(targetW, targetH), SKFilterQuality.High)
+        // SkiaSharp 3 retired SKFilterQuality; Mitchell cubic is the closest
+        // analog to the old "High" filter for arbitrary up/downscales.
+        var sampling = new SKSamplingOptions(SKCubicResampler.Mitchell);
+        return src.Resize(new SKImageInfo(targetW, targetH), sampling)
             ?? throw new InvalidOperationException("Resize failed");
     }
 

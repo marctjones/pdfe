@@ -14,10 +14,10 @@ public class RealPdfTests
     private static bool CorpusAvailable => Directory.Exists(Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, CorpusPath)));
 
-    [SkippableFact]
+    [Fact]
     public void Open_VeraPdfCorpusFile_ParsesSuccessfully()
     {
-        Skip.IfNot(CorpusAvailable, "veraPDF corpus not available");
+        Assert.SkipUnless(CorpusAvailable, "veraPDF corpus not available");
 
         var corpusDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, CorpusPath));
         var pdfFiles = Directory.GetFiles(corpusDir, "*.pdf", SearchOption.AllDirectories)
@@ -45,10 +45,10 @@ public class RealPdfTests
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public void GetContentStreamBytes_VeraPdfCorpusFile_ReturnsContent()
     {
-        Skip.IfNot(CorpusAvailable, "veraPDF corpus not available");
+        Assert.SkipUnless(CorpusAvailable, "veraPDF corpus not available");
 
         var corpusDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, CorpusPath));
         var pdfFiles = Directory.GetFiles(corpusDir, "*pass*.pdf", SearchOption.AllDirectories)

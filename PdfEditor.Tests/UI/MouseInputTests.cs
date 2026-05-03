@@ -17,8 +17,6 @@ using PdfEditor.Services;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -148,7 +146,7 @@ public class MouseInputTests
         var viewer = window.FindControl<PdfViewerControl>("PdfViewerControl");
         viewer.Should().NotBeNull();
 
-        var page = vm.PdfCoreDocument.GetPage(linkPage);
+        var page = vm.PdfCoreDocument!.GetPage(linkPage);
         const double s = RenderDpi / 72.0;
         var dipX = targetLink.Rect.Left * s + (targetLink.Rect.Right - targetLink.Rect.Left) * s * 0.5;
         var dipY = (page.Height - (targetLink.Rect.Top + targetLink.Rect.Bottom) / 2.0) * s;
@@ -588,7 +586,8 @@ public class MouseInputTests
         for (int i = 0; i < 10; i++) { await Task.Delay(150); window.UpdateLayout(); }
 
         var viewer = window.FindControl<PdfViewerControl>("PdfViewerControl");
-        var page = vm.PdfCoreDocument.GetPage(linkPage);
+        viewer.Should().NotBeNull();
+        var page = vm.PdfCoreDocument!.GetPage(linkPage);
         const double s = RenderDpi / 72.0;
 
         var dipX = targetLink.Rect.Left * s + (targetLink.Rect.Right - targetLink.Rect.Left) * s * 0.5;
@@ -607,7 +606,7 @@ public class MouseInputTests
         // confirming LinkClicked fires (which means the hover point was in
         // the link rect).
         bool linkFired = false;
-        viewer.LinkClicked += (_, args) => { linkFired = true; };
+        viewer!.LinkClicked += (_, args) => { linkFired = true; };
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {

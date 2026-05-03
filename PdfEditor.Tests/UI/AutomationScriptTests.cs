@@ -5,8 +5,6 @@ using AwesomeAssertions;
 using PdfEditor.Services;
 using PdfEditor.ViewModels;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>

@@ -45,7 +45,9 @@ public class SKBitmapPool : IDisposable
 
             var pooledEntry = new PooledBitmap { Bitmap = bitmap, SizeInBytes = memorySize };
             _allBitmaps.AddLast(pooledEntry);
-            pooledEntry.Node = _allBitmaps.Last;
+            // _allBitmaps.Last is non-null right after AddLast, even though the
+            // property is typed nullable — bang-suppress the false-positive.
+            pooledEntry.Node = _allBitmaps.Last!;
 
             while (_currentMemoryUsage > MaxTotalMemoryBytes && _allBitmaps.Count > 0)
             {
@@ -169,8 +171,11 @@ public class SKBitmapPool : IDisposable
     /// </summary>
     private class PooledBitmap
     {
-        public SKBitmap Bitmap { get; set; }
+        // Bitmap and Node are always populated immediately after construction
+        // through the object-initializer / AddLast pair above; null! suppresses
+        // the CS8618 "uninitialized non-nullable" warning.
+        public SKBitmap Bitmap { get; set; } = null!;
         public long SizeInBytes { get; set; }
-        public LinkedListNode<PooledBitmap> Node { get; set; }
+        public LinkedListNode<PooledBitmap> Node { get; set; } = null!;
     }
 }

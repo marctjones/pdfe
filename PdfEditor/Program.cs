@@ -1,4 +1,5 @@
 using Avalonia;
+using ReactiveUI.Avalonia;
 using System;
 
 namespace PdfEditor;
@@ -13,5 +14,6 @@ class Program
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
+            .UseReactiveUI(b => b.WithAvalonia())
             .LogToTrace();
 }

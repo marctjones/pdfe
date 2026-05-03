@@ -6,7 +6,6 @@ using System.Text;
 using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
-using Xunit.Abstractions;
 using Pdfe.Rendering.Differential;
 
 namespace Pdfe.Rendering.Tests.Differential;
@@ -101,11 +100,11 @@ public sealed class TextExtractionDifferentialTests
         }
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(CorpusPdfs))]
     public void TextMatchesMutool(string relativePath)
     {
-        Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
+        Assert.SkipUnless(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools");
 
         var root = LocateRepoRoot()!;
@@ -117,21 +116,21 @@ public sealed class TextExtractionDifferentialTests
         {
             using var doc = PdfDocument.Open(pdfPath);
             if (doc.PageCount == 0)
-                Skip.If(true, $"{relativePath}: 0 pages");
+                Assert.SkipWhen(true, $"{relativePath}: 0 pages");
             pdfeText = doc.GetPage(1).Text;
         }
         catch (Exception ex)
         {
-            Skip.If(true,
+            Assert.SkipWhen(true,
                 $"pdfe could not extract from {relativePath}: {ex.GetType().Name}: {ex.Message}");
         }
 
         var mutoolText = MutoolTextExtractor.ExtractPage(pdfPath, 1);
-        Skip.If(mutoolText == null,
+        Assert.SkipWhen(mutoolText == null,
             $"mutool refused to extract text from {relativePath}");
 
         var refNormalized = Normalize(mutoolText!);
-        Skip.If(refNormalized.Length < MinReferenceTextLength,
+        Assert.SkipWhen(refNormalized.Length < MinReferenceTextLength,
             $"{relativePath}: reference extraction is only {refNormalized.Length} chars — too noisy to compare");
 
         var ourNormalized = Normalize(pdfeText ?? string.Empty);
@@ -146,7 +145,7 @@ public sealed class TextExtractionDifferentialTests
         if (failed && KnownTextFailures.TryGetValue(relativePath, out var reason))
         {
             _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {reason}");
-            Skip.If(true, $"Known text-extraction failure for {relativePath}: {reason}");
+            Assert.SkipWhen(true, $"Known text-extraction failure for {relativePath}: {reason}");
         }
         sim.Should().BeGreaterThanOrEqualTo(MinSimilarity,
             $"{relativePath}: pdfe text-extraction differs from mutool. " +

@@ -249,7 +249,9 @@ public class PdfIndirectObjectTests
     [Fact]
     public void Constructor_WithNull_StoresPdfNull()
     {
-        var indirect = new PdfIndirectObject(5, 0, (PdfObject?)null);
+        // Constructor's runtime contract converts null → PdfNull.Instance;
+        // null! silences the non-nullable warning while exercising that path.
+        var indirect = new PdfIndirectObject(5, 0, null!);
 
         indirect.Value.Should().Be(PdfNull.Instance);
     }

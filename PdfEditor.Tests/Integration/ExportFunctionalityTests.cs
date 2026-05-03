@@ -117,7 +117,7 @@ public class ExportFunctionalityTests : IDisposable
         // Verify it's a valid PNG by checking file signature
         using var fs = File.OpenRead(filePath);
         var header = new byte[8];
-        await fs.ReadAsync(header, 0, 8);
+        await fs.ReadExactlyAsync(header);
 
         // PNG signature: 89 50 4E 47 0D 0A 1A 0A
         header[0].Should().Be(0x89);

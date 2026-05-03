@@ -59,7 +59,10 @@ public class PdfArrayTests
     {
         var array = new PdfArray(new PdfInteger(1));
 
-        array[0] = (PdfObject?)null;
+        // The indexer's runtime contract converts null → PdfNull.Instance,
+        // but its signature is non-nullable; null! silences the warning while
+        // exercising that conversion.
+        array[0] = null!;
 
         array[0].Should().Be(PdfNull.Instance);
     }

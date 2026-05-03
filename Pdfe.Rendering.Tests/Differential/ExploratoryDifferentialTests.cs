@@ -8,7 +8,6 @@ using Pdfe.Core.Document;
 using Pdfe.Rendering;
 using SkiaSharp;
 using Xunit;
-using Xunit.Abstractions;
 using Pdfe.Rendering.Differential;
 
 namespace Pdfe.Rendering.Tests.Differential;
@@ -67,12 +66,12 @@ public sealed class ExploratoryDifferentialTests
     [Trait("Category", "Exploratory")]
     public void GenerateCorpusReportChunk()
     {
-        Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
+        Assert.SkipUnless(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools to generate the exploratory report");
 
         var root = LocateRepoRoot()!;
         var corpus = Path.Combine(root, "test-pdfs", "pdfjs");
-        Skip.If(!Directory.Exists(corpus),
+        Assert.SkipWhen(!Directory.Exists(corpus),
             "pdf.js corpus not downloaded — run scripts/download-pdfjs-corpus.sh");
 
         // Chunking. Default is "single chunk = full corpus" so a one-off

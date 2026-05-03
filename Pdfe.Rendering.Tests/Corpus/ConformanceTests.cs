@@ -10,8 +10,6 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests.Corpus;
 
 /// <summary>
