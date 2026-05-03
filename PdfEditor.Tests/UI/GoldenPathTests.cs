@@ -12,8 +12,6 @@ using PdfEditor.Tests.Utilities;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>

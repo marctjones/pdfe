@@ -7,7 +7,6 @@ using Pdfe.Core.Document;
 using Pdfe.Rendering;
 using SkiaSharp;
 using Xunit;
-using Xunit.Abstractions;
 using Pdfe.Rendering.Differential;
 
 namespace Pdfe.Rendering.Tests.Differential;
@@ -137,11 +136,11 @@ public sealed class DifferentialRenderingTests
         }
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(CorpusPdfs))]
     public void RendersSimilarlyToMutool(string relativePath, int pageNumber)
     {
-        Skip.IfNot(MutoolReferenceRenderer.IsAvailable,
+        Assert.SkipUnless(MutoolReferenceRenderer.IsAvailable,
             "mutool not on PATH — install mupdf-tools to run the differential corpus");
 
         var root = LocateRepoRoot()
@@ -162,7 +161,7 @@ public sealed class DifferentialRenderingTests
             // for every PDF; only multi-page docs naturally exercise
             // pages > 1.
             if (pageNumber > doc.PageCount)
-                Skip.If(true,
+                Assert.SkipWhen(true,
                     $"{relativePath}: only {doc.PageCount} page(s); " +
                     $"page {pageNumber} doesn't exist");
             var renderer = new SkiaRenderer();
@@ -170,7 +169,7 @@ public sealed class DifferentialRenderingTests
         }
         catch (Exception ex)
         {
-            Skip.If(true,
+            Assert.SkipWhen(true,
                 $"pdfe could not parse/render {relativePath} p.{pageNumber}: " +
                 $"{ex.GetType().Name}: {ex.Message}. " +
                 "Robustness for malformed inputs is the parser's responsibility, not this harness's.");
@@ -179,7 +178,7 @@ public sealed class DifferentialRenderingTests
 
         // mutool render.
         var mutoolBitmap = MutoolReferenceRenderer.RenderPage(pdfPath, pageNumber, RenderDpi);
-        Skip.If(mutoolBitmap == null,
+        Assert.SkipWhen(mutoolBitmap == null,
             $"mutool refused to render {relativePath} p.{pageNumber} — skipping rather than asserting against a missing reference");
 
         // Normalize dimensions if they drift (rounding can cause ±1 px).
@@ -228,7 +227,7 @@ public sealed class DifferentialRenderingTests
             if (failed && knownReason != null)
             {
                 _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {knownReason}");
-                Skip.If(true,
+                Assert.SkipWhen(true,
                     $"Known differential failure for {relativePath} p.{pageNumber}: {knownReason}. " +
                     "Remove the entry from KnownDifferentialFailures once fixed.");
             }

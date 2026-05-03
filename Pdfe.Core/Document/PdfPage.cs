@@ -12,7 +12,6 @@ public class PdfPage
 {
     private readonly PdfDocument _document;
     private readonly PdfDictionary _pageDict;
-    private PdfGraphics? _graphics;
     private IReadOnlyList<Letter>? _cachedLetters;
     private string? _cachedText;
     private IReadOnlyList<Word>? _cachedWords;

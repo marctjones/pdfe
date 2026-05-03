@@ -17,7 +17,6 @@ public class ContentStreamParser
     // Graphics state tracking
     private readonly Stack<GraphicsState> _stateStack = new();
     private GraphicsState _state = new();
-    private bool _inCompatibilitySection;
 
     // Text state tracking
     private double _fontSize = 12;
@@ -479,12 +478,10 @@ public class ContentStreamParser
             case "EMC":
                 break;
 
-            // Compatibility operators
+            // Compatibility operators (BX/EX) — accepted as no-ops so the
+            // parser consumes them without flagging them as unknown.
             case "BX":
-                _inCompatibilitySection = true;
-                break;
             case "EX":
-                _inCompatibilitySection = false;
                 break;
         }
     }

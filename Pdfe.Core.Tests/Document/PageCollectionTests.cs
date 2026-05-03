@@ -14,7 +14,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         // Act
         using var doc = PdfDocument.Open(pdfPath);
@@ -34,10 +34,10 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
-        Skip.If(doc.PageCount < 1, "PDF needs at least 1 page");
+        Assert.SkipWhen(doc.PageCount < 1, "PDF needs at least 1 page");
 
         // Act
         var page = doc.Pages[0];
@@ -52,7 +52,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
 
@@ -69,7 +69,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -94,7 +94,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -115,7 +115,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -130,7 +130,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];

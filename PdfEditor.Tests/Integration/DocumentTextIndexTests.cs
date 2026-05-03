@@ -8,8 +8,6 @@ using Pdfe.Core.Document;
 using PdfEditor.Services;
 using PdfEditor.Tests.Fixtures;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.Integration;
 
 /// <summary>

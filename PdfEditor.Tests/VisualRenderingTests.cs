@@ -7,7 +7,6 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Microsoft.Extensions.Logging;
-using Xunit.Abstractions;
 using AwesomeAssertions;
 using SkiaSharp;
 

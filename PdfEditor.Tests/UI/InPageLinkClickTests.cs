@@ -15,8 +15,6 @@ using PdfEditor.Controls;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -82,7 +80,7 @@ public class InPageLinkClickTests
 
         // Convert the link's PDF-points rect to viewer DIPs (matches the
         // PdfViewerControl's own conversion: 120 DPI bitmap, Y-flip).
-        var page = vm.PdfCoreDocument.GetPage(linkPage);
+        var page = vm.PdfCoreDocument!.GetPage(linkPage);
         const double s = RenderDpi / 72.0;
         var dipX = targetLink.Rect.Left * s + (targetLink.Rect.Right - targetLink.Rect.Left) * s * 0.5;
         var dipY = (page.Height - (targetLink.Rect.Top + targetLink.Rect.Bottom) / 2.0) * s;

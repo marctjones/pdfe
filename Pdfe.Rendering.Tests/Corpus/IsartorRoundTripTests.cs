@@ -5,8 +5,6 @@ using System.Linq;
 using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests.Corpus;
 
 /// <summary>
@@ -80,7 +78,7 @@ public sealed class IsartorRoundTripTests
             yield return new object[] { Path.GetRelativePath(root, pdf) };
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(IsartorPdfs))]
     public void RoundTripsThroughWriter(string relativePath)
     {
@@ -89,10 +87,10 @@ public sealed class IsartorRoundTripTests
         var pdfPath = Path.Combine(root, relativePath);
 
         if (KnownUnopenable.TryGetValue(relativePath, out var unopenableReason))
-            Skip.If(true, $"Known unopenable Isartor fixture: {unopenableReason}");
+            Assert.SkipWhen(true, $"Known unopenable Isartor fixture: {unopenableReason}");
 
         if (KnownRoundTripFailures.TryGetValue(relativePath, out var roundTripReason))
-            Skip.If(true, $"Known round-trip failure: {roundTripReason}");
+            Assert.SkipWhen(true, $"Known round-trip failure: {roundTripReason}");
 
         // ── Phase 1: open the original ───────────────────────────────
         byte[] originalBytes = File.ReadAllBytes(pdfPath);
@@ -109,7 +107,7 @@ public sealed class IsartorRoundTripTests
             // If we can't even open the original, the round-trip is
             // moot. Skip — robustness for malformed Isartor fixtures
             // is the parser's concern, not the writer's.
-            Skip.If(true,
+            Assert.SkipWhen(true,
                 $"pdfe could not open original: {ex.GetType().Name}: {ex.Message}");
             return;
         }

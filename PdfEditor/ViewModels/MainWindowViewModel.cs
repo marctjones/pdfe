@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -2682,7 +2683,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var window = GetMainWindow();
         if (window != null)
         {
-            var messageBox = new FluentAvalonia.UI.Controls.ContentDialog
+            var messageBox = new FluentAvalonia.UI.Controls.FAContentDialog
             {
                 Title = "Keyboard Shortcuts",
                 Content = "File:\n" +
@@ -2703,7 +2704,7 @@ public partial class MainWindowViewModel : ViewModelBase
                           "Navigation:\n" +
                           "  PgUp/PgDn - Previous/Next Page",
                 CloseButtonText = "Close",
-                DefaultButton = FluentAvalonia.UI.Controls.ContentDialogButton.Close
+                DefaultButton = FluentAvalonia.UI.Controls.FAContentDialogButton.Close
             };
 
             await messageBox.ShowAsync();

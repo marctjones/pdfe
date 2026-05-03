@@ -1,14 +1,12 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using Avalonia.ReactiveUI;
 using Avalonia.Media;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PdfEditor.Services;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
-using ReactiveUI;
 using System;
 
 namespace PdfEditor;
@@ -24,8 +22,10 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // Configure ReactiveUI to use Avalonia's dispatcher
-        RxApp.MainThreadScheduler = AvaloniaScheduler.Instance;
+        // ReactiveUI is wired into Avalonia's dispatcher in Program.cs via
+        // AppBuilder.UseReactiveUI(b => b.WithAvalonia()) — that's the
+        // RxUI-23 + ReactiveUI.Avalonia-12 replacement for the old
+        // RxApp.MainThreadScheduler = AvaloniaScheduler.Instance assignment.
 
         // Configure dependency injection and logging
         var services = new ServiceCollection();

@@ -10,8 +10,6 @@ using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -94,7 +92,7 @@ public class PdfViewerHeadlessRenderTests
             Content = viewer,
             Width = 612,
             Height = 792,
-            SystemDecorations = SystemDecorations.None
+            WindowDecorations = WindowDecorations.None
         };
         window.Show();
 

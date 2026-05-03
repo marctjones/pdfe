@@ -6,8 +6,6 @@ using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text.Segmentation;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests.Differential;
 
 /// <summary>
@@ -101,7 +99,7 @@ public sealed class RedactionRoundTripTests
         }
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(CorpusPdfs))]
     public void RedactedWordIsGoneAfterSaveAndReopen(string relativePath)
     {
@@ -118,12 +116,12 @@ public sealed class RedactionRoundTripTests
         }
         catch (Exception ex)
         {
-            Skip.If(true,
+            Assert.SkipWhen(true,
                 $"pdfe could not open {relativePath}: {ex.GetType().Name}: {ex.Message}");
             return;
         }
 
-        Skip.If(target == null,
+        Assert.SkipWhen(target == null,
             $"{relativePath}: no suitable target word found in extracted text — " +
             "PDF probably has no extractable text or only short/non-ASCII content");
 
@@ -144,7 +142,7 @@ public sealed class RedactionRoundTripTests
                 $"{relativePath}: RedactText('{target}') threw {ex.GetType().Name}: {ex.Message}");
         }
 
-        Skip.If(matchCount == 0,
+        Assert.SkipWhen(matchCount == 0,
             $"{relativePath}: target word '{target}' wasn't matched by RedactText — " +
             "extraction and matching are using different glyph paths; " +
             "this is a separate bug class than 'redaction left text behind'");
@@ -175,7 +173,7 @@ public sealed class RedactionRoundTripTests
         if (stillContainsTarget && KnownRedactionFailures.TryGetValue(relativePath, out var reason))
         {
             _output.WriteLine($"  ⚑ KNOWN FAILURE — not gating: {reason}");
-            Skip.If(true,
+            Assert.SkipWhen(true,
                 $"Known redaction failure for {relativePath}: {reason}");
         }
         stillContainsTarget.Should().BeFalse(

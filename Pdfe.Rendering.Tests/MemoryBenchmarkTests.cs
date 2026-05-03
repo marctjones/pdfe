@@ -5,8 +5,6 @@ using System.Linq;
 using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests;
 
 /// <summary>

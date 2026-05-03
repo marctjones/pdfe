@@ -28,18 +28,17 @@ namespace PdfEditor.Tests.Utilities
         }
 
         /// <summary>
-        /// Throws a SkipException if a skip reason has been set.
-        /// This method should be called early in the test method.
+        /// Skips the current test if a skip reason has been set. xUnit v3
+        /// removed the public SkipException type; the supported way to abort
+        /// a running test is Assert.Skip(reason).
         /// </summary>
-        /// <exception cref="Xunit.SkipException">Thrown if _skipReason is not null.</exception>
         public static void ThrowIfSkipped()
         {
             if (_skipReason != null)
             {
                 var reason = _skipReason;
-                // Reset the reason for the next test execution context
-                _skipReason = null; 
-                throw new SkipException(reason);
+                _skipReason = null;
+                Assert.Skip(reason);
             }
         }
 

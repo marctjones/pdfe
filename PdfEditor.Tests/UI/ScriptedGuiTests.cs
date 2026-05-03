@@ -7,8 +7,6 @@ using PdfEditor.Services;
 using PdfEditor.Tests.Utilities;
 using PdfEditor.ViewModels;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>

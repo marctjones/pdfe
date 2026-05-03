@@ -65,10 +65,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.7" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.7" />
 
-    <!-- Pin transitive Tmds.DBus.Protocol above the GHSA-xrw6-gwf8-vvr9
-         vulnerable range (< 0.92.0). Avalonia 11.x brings in 0.20.0,
-         which fails NU1903 with a high-severity advisory. -->
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.93.0" />
+    <!-- Tmds.DBus.Protocol pin removed: Avalonia 12 already brings 0.92.0
+         transitively, which is past the GHSA-xrw6-gwf8-vvr9 cutoff
+         (< 0.92.0). 0.93.0 dropped the Tmds.DBus.Protocol.Connection
+         type that Avalonia.X11 reflects on, so over-pinning crashes
+         startup with a TypeLoadException. -->
   </ItemGroup>
 
   <ItemGroup>
