@@ -40,7 +40,7 @@ public class MouseInputTests
 
     #region Discrete Event Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ClickInViewer_FocusesTheViewer()
     {
         // When the user clicks anywhere in the PDF viewer area (outside
@@ -75,7 +75,7 @@ public class MouseInputTests
         viewer!.IsVisible.Should().BeTrue();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ClickOnOutlineTreeNode_NavigatesToPage()
     {
         // When the user clicks a node in the outline (TOC) tree, it should
@@ -108,7 +108,7 @@ public class MouseInputTests
             "selecting outline node must navigate to its page");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ClickOnLinkAnnotation_FiresLinkClickedEvent()
     {
         // When the user clicks a link annotation, PdfViewerControl should
@@ -168,7 +168,7 @@ public class MouseInputTests
             "clicking a link annotation must fire LinkClicked event");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task MouseWheelScrollDown_ScrollsViewerVertically()
     {
         // When the user scrolls the mouse wheel down, the viewer scrolls
@@ -211,7 +211,7 @@ public class MouseInputTests
             "scrolling down must increase the vertical offset");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task CtrlWheelZoom_IncreasesZoomLevel()
     {
         // When the user holds Ctrl and scrolls wheel up, zoom level should
@@ -249,7 +249,7 @@ public class MouseInputTests
 
     #region Drag Operations
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task DragInTextSelectionMode_CreatesSelectionRect()
     {
         // When the user drags in text-selection mode, a selection rectangle
@@ -308,7 +308,7 @@ public class MouseInputTests
             "dragging across letters in text-selection mode must select text");
     }
 
-    [AvaloniaFact(Skip = "Drag synthesis in headless mode doesn't reach the redaction handler reliably; covered by ScriptedGuiTests via ViewModel.")]
+    [FixedAvaloniaFact(Skip = "Drag synthesis in headless mode doesn't reach the redaction handler reliably; covered by ScriptedGuiTests via ViewModel.")]
     public async Task DragInRedactionMode_CreatesRedactionRect()
     {
         // When the user drags in redaction mode, a redaction rectangle is
@@ -357,7 +357,7 @@ public class MouseInputTests
         _out.WriteLine($"Redaction rect: {redactionRect}");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task MultiStepDrag_WithIntermediateMoves_TracksProgress()
     {
         // A realistic drag involves multiple MouseMove events between
@@ -432,7 +432,7 @@ public class MouseInputTests
 
     #region Multi-Click Semantics
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task SingleClickOnLetter_SelectsOnlyThatLetter()
     {
         // Clicking and immediately releasing on a single letter should
@@ -483,7 +483,7 @@ public class MouseInputTests
             "single-click on a letter must select only that letter");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task DoubleClickOnWord_SelectsTheWord()
     {
         // Rapid double-click on a letter should select the whole word
@@ -550,7 +550,7 @@ public class MouseInputTests
 
     #region Hover/State Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task HoverOverLinkAnnotation_IndicatesInteractivity()
     {
         // When the user hovers over a link annotation, the viewer should
@@ -624,7 +624,7 @@ public class MouseInputTests
 
     #region Compound Workflows
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OpenDocument_SelectText_VerifyClipboardEntry()
     {
         // End-to-end workflow: open PDF → switch to text-selection mode →

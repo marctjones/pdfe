@@ -54,7 +54,7 @@ public class GoldenPathTests
     /// - Search results navigate to correct pages
     /// - Document can be closed cleanly
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_OpenSearchNavigateClose()
     {
         // Arrange
@@ -129,7 +129,7 @@ public class GoldenPathTests
     /// Note: The actual glyph-level removal is verified in Pdfe.Core.Tests.
     /// Saving to disk is tested via integration tests.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_OpenRedactApplyVerifyTextGone()
     {
         // Arrange: Create a PDF with predictable text at known position
@@ -197,7 +197,7 @@ public class GoldenPathTests
     /// - Pending count clears after apply
     /// - Navigation across pages with redactions works
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_MultiPageRedaction()
     {
         // Arrange: Create a 3-page PDF with distinct text per page
@@ -272,7 +272,7 @@ public class GoldenPathTests
     ///
     /// Uses TestPdfGenerator to create a 20-page PDF on-the-fly.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_LargePdfResponsiveness()
     {
         // Arrange: Create a moderately large PDF (20 pages)
@@ -339,7 +339,7 @@ public class GoldenPathTests
     /// Note: Recent files ordering depends on implementation;
     /// this test verifies files are tracked, not sorting order.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_RecentFilesRoundTrip()
     {
         // Arrange: Create two test PDFs
@@ -391,7 +391,7 @@ public class GoldenPathTests
     /// The actual error handling happens in PdfDocumentService.LoadDocument(),
     /// which may silently fail or throw depending on the error.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_MalformedPdfGracefulFailure()
     {
         // Arrange: Create a "PDF" file with random garbage
@@ -442,7 +442,7 @@ public class GoldenPathTests
     /// - Jumping to a result navigates the page correctly
     /// - CurrentSearchMatchIndex updates
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_SearchResultNavigation()
     {
         // Arrange: Create PDF with repeated text across multiple pages
@@ -494,7 +494,7 @@ public class GoldenPathTests
     /// - Page count reset to 0
     /// - Document marked as closed
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task GoldenPath_DocumentStateCleanup()
     {
         // Arrange

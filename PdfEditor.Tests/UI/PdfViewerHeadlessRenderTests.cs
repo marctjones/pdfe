@@ -32,7 +32,7 @@ public class PdfViewerHeadlessRenderTests
         _output = output;
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewer_RendersSimpleText_MatchesBaseline()
     {
         var pdfBytes = CreatePdfWithContent("BT /F1 24 Tf 100 700 Td (Hello, World!) Tj ET");
@@ -47,7 +47,7 @@ public class PdfViewerHeadlessRenderTests
     /// fixed in commits 0709a39 (font encoding detection) and d1357bd
     /// (CodePagesEncodingProvider registration).
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewer_RendersBirthCertificate_MatchesBaseline()
     {
         var pdfPath = Path.Combine(AppContext.BaseDirectory, "UI", "test-pdfs",
@@ -81,7 +81,7 @@ public class PdfViewerHeadlessRenderTests
 
     private async Task<SKBitmap> RenderViaViewerControl(byte[] pdfBytes)
     {
-        // [AvaloniaFact] already dispatches this method onto the UI thread, so
+        // [FixedAvaloniaFact] already dispatches this method onto the UI thread, so
         // we can touch Avalonia types directly.
 
         var doc = Pdfe.Core.Document.PdfDocument.Open(pdfBytes);

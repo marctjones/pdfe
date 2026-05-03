@@ -34,7 +34,7 @@ public class CommandBindingSweepTests
     private readonly ITestOutputHelper _out;
     public CommandBindingSweepTests(ITestOutputHelper o) { _out = o; }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void EveryButtonAndMenuItemCommand_ResolvesToNonNullCommand()
     {
         var vm = new MainWindowViewModel();

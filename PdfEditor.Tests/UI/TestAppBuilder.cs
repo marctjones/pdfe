@@ -1,7 +1,7 @@
 using Avalonia;
 using Avalonia.Headless;
 
-// Registers the headless app builder used by [AvaloniaFact] tests across the
+// Registers the headless app builder used by [FixedAvaloniaFact] tests across the
 // assembly. Required for UseHeadlessDrawing=false to take effect so that
 // Bitmap(stream) decodes real pixels (visual-regression tests rely on this).
 [assembly: Avalonia.Headless.AvaloniaTestApplication(typeof(PdfEditor.Tests.UI.TestAppBuilder))]

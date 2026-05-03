@@ -33,7 +33,7 @@ public class InPageLinkClickTests
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
     private const double RenderDpi = 120.0;
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ClickOnTocLink_NavigatesToDestinationPage()
     {
         if (!File.Exists(PragmaticBook)) return;

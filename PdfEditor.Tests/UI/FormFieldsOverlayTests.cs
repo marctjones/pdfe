@@ -87,7 +87,7 @@ public class FormFieldsOverlayTests
         return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task FormFieldsLayer_PaintsOneInputPerField()
     {
         var path = WriteTempFormPdf();
@@ -130,7 +130,7 @@ public class FormFieldsOverlayTests
         }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task EditingTextField_MutatesUnderlyingFieldAndMarksDirty()
     {
         var path = WriteTempFormPdf();
