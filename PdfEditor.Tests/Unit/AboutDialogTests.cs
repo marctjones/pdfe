@@ -11,7 +11,7 @@ namespace PdfEditor.Tests.Unit;
 /// - Dialog shows: version (from Assembly), runtime version, license summary, GitHub URL
 /// - FluentAvaloniaUI ContentDialog
 ///
-/// Note: UI tests (dialog visibility, button clicks) require [AvaloniaFact].
+/// Note: UI tests (dialog visibility, button clicks) require [FixedAvaloniaFact].
 /// Here we test the ViewModel properties and version extraction.
 /// </summary>
 public class AboutDialogTests

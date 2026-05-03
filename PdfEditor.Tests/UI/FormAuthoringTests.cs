@@ -70,7 +70,7 @@ public class FormAuthoringTests
         return path;
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ToggleFormAuthoringMode_FlipsInteractionMode()
     {
         var path = WritePdf(BarePdf());
@@ -93,7 +93,7 @@ public class FormAuthoringTests
         finally { try { File.Delete(path); } catch { } }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OnFormFieldRectDrawn_CreatesTextFieldWithUniqueName()
     {
         var path = WritePdf(BarePdf());
@@ -118,7 +118,7 @@ public class FormAuthoringTests
         finally { try { File.Delete(path); } catch { } }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OnFormFieldRectDrawn_CheckboxType_CreatesButtonField()
     {
         var path = WritePdf(BarePdf());
@@ -140,7 +140,7 @@ public class FormAuthoringTests
         finally { try { File.Delete(path); } catch { } }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task AutoDetectFieldsCommand_ScansAndAppliesSuggestions()
     {
         // PDF with one underline and one checkbox-sized outline.

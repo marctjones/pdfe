@@ -15,7 +15,7 @@ namespace PdfEditor.Tests.Unit;
 /// - RedactionPreview overlay with Apply button to commit
 ///
 /// Note: Some tests here verify the underlying ViewModel logic;
-/// UI tests (drag, double-click, Esc) require [AvaloniaFact] and headless UI runner.
+/// UI tests (drag, double-click, Esc) require [FixedAvaloniaFact] and headless UI runner.
 /// </summary>
 public class RedactionInteractionTests
 {

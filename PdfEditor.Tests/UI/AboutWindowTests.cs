@@ -44,7 +44,7 @@ public class AboutWindowTests
         vm.AppVersion.Should().NotBeNullOrWhiteSpace();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void AboutWindow_OpensAndPaintsDetailPane()
     {
         var window = new AboutWindow();

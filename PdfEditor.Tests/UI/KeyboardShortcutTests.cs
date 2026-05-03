@@ -45,7 +45,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+O: Open file dialog (cannot test dialog itself, but can verify command executes without error).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlO_OpensFileDialog()
     {
         // Arrange
@@ -66,7 +66,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+S: Save file (only works when document is loaded).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlS_SavesFile()
     {
         // Arrange
@@ -90,7 +90,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+W: Close document.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlW_ClosesDocument()
     {
         // Arrange
@@ -120,7 +120,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+F: Toggle search bar visibility.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlF_ToggleSearchBar()
     {
         // Arrange
@@ -146,7 +146,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// F3: Find next match.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task F3_FindsNextMatch()
     {
         // Arrange
@@ -170,7 +170,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Shift+F3: Find previous match.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task ShiftF3_FindsPreviousMatch()
     {
         // Arrange
@@ -194,7 +194,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Escape: Close search bar (when visible).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task Escape_ClosesSearchBar()
     {
         // Arrange
@@ -224,7 +224,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+C: Copy selected text (only works in text selection mode).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlC_CopiesText()
     {
         // Arrange
@@ -256,7 +256,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Page Down: Advance to next page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task PageDown_AdvancesToNextPage()
     {
         // Arrange
@@ -282,7 +282,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Page Up: Go to previous page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task PageUp_ReturnsToPreviousPage()
     {
         // Arrange
@@ -312,7 +312,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Home: Jump to first page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task Home_JumpsToFirstPage()
     {
         // Arrange
@@ -341,7 +341,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// End: Jump to last page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task End_JumpsToLastPage()
     {
         // Arrange
@@ -370,7 +370,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Down arrow: Advance to next page (when not in a text control).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000, Skip = "Arrow keys in Avalonia.Headless tests do not route through window KeyDown handler; PageDown/PageUp work as alternative")]
+    [FixedAvaloniaFact(Timeout = 3000, Skip = "Arrow keys in Avalonia.Headless tests do not route through window KeyDown handler; PageDown/PageUp work as alternative")]
     public async Task DownArrow_AdvancesToNextPage()
     {
         // Arrange
@@ -396,7 +396,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Up arrow: Return to previous page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000, Skip = "Arrow keys in Avalonia.Headless tests do not route through window KeyDown handler; PageUp works as alternative")]
+    [FixedAvaloniaFact(Timeout = 3000, Skip = "Arrow keys in Avalonia.Headless tests do not route through window KeyDown handler; PageUp works as alternative")]
     public async Task UpArrow_ReturnsToPreviousPage()
     {
         // Arrange
@@ -430,7 +430,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+L: Rotate page left 90 degrees.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlL_RotatesPageLeft()
     {
         // Arrange
@@ -454,7 +454,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+R: Rotate page right 90 degrees.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlR_RotatesPageRight()
     {
         // Arrange
@@ -478,7 +478,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+E: Export current page to image.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlE_ExportsCurrentPage()
     {
         // Arrange
@@ -502,7 +502,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+P: Print document.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlP_PrintsDocument()
     {
         // Arrange
@@ -530,7 +530,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+Plus: Zoom in.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlPlus_ZoomsIn()
     {
         // Arrange
@@ -556,7 +556,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+Minus: Zoom out.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlMinus_ZoomsOut()
     {
         // Arrange
@@ -586,7 +586,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+0: Actual size (100%).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task Ctrl0_ResetsZoomToActualSize()
     {
         // Arrange
@@ -615,7 +615,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+1: Fit width.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task Ctrl1_FitsPageWidth()
     {
         // Arrange
@@ -640,7 +640,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+2: Fit page.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task Ctrl2_FitsEntirePage()
     {
         // Arrange
@@ -669,7 +669,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// R: Toggle redaction mode.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task R_ToggleRedactionMode()
     {
         // Arrange
@@ -695,7 +695,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// T: Toggle text selection mode.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task T_ToggleTextSelectionMode()
     {
         // Arrange
@@ -721,7 +721,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Enter: Apply redaction (when in redaction mode).
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task Enter_AppliesRedaction()
     {
         // Arrange
@@ -753,7 +753,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// F1: Show keyboard shortcuts dialog.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task F1_ShowsShortcuts()
     {
         // Arrange
@@ -772,7 +772,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Ctrl+Comma: Show preferences dialog.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CtrlComma_ShowsPreferences()
     {
         // Arrange
@@ -795,7 +795,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Compound: Ctrl+F → type text → Enter → verify search progresses.
     /// </summary>
-    [AvaloniaFact(Timeout = 5000, Skip = "Depends on search textbox receiving focus/input correctly in headless tests")]
+    [FixedAvaloniaFact(Timeout = 5000, Skip = "Depends on search textbox receiving focus/input correctly in headless tests")]
     public async Task CompoundFlow_SearchWorkflow()
     {
         // Arrange
@@ -826,7 +826,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Compound: PageDown multiple times → verify navigation.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CompoundFlow_MultiplePageDowns()
     {
         // Arrange
@@ -856,7 +856,7 @@ public class KeyboardShortcutTests
     /// <summary>
     /// Compound: Ctrl+= twice → verify zoom stacks correctly.
     /// </summary>
-    [AvaloniaFact(Timeout = 3000)]
+    [FixedAvaloniaFact(Timeout = 3000)]
     public async Task CompoundFlow_MultipleZoomIns()
     {
         // Arrange
