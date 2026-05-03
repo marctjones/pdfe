@@ -9,7 +9,13 @@ namespace Pdfe.Core.Tests.Document;
 /// </summary>
 public class RealPdfTests
 {
-    private const string CorpusPath = "../../../test-pdfs/verapdf-corpus/veraPDF-corpus-master/PDF_A-1b";
+    // Path resolves from the test DLL's bin/Debug/net10.0/ up four levels
+    // to the repo root, then into test-pdfs. Matches the convention every
+    // other test file in this repo uses (PdfAnnotationTests, CjkRenderingTests,
+    // CorpusConformanceTests, etc.). Pre-fix: only three "../" — landed in
+    // Pdfe.Core.Tests/test-pdfs/ which never exists, so the corpus-presence
+    // gate always reported "not available" and these tests always skipped.
+    private const string CorpusPath = "../../../../test-pdfs/verapdf-corpus/veraPDF-corpus-master/PDF_A-1b";
 
     private static bool CorpusAvailable => Directory.Exists(Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, CorpusPath)));
