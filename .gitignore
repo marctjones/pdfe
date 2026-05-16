@@ -95,3 +95,4 @@ pdfe.sh
 
 # Auto-generated test JSON
 **/*.cs.json
+.idlergear.retired/
