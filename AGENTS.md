@@ -1,80 +1,32 @@
 # Agent Instructions
 
-## IdlerGear
+This is a cross-platform PDF editor (C# / .NET 8 / Avalonia, MVVM). Full guidance
+for AI assistants lives in [`CLAUDE.md`](CLAUDE.md); read it first.
 
-This project uses [IdlerGear](https://github.com/marctjones/idlergear) for knowledge management.
+## Task tracking
 
-### CRITICAL: Session Start
-
-**ALWAYS run this command at the start of EVERY session:**
+This project tracks all work in **GitHub Issues** — bugs, features, tech debt, and
+research questions. Use the `gh` CLI:
 
 ```bash
-idlergear context
+gh issue list
+gh issue create --title "..." --body "..." --label "bug,component: redaction-engine"
 ```
 
-This shows the project vision, current plan, open tasks, and recent notes. Do NOT skip this step.
+Reference issues from code and commits (`// See issue #25`, `Fixes #17`) instead of
+leaving `// TODO:` comments or creating ad-hoc tracking files.
 
-### FORBIDDEN: File-Based Knowledge
+## Knowledge organization
 
-**DO NOT create any of these files:**
-- `TODO.md`, `TODO.txt`, `TASKS.md`
-- `NOTES.md`, `SESSION_*.md`, `SCRATCH.md`
-- `FEATURE_IDEAS.md`, `RESEARCH.md`, `BACKLOG.md`
-- Any markdown file for tracking work or capturing thoughts
+Four tiers (see CLAUDE.md for the decision matrix):
 
-**ALWAYS use IdlerGear commands instead.**
+- **Wiki** — concepts, algorithms, PDF-format theory (timeless reference)
+- **Discussions** — research, ideas, lab notes (unstructured exploration)
+- **Issues** — actionable bugs/features/tasks (clear completion criteria)
+- **Markdown files** — code/setup documentation (version-controlled)
 
-### FORBIDDEN: Inline TODOs
+## Redaction is security-critical
 
-**DO NOT write inline TODO comments:**
-- `// TODO: ...`
-- `# FIXME: ...`
-- `/* HACK: ... */`
-
-**INSTEAD:** Create a task with `idlergear task create "..." --label technical-debt`
-
-### REQUIRED: Use IdlerGear Commands
-
-| Instead of... | Use this command |
-|---------------|------------------|
-| Creating TODO.md | `idlergear task create "description"` |
-| Writing notes to files | `idlergear note create "content"` |
-| Adding TODO comments | `idlergear task create "..." --label technical-debt` |
-| Creating VISION.md | `idlergear vision edit` |
-| Documenting findings | `idlergear reference add "title" --body "..."` |
-
-### During Development
-
-| Action | Command |
-|--------|---------|
-| Found a bug | `idlergear task create "..." --label bug` |
-| Had an idea | `idlergear note create "..."` |
-| Research question | `idlergear explore create "..."` |
-| Completed work | `idlergear task close <id>` |
-| Check project goals | `idlergear vision show` |
-| View open tasks | `idlergear task list` |
-
-### Knowledge Promotion Flow
-
-```
-note → explore → task
-```
-- Quick thoughts: `idlergear note create "..."` (capture now, review later)
-- Research threads: `idlergear explore create "..."` (open questions)
-- Actionable work: `idlergear task create "..."` (clear completion criteria)
-- Promote notes: `idlergear note promote <id>` (convert to task/explore)
-
-### Reference Documentation
-
-- `idlergear reference list` - View reference documents
-- `idlergear reference show "title"` - Read a specific reference
-- `idlergear reference add "title" --body "..."` - Add documentation
-- `idlergear search "query"` - Search across all knowledge types
-
-### Protected Files
-
-**DO NOT modify directly:**
-- `.idlergear/` - Data files (use CLI commands)
-- `.mcp.json` - MCP configuration
-
-The IdlerGear MCP server is configured in `.mcp.json` and provides these tools directly.
+Never replace glyph-level removal with visual-only redaction. Always run
+`dotnet test --filter "FullyQualifiedName~Redaction"` after touching redaction code.
+See [`REDACTION_AI_GUIDELINES.md`](REDACTION_AI_GUIDELINES.md).

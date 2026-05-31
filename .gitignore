@@ -70,12 +70,6 @@ run_output.txt
 # Screenshots (temporary debug files)
 screenshots/
 
-# IdlerGear daemon / runtime files (don't commit)
-.idlergear/daemon.sock
-.idlergear/daemon.pid
-.idlergear/sync/
-.idlergear/runs/
-
 # Claude Code runtime state
 .claude/scheduled_tasks.lock
 
@@ -88,11 +82,9 @@ artifacts/
 coverage/
 dist/
 tools/
-.idlergear/
 .claude/worktrees/
 .wiki/
 pdfe.sh
 
 # Auto-generated test JSON
 **/*.cs.json
-.idlergear.retired/
