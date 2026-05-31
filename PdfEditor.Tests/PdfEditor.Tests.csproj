@@ -42,7 +42,7 @@
          non-commercial Xceed Community License. -->
     <PackageReference Include="AwesomeAssertions" Version="9.4.0" />
 
-    <PackageReference Include="SkiaSharp" Version="3.119.4-preview.1.1" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
 
     <!-- Avalonia Headless Testing (synced with main app) -->
     <PackageReference Include="Avalonia.Headless" Version="12.0.2" />
