@@ -28,8 +28,8 @@
          description and default moved to property-initializers, IsRequired
          renamed to Required). Migration done in Program.cs. -->
     <PackageReference Include="System.CommandLine" Version="2.0.7" />
-    <PackageReference Include="SkiaSharp" Version="3.119.4-preview.1.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4-preview.1.1" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
   </ItemGroup>
 
 </Project>

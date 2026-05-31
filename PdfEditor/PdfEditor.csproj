@@ -44,7 +44,7 @@
          unmaintained since 2020. Same Org.BouncyCastle.* namespaces, so
          this is a drop-in replacement. -->
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-    <PackageReference Include="SkiaSharp" Version="3.119.4-preview.1.1" /> <!-- MIT License -->
+    <PackageReference Include="SkiaSharp" Version="3.119.4" /> <!-- MIT License -->
 
     <!-- MVVM and Utilities. ReactiveUI is pinned to the 20.x line
          because Avalonia.ReactiveUI 11.3.9 declares ReactiveUI 20.1.1
