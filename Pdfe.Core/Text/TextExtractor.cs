@@ -792,7 +792,8 @@ public class TextExtractor
                 x,
                 y,
                 glyphWidth,
-                charCode
+                charCode,
+                stride // 1 for simple fonts, 2 for Type0/CID (#353)
             );
             _letters.Add(letter);
 

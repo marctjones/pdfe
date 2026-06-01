@@ -50,6 +50,14 @@ public class Letter
     public int CharacterCode { get; }
 
     /// <summary>
+    /// Number of bytes the source code occupies in the content stream: 1 for
+    /// simple fonts, 2 for Type0/CID fonts using Identity-H/V (the common CJK
+    /// case). Used by redaction to re-encode kept glyphs with their original
+    /// bytes instead of Unicode, which a CID font cannot render. (Issue #353)
+    /// </summary>
+    public int CodeByteLength { get; }
+
+    /// <summary>
     /// Whether this letter was rendered inside an Optional Content Group (OCG)
     /// that is OFF by default (hidden). This is a security concern: while invisible
     /// in the default viewer, the text is fully extractable via the structure tree
@@ -77,7 +85,8 @@ public class Letter
         double startX,
         double startY,
         double width,
-        int characterCode)
+        int characterCode,
+        int codeByteLength = 1)
     {
         Value = value;
         GlyphRectangle = glyphRectangle;
@@ -87,6 +96,7 @@ public class Letter
         StartY = startY;
         Width = width;
         CharacterCode = characterCode;
+        CodeByteLength = codeByteLength < 1 ? 1 : codeByteLength;
     }
 
     public override string ToString() => $"'{Value}' at ({GlyphRectangle.Left:F1}, {GlyphRectangle.Bottom:F1})";

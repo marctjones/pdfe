@@ -84,13 +84,37 @@ public class LetterFinder
         int count = Math.Min(operationText.Length, allLetters.Count - matchIndex);
         for (int i = 0; i < count; i++)
         {
+            var letter = allLetters[matchIndex + i];
             matches.Add(new LetterMatch
             {
                 CharacterIndex = i,
-                Letter = allLetters[matchIndex + i],
+                Letter = letter,
+                // Carry the glyph's original source bytes so a Type0/CID font's
+                // kept text can be re-encoded with its real codes rather than
+                // Unicode (which the font can't render). (Issue #353)
+                RawBytes = EncodeCharacterCode(letter),
             });
         }
         return matches;
+    }
+
+    /// <summary>
+    /// Re-encode a letter's <see cref="Letter.CharacterCode"/> to its original
+    /// source bytes (big-endian, <see cref="Letter.CodeByteLength"/> wide). For
+    /// Identity-H/V CID fonts this is a 2-byte code; for simple fonts a single
+    /// byte. The reconstructor only uses these for CID/ToUnicode fonts.
+    /// </summary>
+    private static byte[] EncodeCharacterCode(Letter letter)
+    {
+        int len = letter.CodeByteLength < 1 ? 1 : letter.CodeByteLength;
+        int code = letter.CharacterCode;
+        var bytes = new byte[len];
+        for (int b = len - 1; b >= 0; b--)
+        {
+            bytes[b] = (byte)(code & 0xFF);
+            code >>= 8;
+        }
+        return bytes;
     }
 
     private static List<int> FindAllTextOccurrences(string haystack, string needle)
