@@ -13,6 +13,21 @@ public class PdfParser : IDisposable
     private readonly bool _ownsLexer;
 
     /// <summary>
+    /// Current array/dictionary nesting depth, used to bound recursion on
+    /// hostile or malformed input (deeply nested <c>[[[…]]]</c> / <c>&lt;&lt;…&gt;&gt;</c>)
+    /// that would otherwise drive an uncatchable StackOverflow. See issue #346.
+    /// </summary>
+    private int _depth;
+
+    /// <summary>
+    /// Maximum array/dictionary nesting depth before parsing aborts with a
+    /// <see cref="PdfParseException"/>. Generous enough for any legitimate PDF
+    /// (the deepest real-world structures are well under 100 levels) while
+    /// preventing a stack overflow from adversarial input.
+    /// </summary>
+    public int MaxNestingDepth { get; set; } = 512;
+
+    /// <summary>
     /// Creates a new parser with the specified lexer.
     /// </summary>
     public PdfParser(PdfLexer lexer, bool ownsLexer = false)
@@ -142,22 +157,31 @@ public class PdfParser : IDisposable
     /// </summary>
     private PdfArray ParseArray()
     {
-        var array = new PdfArray();
-
-        while (true)
+        if (++_depth > MaxNestingDepth)
         {
-            var token = _lexer.NextToken();
-
-            if (token.Type == PdfTokenType.ArrayEnd)
-                break;
-
-            if (token.Type == PdfTokenType.Eof)
-                throw new PdfParseException("Unterminated array");
-
-            array.Add(ParseObjectFromToken(token));
+            _depth--;
+            throw new PdfParseException($"Maximum nesting depth ({MaxNestingDepth}) exceeded while parsing array");
         }
+        try
+        {
+            var array = new PdfArray();
 
-        return array;
+            while (true)
+            {
+                var token = _lexer.NextToken();
+
+                if (token.Type == PdfTokenType.ArrayEnd)
+                    break;
+
+                if (token.Type == PdfTokenType.Eof)
+                    throw new PdfParseException("Unterminated array");
+
+                array.Add(ParseObjectFromToken(token));
+            }
+
+            return array;
+        }
+        finally { _depth--; }
     }
 
     /// <summary>
@@ -186,29 +210,38 @@ public class PdfParser : IDisposable
     /// </summary>
     private PdfDictionary ParseDictionaryContents()
     {
-        var dict = new PdfDictionary();
-
-        while (true)
+        if (++_depth > MaxNestingDepth)
         {
-            var token = _lexer.NextToken();
-
-            if (token.Type == PdfTokenType.DictionaryEnd)
-                break;
-
-            if (token.Type == PdfTokenType.Eof)
-                throw new PdfParseException("Unterminated dictionary");
-
-            // Key must be a name
-            if (token.Type != PdfTokenType.Name)
-                throw new PdfParseException($"Expected name in dictionary, got {token.Type} at position {token.Position}");
-
-            var key = new PdfName(token.Value);
-            var value = ParseObject();
-
-            dict[key] = value;
+            _depth--;
+            throw new PdfParseException($"Maximum nesting depth ({MaxNestingDepth}) exceeded while parsing dictionary");
         }
+        try
+        {
+            var dict = new PdfDictionary();
 
-        return dict;
+            while (true)
+            {
+                var token = _lexer.NextToken();
+
+                if (token.Type == PdfTokenType.DictionaryEnd)
+                    break;
+
+                if (token.Type == PdfTokenType.Eof)
+                    throw new PdfParseException("Unterminated dictionary");
+
+                // Key must be a name
+                if (token.Type != PdfTokenType.Name)
+                    throw new PdfParseException($"Expected name in dictionary, got {token.Type} at position {token.Position}");
+
+                var key = new PdfName(token.Value);
+                var value = ParseObject();
+
+                dict[key] = value;
+            }
+
+            return dict;
+        }
+        finally { _depth--; }
     }
 
     /// <summary>

@@ -647,4 +647,59 @@ public class PdfParserTests
     }
 
     #endregion
+
+    #region Recursion-depth hardening (issue #346)
+
+    [Fact]
+    public void ParseObject_DeeplyNestedArrays_ThrowsInsteadOfStackOverflow()
+    {
+        // 5000 levels of nested arrays would overflow the stack without a guard.
+        var data = Encoding.ASCII.GetBytes(new string('[', 5000) + new string(']', 5000));
+        using var parser = new PdfParser(data);
+
+        var action = () => parser.ParseObject();
+
+        action.Should().Throw<PdfParseException>()
+            .WithMessage("*nesting depth*");
+    }
+
+    [Fact]
+    public void ParseObject_DeeplyNestedDictionaries_ThrowsInsteadOfStackOverflow()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 5000; i++) sb.Append("<< /K ");
+        for (int i = 0; i < 5000; i++) sb.Append(" >>");
+        using var parser = new PdfParser(Encoding.ASCII.GetBytes(sb.ToString()));
+
+        var action = () => parser.ParseObject();
+
+        action.Should().Throw<PdfParseException>()
+            .WithMessage("*nesting depth*");
+    }
+
+    [Fact]
+    public void ParseObject_NestingWithinLimit_Succeeds()
+    {
+        // Comfortably below the 512 default — must parse cleanly.
+        const int depth = 100;
+        var data = Encoding.ASCII.GetBytes(new string('[', depth) + new string(']', depth));
+        using var parser = new PdfParser(data);
+
+        var obj = parser.ParseObject();
+
+        obj.Should().BeOfType<PdfArray>();
+    }
+
+    [Fact]
+    public void MaxNestingDepth_IsConfigurable()
+    {
+        var data = Encoding.ASCII.GetBytes(new string('[', 20) + new string(']', 20));
+        using var parser = new PdfParser(data) { MaxNestingDepth = 5 };
+
+        var action = () => parser.ParseObject();
+
+        action.Should().Throw<PdfParseException>().WithMessage("*nesting depth (5)*");
+    }
+
+    #endregion
 }
