@@ -708,29 +708,60 @@ public class ContentStreamParser
                 imageParams[canonicalKey] = valObj;
         }
 
-        // --- 2. Scan for 'EI' at a word boundary, consuming raw image data ---
-        var dataStart = _pos;
-        while (_pos < _content.Length)
-        {
-            if (IsWhitespaceByte(_content[_pos]) || _pos == dataStart)
-            {
-                // Consume the whitespace, then check for 'EI'
-                int wsPos = _pos;
-                if (_pos != dataStart) _pos++; // skip whitespace byte
+        // --- 2. Locate the end of the image data (past 'EI') ---
+        bool consumed = false;
 
-                if (_pos + 1 < _content.Length &&
-                    _content[_pos] == 'E' && _content[_pos + 1] == 'I' &&
-                    (_pos + 2 >= _content.Length || IsWordBoundaryByte(_content[_pos + 2])))
-                {
-                    _pos += 2; // consume 'EI'
-                    break;
-                }
-                // Not EI — roll back to whitespace position and advance one
-                _pos = wsPos + 1;
-            }
-            else
+        // 2a. Trust an explicit data length when present (/L — PDF 2.0 §8.9.7;
+        // or full-form /Length mapped to the canonical "L" key). Skip exactly
+        // that many bytes and confirm EI follows. This avoids false-positive
+        // 'EI' matches inside binary image data, which the byte-scan below
+        // cannot reliably distinguish. (Issue #347)
+        if (imageParams.GetOptional("L") is PdfInteger lenObj &&
+            lenObj.Value > 0 && lenObj.Value <= int.MaxValue)
+        {
+            int afterData = _pos + (int)lenObj.Value;
+            if (afterData <= _content.Length)
             {
-                _pos++;
+                int probe = afterData;
+                while (probe < _content.Length && IsWhitespaceByte(_content[probe])) probe++;
+                if (probe + 1 < _content.Length &&
+                    _content[probe] == 'E' && _content[probe + 1] == 'I' &&
+                    (probe + 2 >= _content.Length || IsWordBoundaryByte(_content[probe + 2])))
+                {
+                    _pos = probe + 2; // consume 'EI'
+                    consumed = true;
+                }
+                // length present but EI didn't line up → fall back to scanning
+            }
+        }
+
+        // 2b. No usable length: scan for 'EI' at a word boundary, consuming raw
+        // image data. This is O(n) in the data size and always terminates.
+        if (!consumed)
+        {
+            var dataStart = _pos;
+            while (_pos < _content.Length)
+            {
+                if (IsWhitespaceByte(_content[_pos]) || _pos == dataStart)
+                {
+                    // Consume the whitespace, then check for 'EI'
+                    int wsPos = _pos;
+                    if (_pos != dataStart) _pos++; // skip whitespace byte
+
+                    if (_pos + 1 < _content.Length &&
+                        _content[_pos] == 'E' && _content[_pos + 1] == 'I' &&
+                        (_pos + 2 >= _content.Length || IsWordBoundaryByte(_content[_pos + 2])))
+                    {
+                        _pos += 2; // consume 'EI'
+                        break;
+                    }
+                    // Not EI — roll back to whitespace position and advance one
+                    _pos = wsPos + 1;
+                }
+                else
+                {
+                    _pos++;
+                }
             }
         }
 

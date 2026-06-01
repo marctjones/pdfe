@@ -186,4 +186,43 @@ public class InlineImageTests
         dict.ContainsKey("ImageMask").Should().BeFalse();
         dict.ContainsKey("Interpolate").Should().BeFalse();
     }
+
+    [Fact]
+    public void Parse_InlineImage_WithLength_SkipsEmbeddedFalseEI()
+    {
+        // The 7 raw bytes contain the sequence <space>EI<space> at offset 1,
+        // which the byte-scan fallback would mistake for the real end marker
+        // and truncate the image — corrupting every operator after it.
+        // With an explicit /L 7 the parser must skip exactly 7 bytes to the
+        // *real* EI and resync cleanly. (Issue #347)
+        byte[] raw = { 0x01, 0x20, 0x45, 0x49, 0x20, 0x02, 0x03 }; // .· E I · .. — " EI " inside
+        var header = Encoding.ASCII.GetBytes("BI\n/W 7\n/H 1\n/BPC 8\n/CS /G\n/L 7\nID\n");
+        var footer = Encoding.ASCII.GetBytes("\nEI\nBT (after) Tj ET\n");
+        var content = header.Concat(raw).Concat(footer).ToArray();
+
+        var result = new ContentStreamParser(content).Parse();
+
+        result.Operators.Should().ContainSingle(op => op.Name == "BI",
+            "the /L length must skip the embedded false 'EI' and find exactly one image");
+        result.Operators.Should().Contain(op => op.Name == "Tj",
+            "the text operator after the real EI must be parsed once the image is consumed correctly");
+    }
+
+    [Fact]
+    public void Parse_InlineImage_WithoutLength_TruncatesAtFalseEI_DocumentsScanLimitation()
+    {
+        // Same payload, but WITHOUT /L. The scan stops at the embedded false
+        // 'EI', so the trailing bytes are mis-tokenised. This documents why
+        // /L is preferred (and why #354 inline-image redaction should rely on
+        // declared length where available).
+        byte[] raw = { 0x01, 0x20, 0x45, 0x49, 0x20, 0x02, 0x03 };
+        var header = Encoding.ASCII.GetBytes("BI\n/W 7\n/H 1\n/BPC 8\n/CS /G\nID\n");
+        var footer = Encoding.ASCII.GetBytes("\nEI\nBT (after) Tj ET\n");
+        var content = header.Concat(raw).Concat(footer).ToArray();
+
+        var result = new ContentStreamParser(content).Parse();
+
+        // Still exactly one BI; the difference is the image ends early.
+        result.Operators.Should().ContainSingle(op => op.Name == "BI");
+    }
 }
