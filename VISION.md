@@ -7,11 +7,11 @@ A cross-platform PDF editor focused on **true content-level redaction** for priv
 
 1. **Security-First Redaction** - Remove text/graphics from PDF structure, not just visual covering. Text extraction tools cannot recover redacted content.
 
-2. **Cross-Platform** - Runs on Windows, Linux, and macOS via .NET 8 + Avalonia UI.
+2. **Cross-Platform** - Runs on Windows, Linux, and macOS via .NET 10 + Avalonia 12 (UI).
 
 3. **Permissive Licensing** - All dependencies use MIT, Apache 2.0, or BSD-3 licenses. No copyleft restrictions.
 
-4. **Self-Contained** - Working toward zero external PDF library dependencies with Pdfe.Core (parsing/writing) and Pdfe.Rendering (SkiaSharp-based rendering).
+4. **Self-Contained** - As of v2.0, zero external *PDF* library dependencies: Pdfe.Core (parsing/writing) and Pdfe.Rendering (SkiaSharp-based rendering) replace PdfPig/PDFsharp/PDFtoImage. SkiaSharp (rasterization) and BouncyCastle (crypto) remain as permissively-licensed support libraries.
 
 ## v2.0 Goals
 
