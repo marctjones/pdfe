@@ -27,7 +27,7 @@ See [Knowledge Management Strategy](#knowledge-management-strategy) section belo
 
 ## Project Overview
 
-This is a cross-platform PDF editor built with **C# + .NET 8 + Avalonia UI** (MVVM architecture). The application runs on Windows, Linux, and macOS, providing PDF viewing, page manipulation, and content-level redaction capabilities.
+This is a cross-platform PDF editor built with **C# + .NET 10 + Avalonia UI** (MVVM architecture). The application runs on Windows, Linux, and macOS, providing PDF viewing, page manipulation, and content-level redaction capabilities. As of v2.0 the PDF stack is pure-.NET and pdfe-owned (Pdfe.Core parser/writer, Pdfe.Rendering SkiaSharp renderer, Pdfe.Ocr); the legacy PdfPig/PDFsharp/PDFtoImage dependencies have been removed.
 
 **Key Features:**
 - Open/view PDFs with zoom and pan controls
@@ -62,9 +62,12 @@ This project implements **TRUE glyph-level removal** for PDF redaction. This is 
 ### Critical Files - DO NOT SIMPLIFY
 
 ```
-PdfEditor/Services/RedactionService.cs           ← RemoveContentInArea() is critical
-PdfEditor/Services/Redaction/ContentStreamParser.cs  ← Parses text operations
-PdfEditor/Services/Redaction/ContentStreamBuilder.cs ← Rebuilds without removed ops
+Pdfe.Core/Text/Segmentation/GlyphRemover.cs            ← orchestrates glyph-level removal
+Pdfe.Core/Text/Segmentation/LetterFinder.cs            ← text-based letter matching (issue #90)
+Pdfe.Core/Text/Segmentation/OperationReconstructor.cs  ← rebuilds BT/Tf/Tj blocks without removed glyphs
+Pdfe.Core/Content/ContentStreamParser.cs               ← parses content-stream operators
+Pdfe.Core/Content/ContentStreamWriter.cs               ← serializes operators back to bytes
+PdfEditor/Services/RedactionService.cs                 ← GUI orchestration; mirrors the rewrite onto the page
 ```
 
 ### Required Test Assertion
@@ -126,7 +129,7 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 dotnet publish -c Release -r osx-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-Published executables are in `bin/Release/net8.0/{runtime}/publish/`
+Published executables are in `bin/Release/net10.0/{runtime}/publish/`
 
 ### Build Scripts
 
@@ -155,7 +158,7 @@ The codebase follows strict MVVM separation:
 
 **Service Layer** (`Services/`):
 - `PdfDocumentService.cs` - PDF loading, saving, page add/remove
-- `PdfRenderService.cs` - PDF-to-image rendering (uses PDFium)
+- `PdfRenderService.cs` - PDF-to-image rendering (uses Pdfe.Rendering / SkiaSharp)
 - `RedactionService.cs` - Orchestrates content-level redaction
 - `PdfTextExtractionService.cs` - Text extraction from PDFs
 - `PdfSearchService.cs` - Search functionality
@@ -170,7 +173,7 @@ ViewModel (MainWindowViewModel)
     ↓ Calls Services
 Service Layer (PdfDocumentService, RedactionService, etc.)
     ↓ Uses Libraries
-PDF Libraries (Pdfe.Core for parsing/redaction, Pdfe.Rendering for Skia render, PDFsharp for save)
+PDF Libraries (Pdfe.Core for parsing/redaction/save, Pdfe.Rendering for Skia render, Pdfe.Ocr for OCR)
 ```
 
 When modifying the UI, update the XAML and bind to ViewModel properties. Never put business logic in code-behind.
@@ -245,16 +248,22 @@ This conversion happens in `TextBoundsCalculator` and when drawing redaction rec
 Located in `PdfEditor/PdfEditor.csproj`:
 
 **UI Framework:**
-- Avalonia 11.1.3 (cross-platform XAML UI)
-- ReactiveUI 20.1.1 (MVVM framework)
+- Avalonia 12.0.4 (cross-platform XAML UI)
+- ReactiveUI 23.2.27 (MVVM framework)
+- FluentAvaloniaUI 3.0.0-preview2 (Fluent theme/controls)
 
-**PDF Libraries:**
-- PDFsharp 6.2.2 (MIT) - PDF structure manipulation
-- PdfPig 0.1.11 (Apache 2.0) - PDF parsing, text extraction
-- PDFtoImage 4.0.2 (MIT) - PDF rendering via PDFium
-- SkiaSharp 2.88.8 (MIT) - 2D graphics
+**PDF Stack (pdfe-owned, pure .NET):**
+- Pdfe.Core - parser, writer, content streams, fonts, encryption, glyph-level redaction
+- Pdfe.Rendering - SkiaSharp-based renderer (replaces PDFium)
+- Pdfe.Ocr - shells out to system tesseract
 
-All licenses are permissive (MIT/Apache 2.0/BSD-3), no copyleft restrictions.
+**Supporting:**
+- SkiaSharp 3.119.4 (MIT) - 2D graphics / rasterization
+- BouncyCastle.Cryptography 2.6.2 (MIT) - crypto primitives for encryption
+
+The legacy PdfPig / PDFsharp / PDFtoImage dependencies were removed in v2.0.
+All remaining licenses are permissive (MIT/Apache 2.0/BSD-3), no copyleft restrictions.
+SkiaSharp ships a native component but is MIT-licensed.
 
 ## Test Infrastructure
 
@@ -316,14 +325,13 @@ Located in `PdfEditor.Tests/`:
 
 ### PDF Rendering Issues
 
-- PDFtoImage uses PDFium (native library)
-- Linux requires `libgdiplus`: `sudo apt-get install libgdiplus`
-- Check `PdfRenderService.cs` for rendering code
+- Rendering goes through Pdfe.Rendering (SkiaSharp); SkiaSharp carries its own native component
+- Check `PdfRenderService.cs` (GUI) and `Pdfe.Rendering/SkiaRenderer.cs` for rendering code
 
 ### Build Failures
 
 - Run `dotnet restore` first
-- Ensure .NET 8.0 SDK installed: `dotnet --version`
+- Ensure .NET 10.0 SDK installed: `dotnet --version`
 - Clear build artifacts: `dotnet clean`
 
 ### Build Warnings
