@@ -18,6 +18,26 @@
     <ApplicationIcon>Assets\pdfe_logo.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Release startup/responsiveness tuning (#339). These only take effect for
+       Release builds; PublishReadyToRun additionally only activates on a
+       `dotnet publish -r <rid>`, so a plain `dotnet build` is unaffected.
+       NativeAOT and full trimming are deliberately NOT enabled here — they are
+       blocked by the Roslyn scripting engine and ReactiveUI's reflection (see
+       the feasibility investigations in #342 / #343). Workstation (not Server)
+       GC with concurrent collection is the right tradeoff for a desktop UI:
+       it minimises pause times so the window never hitches. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Pre-JIT IL to native at publish time → faster cold start. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Profile-guided tiered compilation → better steady-state hot paths
+         (render + redaction loops). -->
+    <TieredCompilation>true</TieredCompilation>
+    <TieredPGO>true</TieredPGO>
+    <!-- Low-pause GC for a responsive UI thread. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="PdfEditor.Tests" />
   </ItemGroup>
