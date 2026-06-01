@@ -1,5 +1,5 @@
 using Xunit;
-using FluentAssertions;
+using AwesomeAssertions;
 using Avalonia.Styling;
 using System;
 
@@ -13,7 +13,7 @@ namespace PdfEditor.Tests.Unit;
 /// - Default: System
 ///
 /// Note: Full integration with Avalonia Application.RequestedThemeVariant
-/// requires [AvaloniaFact] for UI tests. Here we test enum values and logic.
+/// requires [FixedAvaloniaFact] for UI tests. Here we test enum values and logic.
 /// </summary>
 public class ThemeToggleTests
 {

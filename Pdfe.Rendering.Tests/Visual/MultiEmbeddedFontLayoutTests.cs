@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Rendering;
 using SkiaSharp;

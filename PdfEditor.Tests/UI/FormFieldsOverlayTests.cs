@@ -7,14 +7,12 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using PdfEditor.Controls;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -89,7 +87,7 @@ public class FormFieldsOverlayTests
         return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task FormFieldsLayer_PaintsOneInputPerField()
     {
         var path = WriteTempFormPdf();
@@ -132,7 +130,7 @@ public class FormFieldsOverlayTests
         }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task EditingTextField_MutatesUnderlyingFieldAndMarksDirty()
     {
         var path = WriteTempFormPdf();

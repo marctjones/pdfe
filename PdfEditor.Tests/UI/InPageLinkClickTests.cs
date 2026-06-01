@@ -9,14 +9,12 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using PdfEditor.Controls;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -35,7 +33,7 @@ public class InPageLinkClickTests
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
     private const double RenderDpi = 120.0;
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ClickOnTocLink_NavigatesToDestinationPage()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -82,7 +80,7 @@ public class InPageLinkClickTests
 
         // Convert the link's PDF-points rect to viewer DIPs (matches the
         // PdfViewerControl's own conversion: 120 DPI bitmap, Y-flip).
-        var page = vm.PdfCoreDocument.GetPage(linkPage);
+        var page = vm.PdfCoreDocument!.GetPage(linkPage);
         const double s = RenderDpi / 72.0;
         var dipX = targetLink.Rect.Left * s + (targetLink.Rect.Right - targetLink.Rect.Left) * s * 0.5;
         var dipY = (page.Height - (targetLink.Rect.Top + targetLink.Rect.Bottom) / 2.0) * s;

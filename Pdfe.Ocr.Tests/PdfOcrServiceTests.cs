@@ -1,5 +1,5 @@
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
 using Pdfe.Ocr;
@@ -38,10 +38,10 @@ public class PdfOcrServiceTests
     private static PdfOcrService NewService(int dpi = 300) =>
         new(dpi: dpi, tessdataPrefix: TessdataPrefix);
 
-    [SkippableFact]
+    [Fact]
     public void RecognizePage_ReadsTextFromRenderedPage()
     {
-        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+        Assert.SkipUnless(TesseractAvailable, "tesseract CLI not installed");
 
         using var doc = PdfDocument.CreateNew();
         var page = doc.Pages.AddBlank(612, 792);
@@ -63,10 +63,10 @@ public class PdfOcrServiceTests
         result.Words.Should().NotBeEmpty();
     }
 
-    [SkippableFact]
+    [Fact]
     public void RecognizePage_BlankPage_ReturnsEmptyText()
     {
-        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+        Assert.SkipUnless(TesseractAvailable, "tesseract CLI not installed");
 
         using var doc = PdfDocument.CreateNew();
         doc.Pages.AddBlank(612, 792);
@@ -78,10 +78,10 @@ public class PdfOcrServiceTests
         result.Words.Should().BeEmpty();
     }
 
-    [SkippableFact]
+    [Fact]
     public void OcrWord_BoundingBox_IsInPdfPointsBottomLeft()
     {
-        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+        Assert.SkipUnless(TesseractAvailable, "tesseract CLI not installed");
 
         using var doc = PdfDocument.CreateNew();
         var page = doc.Pages.AddBlank(612, 792);
@@ -194,10 +194,10 @@ public class PdfOcrServiceTests
         action.Should().Throw<ArgumentNullException>();
     }
 
-    [SkippableFact]
+    [Fact]
     public void PdfOcrService_RecognizeDocument_ReturnsOneResultPerPage()
     {
-        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+        Assert.SkipUnless(TesseractAvailable, "tesseract CLI not installed");
 
         using var doc = PdfDocument.CreateNew();
         for (int i = 0; i < 3; i++)

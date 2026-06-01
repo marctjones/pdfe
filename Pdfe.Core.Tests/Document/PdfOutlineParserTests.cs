@@ -1,10 +1,8 @@
 using System.IO;
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Core.Tests.Document;
 
 /// <summary>
@@ -65,7 +63,7 @@ public class PdfOutlineParserTests
         });
 
         _out.WriteLine($"resolved {resolved}/{total} outline destinations");
-        resolved.Should().BeGreaterOrEqualTo(total / 2,
+        resolved.Should().BeGreaterThanOrEqualTo(total / 2,
             "at least half of outline entries should resolve to real pages");
     }
 

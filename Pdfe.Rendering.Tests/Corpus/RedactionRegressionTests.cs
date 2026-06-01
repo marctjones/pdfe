@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
 using Pdfe.Core.Text;
@@ -10,8 +10,6 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests.Corpus;
 
 /// <summary>

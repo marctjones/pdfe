@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Rendering.Fonts;
 using SkiaSharp;
@@ -6,8 +6,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests.Fonts;
 
 /// <summary>

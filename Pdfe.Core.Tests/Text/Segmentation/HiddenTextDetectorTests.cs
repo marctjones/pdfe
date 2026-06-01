@@ -1,7 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Content;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
@@ -274,7 +274,7 @@ public class HiddenTextDetectorTests
         using var doc = PdfDocument.Open(pdf);
         var hits = HiddenTextDetector.ScanPage(doc.GetPage(1), 1);
 
-        hits.Should().HaveCountGreaterOrEqualTo(1);
+        hits.Should().HaveCountGreaterThanOrEqualTo(1);
     }
 
     #endregion

@@ -23,9 +23,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="SkiaSharp" Version="2.88.9" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="2.88.9" />
+    <!-- System.CommandLine 2.0.0 GA was a substantial API rewrite vs the
+         beta4 build (handlers → SetAction(parseResult), Argument/Option
+         description and default moved to property-initializers, IsRequired
+         renamed to Required). Migration done in Program.cs. -->
+    <PackageReference Include="System.CommandLine" Version="2.0.7" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
   </ItemGroup>
 
 </Project>

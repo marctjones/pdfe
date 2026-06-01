@@ -6,7 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Controls;
 using PdfEditor.Tests.Utilities;
 using Xunit;
@@ -26,7 +26,7 @@ public class PdfViewerControlTests
 
     #region Instantiation Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_CanBeInstantiated()
     {
         // Act
@@ -36,7 +36,7 @@ public class PdfViewerControlTests
         control.Should().NotBeNull();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_HasDefaultProperties()
     {
         // Arrange & Act
@@ -53,7 +53,7 @@ public class PdfViewerControlTests
 
     #region Document Loading Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_CanLoadDocument()
     {
         // Arrange
@@ -81,7 +81,7 @@ public class PdfViewerControlTests
         control.Document?.Dispose();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_LoadMultiPageDocument_ShowsPageCount()
     {
         // Arrange
@@ -112,7 +112,7 @@ public class PdfViewerControlTests
 
     #region Zoom Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_ZoomIn_IncreasesZoomLevel()
     {
         // Arrange
@@ -129,7 +129,7 @@ public class PdfViewerControlTests
         control.ZoomLevel.Should().BeGreaterThan(initialZoom);
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_ZoomOut_DecreasesZoomLevel()
     {
         // Arrange
@@ -146,7 +146,7 @@ public class PdfViewerControlTests
         control.ZoomLevel.Should().BeLessThan(2.0);
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_ZoomLevel_CanBeSetDirectly()
     {
         // Arrange
@@ -166,7 +166,7 @@ public class PdfViewerControlTests
 
     #region Page Navigation Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_CurrentPage_CanBeChanged()
     {
         // Arrange
@@ -197,7 +197,7 @@ public class PdfViewerControlTests
         control.Document?.Dispose();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_CanNavigateToLastPage()
     {
         // Arrange
@@ -232,7 +232,7 @@ public class PdfViewerControlTests
 
     #region Interaction Mode Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_InteractionMode_CanBeChanged()
     {
         // Arrange
@@ -248,7 +248,7 @@ public class PdfViewerControlTests
         control.InteractionMode.Should().Be(InteractionMode.Redaction);
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void PdfViewerControl_InteractionMode_CanBeSwitched()
     {
         // Arrange
@@ -269,7 +269,7 @@ public class PdfViewerControlTests
 
     #region Event Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_PageChanged_FiresEvent()
     {
         // Arrange
@@ -324,7 +324,7 @@ public class PdfViewerControlTests
 
     #region Annotation Overlay Tests
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_LoadDocumentWithAnnotations_AnnotationsLayerHasChildren()
     {
         // Build a minimal in-memory PDF with a single Text annotation.
@@ -366,7 +366,7 @@ public class PdfViewerControlTests
         control.Document?.Dispose();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_SetAnnotationsDirectly_LayerMatchesCount()
     {
         // Set the Annotations property with 2 known annotations and verify
@@ -405,7 +405,7 @@ public class PdfViewerControlTests
         control.Document?.Dispose();
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PdfViewerControl_AnnotationsCleared_WhenDocumentSetToNull()
     {
         var pdf = MakePdfWithAnnotation(

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
 using SkiaSharp;
@@ -314,12 +314,8 @@ public class SkiaRendererCoverageTests
     public void RenderPage_Transparency_OverlappingRectangles_BlendingApplied()
     {
         // Arrange - Two overlapping rectangles with transparency via /ca (fill alpha)
-        var content = @"
-            1 0 0 rg
-            100 100 150 150 re f
-            0 0 1 rg
-            150 150 150 150 re f
-        ";
+        // Content stream is fixed inside CreatePdfWithExtGState — the ExtGState
+        // resource dictionary is the only knob this test varies.
         var extGState = new Dictionary<string, object>
         {
             ["ca"] = 0.5  // Non-stroking alpha
@@ -339,14 +335,9 @@ public class SkiaRendererCoverageTests
     [Fact]
     public void RenderPage_StrokeAlpha_CA_Operator()
     {
-        // Arrange - Stroke alpha via /CA (stroking alpha) in ExtGState
-        var content = @"
-            0 G
-            3 w
-            100 200 m
-            300 200 l
-            S
-        ";
+        // Arrange - Stroke alpha via /CA (stroking alpha) in ExtGState.
+        // Content stream is fixed inside CreatePdfWithExtGState — the
+        // ExtGState resource dictionary is the only knob this test varies.
         var extGState = new Dictionary<string, object>
         {
             ["CA"] = 0.3  // Stroking alpha = 30%

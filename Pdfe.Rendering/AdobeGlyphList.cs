@@ -16,10 +16,14 @@ namespace Pdfe.Rendering;
 /// </summary>
 internal static class AdobeGlyphList
 {
+    // Roslyn can't prove that _map is initialized before the Lazy<>'s factory
+    // runs (the field appears later in source order), even though the factory
+    // is only invoked on first .Value access — bang-suppress the spurious
+    // CS8602 warning rather than reorder the file.
     private static readonly Lazy<Dictionary<char, string>> _reverse =
         new(() =>
         {
-            var inv = new Dictionary<char, string>(_map.Count);
+            var inv = new Dictionary<char, string>(_map!.Count);
             foreach (var kvp in _map)
                 if (!inv.ContainsKey(kvp.Value))
                     inv[kvp.Value] = kvp.Key;

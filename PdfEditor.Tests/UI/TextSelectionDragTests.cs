@@ -10,7 +10,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using PdfEditor.Controls;
@@ -18,8 +18,6 @@ using PdfEditor.Services;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -42,7 +40,7 @@ public class TextSelectionDragTests
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
     private const double RenderDpi = 120.0;
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task DragOverFirstLine_SelectsExpectedReadingOrderText()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -66,7 +64,7 @@ public class TextSelectionDragTests
         // Pick a page with plenty of body text — page 15 in this book
         // is well into prose, no figures, predictable reading order.
         const int targetPageNumber = 15;
-        targetPageNumber.Should().BeLessOrEqualTo(vm.TotalPages);
+        targetPageNumber.Should().BeLessThanOrEqualTo(vm.TotalPages);
 
         var page = vm.PdfCoreDocument!.GetPage(targetPageNumber);
         var letters = page.Letters?.ToList() ?? new System.Collections.Generic.List<Letter>();
@@ -165,7 +163,7 @@ public class TextSelectionDragTests
         vm.SelectedText.Should().Be(expectedText);
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task DragOverFirstLine_AtNonDefaultZoom_SelectsExpectedReadingOrderText()
     {
         // Same single-line selection but with zoom kicked off the
@@ -242,7 +240,7 @@ public class TextSelectionDragTests
             "selection must hit the same letter run regardless of zoom level");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task DragAcrossTwoLines_SelectsRangeIncludingLineBreak()
     {
         // Multi-line selection: anchor on line 1, focus deep into line 2.
@@ -321,7 +319,7 @@ public class TextSelectionDragTests
         viewerReportedText.Should().Be(expectedText);
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ClickOnSpecificVisibleLetter_HitTestReturnsThatLetter()
     {
         // Stronger version of the earlier tests: those used JoinText for
@@ -381,7 +379,7 @@ public class TextSelectionDragTests
             "if the result is a different letter (or empty) the hit-test is off");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task SelectExactPhrase_ProducesPhraseTextWithoutTrailingExtras()
     {
         // The tightest test of the user's "wrong text selected" report:
@@ -455,7 +453,7 @@ public class TextSelectionDragTests
             "exactly that phrase — no off-by-one, no extra trailing letters");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task AfterSelection_ClipboardHistoryGetsTheSelectedText()
     {
         // The "select then copy" flow: SelectedText is published, the
@@ -522,7 +520,7 @@ public class TextSelectionDragTests
         vm.ClipboardHistory[0].PageNumber.Should().Be(targetPageNumber);
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task CtrlC_AfterPhraseSelection_CopiesExactlyTheSelectedPhrase()
     {
         // The user-reported "wrong text" bug — pressing Ctrl+C after a
@@ -593,7 +591,7 @@ public class TextSelectionDragTests
         // Fire the command (non-blocking) and poll for the side-effect.
         // Awaiting Execute().ToTask() deadlocks here: the command body
         // awaits Dispatcher.UIThread.InvokeAsync, but we're holding the
-        // UI-thread synchronisation context inside an [AvaloniaFact]
+        // UI-thread synchronisation context inside an [FixedAvaloniaFact]
         // and the await on ToTask() prevents the dispatcher from
         // pumping the InvokeAsync continuation.
         vm.CopyTextCommand.Execute().Subscribe();

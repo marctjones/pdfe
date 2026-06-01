@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Pdfe.Core.ColorSpaces;
 using Pdfe.Core.Document;
+using Pdfe.Rendering.Fonts;
 using SkiaSharp;
 
 namespace Pdfe.Rendering;
@@ -71,9 +72,29 @@ internal class RenderContext
     private SKPath? _currentPath;
     private TextState _textState;
     private bool _inTextBlock;
-    private bool _inCompatibilitySection;
     private SKTypeface? _currentTypeface;
     private string _currentFontEncoding;
+
+    // Form-XObject recursion guards. PDF allows Form XObjects to invoke
+    // each other via the `Do` operator, and a malformed file can have
+    // a cycle (form A → form B → form A). Without protection that
+    // recurses until the stack overflows and SIGABRTs the process —
+    // observed on a pdf.js corpus fixture during the differential
+    // run on 2026-05-01. The visited-set tracks the call stack so
+    // a Do-cycle skips the recursive call; the depth counter is a
+    // backstop for pathologically deep but acyclic nests.
+    private readonly HashSet<Pdfe.Core.Primitives.PdfStream> _formXObjectStack =
+        new(ReferenceEqualityComparer.Instance);
+    private int _formXObjectDepth;
+    // Form XObject nesting cap. Has to be high enough to satisfy PDF/A-1
+    // §6.1.12's "implementation limits" conformance fixtures — those
+    // specifically chain a long ladder of Form XObjects to test that a
+    // reader supports deep nesting (the spec says 28+ levels of graphic
+    // state nesting must work). 64 is still well below any plausible
+    // .NET stack overflow point and is the same neighbourhood that
+    // mutool / Poppler use; cycle detection via _formXObjectStack
+    // catches genuine self-reference loops independently.
+    private const int MaxFormXObjectDepth = 64;
 
     // Glyph widths parsed from the current font dictionary's /Widths array.
     // Null when unavailable (e.g. standard 14 fonts that omit /Widths), in which
@@ -94,10 +115,40 @@ internal class RenderContext
     private Dictionary<char, byte>? _currentUnicodeToCode;
 
     // Typefaces loaded from the PDF's own embedded font streams
-    // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). Keyed by resource
-    // name (e.g. "TT0") so repeated SetFont calls for the same font within a
-    // page don't re-parse. Disposed at the end of Render().
-    private readonly Dictionary<string, SKTypeface> _embeddedTypefaces = new();
+    // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). Keyed by the
+    // resolved /Font dictionary's reference identity (PdfDocument.Resolve
+    // caches by object number, so two ResolveFontFromActiveResources calls
+    // for the same indirect ref return the same C# instance). Keying by
+    // the dict instead of the resource name correctly distinguishes two
+    // different physical fonts that share the same logical name (e.g.
+    // /F0) in different /Resources scopes — common in widget annotation
+    // appearances where each appearance dict's /Resources defines its
+    // own /F0. Disposed at the end of Render().
+    private readonly Dictionary<Pdfe.Core.Primitives.PdfDictionary, SKTypeface> _embeddedTypefaces = new();
+
+    // Per-font byte→glyphId map extracted from a format-0 cmap subtable when
+    // the typeface has no Unicode-mapped subtable Skia's shaper can use
+    // (Mac Roman / format-0 subsets from veraPDF Test Builder, LibreOffice
+    // and Office). When non-null for the active font, RenderText draws via
+    // SKTextEncoding.GlyphId with explicit glyph IDs. Otherwise text would
+    // shape to all-.notdef and the page would render blank, even though the
+    // parser correctly extracts the Unicode text via /ToUnicode.
+    // Cache value of null = "checked, not needed" so we don't re-probe.
+    // Keyed by the same fontDict reference as _embeddedTypefaces so two
+    // appearance-scoped /F0 entries that point to different fonts get
+    // independent byte-cmap probes.
+    private readonly Dictionary<Pdfe.Core.Primitives.PdfDictionary, ushort[]?> _embeddedTypefaceByteToGlyph = new();
+    private ushort[]? _currentByteToGlyph;
+
+    // Stack of /Resources dictionaries currently active. The page's own
+    // /Resources is the bottom; entering a Form XObject pushes its own
+    // /Resources (or null when absent — we still push so push/pop pair).
+    // Font and XObject lookups walk top-down, falling back to page
+    // resources at the bottom of the stack. Without this, annotation
+    // appearances and nested Form XObjects can't see the fonts and
+    // images defined in their own /Resources, so text in /AP /N streams
+    // either rendered with wrong fonts or not at all.
+    private readonly Stack<Pdfe.Core.Primitives.PdfDictionary?> _resourcesStack = new();
 
     // Type0 / CID font state. Type0 fonts use 2-byte-per-character codes and
     // index a descendant font's /W array for widths (different format from the
@@ -112,6 +163,37 @@ internal class RenderContext
     private bool _currentFontHasEmbeddedProgram;
     private Dictionary<int, float>? _currentCidWidths;
     private float _currentCidDefaultWidth = 1000f;
+
+    // CID → glyph-id mapping for the active CIDFontType2 font, when a
+    // non-identity /CIDToGIDMap stream is present. ushort.MaxValue at
+    // index N means "this CID is unmapped". Null means /CIDToGIDMap is
+    // absent or /Identity, so CID == GID and RenderCidBytes draws CIDs
+    // straight. Subset CIDFontType2 fonts (NotoSans, Noto* family) ship
+    // a stream remapping each used CID to its small subset glyph index;
+    // skipping the remap draws .notdef for every glyph and the page
+    // appears blank.
+    private ushort[]? _currentCidToGidMap;
+
+    // CID → glyph-index mapping for the active CIDFontType0 (CFF-based)
+    // font, derived from the /ROS-marked CFF's charset table. Same
+    // purpose as _currentCidToGidMap, but for CFF-keyed CID fonts where
+    // the mapping lives inside the embedded CFF rather than alongside
+    // it as /CIDToGIDMap. Subset Adobe-Japan1 fonts (KozMinPro,
+    // YuMincho, Source Han Sans, etc.) reach this path; without it,
+    // every CJK glyph resolves to .notdef and Japanese / Chinese /
+    // Korean PDFs render as blank pages.
+    private Dictionary<int, int>? _currentCffCidToGlyph;
+    // Per-fontDict cache for the above, keyed the same way as
+    // _embeddedTypefaces so two different /Font dicts with the same
+    // resource name but different physical fonts don't collide.
+    private readonly Dictionary<Pdfe.Core.Primitives.PdfDictionary, Dictionary<int, int>?> _embeddedCffCidToGlyph = new();
+
+    // Side-table for inline images. The tokenizer captures the dict
+    // header text and the raw data bytes between BI/ID/EI as we scan
+    // (where the bytes can be binary and not safe to round-trip through
+    // a token string), and emits a numeric operand pointing into this
+    // list. RenderInlineImage looks up the entry and rasterizes.
+    private readonly List<(string HeaderText, byte[] DataBytes)> _inlineImages = new();
 
     public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
     {
@@ -132,29 +214,44 @@ internal class RenderContext
     {
         try
         {
+            // Page resources sit at the bottom of the stack. Form XObjects
+            // (incl. annotation appearances) push their own /Resources on
+            // top of this when entered; lookups fall back to the page when
+            // a name isn't defined locally.
+            _resourcesStack.Push(_page.Resources);
+
             var contentBytes = _page.GetContentStreamBytes();
-            if (contentBytes.Length == 0)
-                return;
-
-            var content = Encoding.Latin1.GetString(contentBytes);
-            var tokens = Tokenize(content);
-            var operands = new List<string>();
-
-            foreach (var token in tokens)
+            if (contentBytes.Length > 0)
             {
-                if (IsOperator(token))
+                var content = Encoding.Latin1.GetString(contentBytes);
+                var tokens = Tokenize(content);
+                var operands = new List<string>();
+
+                foreach (var token in tokens)
                 {
-                    ExecuteOperator(token, operands);
-                    operands.Clear();
-                }
-                else
-                {
-                    operands.Add(token);
+                    if (IsOperator(token))
+                    {
+                        ExecuteOperator(token, operands);
+                        operands.Clear();
+                    }
+                    else
+                    {
+                        operands.Add(token);
+                    }
                 }
             }
+
+            // Annotations render on top of page content — sticky notes,
+            // FreeText callouts, Widget appearances, etc. live in the
+            // page's /Annots array as separate Form XObjects rather than
+            // in the content stream. Without this pass, pages where the
+            // visible text is entirely in annotations (a common veraPDF
+            // PDF/UA fixture pattern) come out blank.
+            RenderAnnotations();
         }
         finally
         {
+            _resourcesStack.Clear();
             foreach (var typeface in _embeddedTypefaces.Values)
                 typeface.Dispose();
             _embeddedTypefaces.Clear();
@@ -339,6 +436,22 @@ internal class RenderContext
                 SetClippingPath(true);
                 break;
 
+            // Inline image operator. The tokenizer captured the dict
+            // header text and binary data into _inlineImages and emitted
+            // the side-table index as our operand; we pull the entry,
+            // build a synthetic stream, and reuse the existing image
+            // renderer.
+            case "BI":
+                if (operands.Count >= 1 &&
+                    int.TryParse(operands[0], NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out var inlineIdx) &&
+                    inlineIdx >= 0 && inlineIdx < _inlineImages.Count)
+                {
+                    var entry = _inlineImages[inlineIdx];
+                    RenderInlineImage(entry.HeaderText, entry.DataBytes);
+                }
+                break;
+
             // Marked content operators (#298)
             case "BMC":
                 // Begin marked content - no visual effect
@@ -472,12 +585,10 @@ internal class RenderContext
                 }
                 break;
 
-            // Compatibility operators
+            // Compatibility operators (BX/EX) — accepted as no-ops so the
+            // dispatcher consumes them without flagging them as unknown.
             case "BX":
-                _inCompatibilitySection = true;
-                break;
             case "EX":
-                _inCompatibilitySection = false;
                 break;
 
             // Ignore unknown operators
@@ -505,37 +616,63 @@ internal class RenderContext
 
     private void ApplyTransform(List<string> operands)
     {
-        var a = (float)ParseNumber(operands[0]);
-        var b = (float)ParseNumber(operands[1]);
-        var c = (float)ParseNumber(operands[2]);
-        var d = (float)ParseNumber(operands[3]);
-        var e = (float)ParseNumber(operands[4]);
-        var f = (float)ParseNumber(operands[5]);
+        // Clamp matrix components to PDF 32000-2 §6.1.12's
+        // "implementation limit" range. Values larger than ±32767 are
+        // outside the spec's guaranteed range and either cause Skia's
+        // accumulated CTM to overflow into NaN/Inf (so subsequent draws
+        // collapse to nothing) or push content astronomically far
+        // off-page. Real PDFs never have values this big; conformance
+        // tests like A019-pdfa2-pass-* use ±FLT_MAX to verify the
+        // reader degrades gracefully. Clamping matches mutool's policy.
+        var a = ClampMatrix(ParseNumber(operands[0]));
+        var b = ClampMatrix(ParseNumber(operands[1]));
+        var c = ClampMatrix(ParseNumber(operands[2]));
+        var d = ClampMatrix(ParseNumber(operands[3]));
+        var e = ClampMatrix(ParseNumber(operands[4]));
+        var f = ClampMatrix(ParseNumber(operands[5]));
 
         var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
-        _canvas.Concat(ref matrix);
+        _canvas.Concat(in matrix);
+    }
+
+    private const float MatrixComponentMax = 32767f;
+    private static float ClampMatrix(double v)
+    {
+        if (double.IsNaN(v) || double.IsInfinity(v)) return 0f;
+        if (v > MatrixComponentMax) return MatrixComponentMax;
+        if (v < -MatrixComponentMax) return -MatrixComponentMax;
+        return (float)v;
     }
 
     #endregion
 
     #region Path Construction
 
+    // Path coordinates are subject to the same PDF 32000-2 §6.1.12
+    // implementation-limit as matrix components. Conformance fixtures
+    // (A019-pdfa2-pass-*) put ±FLT_MAX in `l` to verify the reader
+    // doesn't crash or freeze; clamping keeps the path representable
+    // in Skia's float matrix without overflowing. Real PDFs always
+    // stay within page bounds (typically <5000 pt).
     private void MoveTo(double x, double y)
     {
         _currentPath ??= new SKPath();
-        _currentPath.MoveTo((float)x, (float)y);
+        _currentPath.MoveTo(ClampMatrix(x), ClampMatrix(y));
     }
 
     private void LineTo(double x, double y)
     {
         _currentPath ??= new SKPath();
-        _currentPath.LineTo((float)x, (float)y);
+        _currentPath.LineTo(ClampMatrix(x), ClampMatrix(y));
     }
 
     private void CurveTo(double x1, double y1, double x2, double y2, double x3, double y3)
     {
         _currentPath ??= new SKPath();
-        _currentPath.CubicTo((float)x1, (float)y1, (float)x2, (float)y2, (float)x3, (float)y3);
+        _currentPath.CubicTo(
+            ClampMatrix(x1), ClampMatrix(y1),
+            ClampMatrix(x2), ClampMatrix(y2),
+            ClampMatrix(x3), ClampMatrix(y3));
     }
 
     private void CurveToV(double x2, double y2, double x3, double y3)
@@ -690,8 +827,10 @@ internal class RenderContext
         _textState.FontName = fontName;
         _textState.FontSize = (float)fontSize;
 
-        // Try to get the font from page resources to determine the base font and encoding
-        var fontDict = _page.GetFont(fontName);
+        // Try to get the font from the active resources (innermost Form
+        // XObject's /Resources, falling back to the page) to determine the
+        // base font and encoding.
+        var fontDict = ResolveFontFromActiveResources(fontName);
         var baseFont = fontDict?.GetNameOrNull("BaseFont") ?? "Helvetica";
 
         // /Encoding can be either a Name (e.g. /WinAnsiEncoding) or a Dictionary
@@ -740,15 +879,22 @@ internal class RenderContext
         // (/FontFile2 = TrueType, /FontFile3 = OpenType/CFF). When no embedded
         // data is present or the format isn't SkiaSharp-loadable (e.g. /FontFile
         // is raw Type1 PostScript), fall through to the system-font mapping.
-        var embedded = TryLoadEmbeddedTypeface(fontName, fontDict);
+        var embedded = TryLoadEmbeddedTypeface(fontDict);
         _currentFontHasEmbeddedProgram = embedded != null;
         _currentTypeface = embedded ?? GetTypeface(baseFont);
+        _currentByteToGlyph = embedded != null && fontDict != null
+            && _embeddedTypefaceByteToGlyph.TryGetValue(fontDict, out var btg)
+            ? btg : null;
+        _currentCffCidToGlyph = embedded != null && fontDict != null
+            && _embeddedCffCidToGlyph.TryGetValue(fontDict, out var cffMap)
+            ? cffMap : null;
 
         // Type0 (composite CID) fonts need a completely different content-stream
         // parse (2 bytes per character, widths indexed via /W not /Widths).
         _currentFontIsType0 = fontDict?.GetNameOrNull("Subtype") == "Type0";
         _currentCidWidths = null;
         _currentCidDefaultWidth = 1000f;
+        _currentCidToGidMap = null;
         if (_currentFontIsType0 && fontDict != null)
         {
             var descendants = ResolveArray(fontDict, "DescendantFonts");
@@ -759,6 +905,31 @@ internal class RenderContext
                 var w = ResolveArray(cidFont, "W");
                 if (w != null)
                     _currentCidWidths = ParseWArray(w);
+
+                // /CIDToGIDMap is /Identity (or absent) for most modern Type0
+                // fonts and CID == GID. Subset CIDFontType2 fonts produced by
+                // veraPDF Test Builder, Word, etc. ship a remapping stream
+                // (2-byte big-endian uint16 per CID); without applying it,
+                // glyph IDs miss every glyph in the subset and pages render
+                // .notdef-only blanks.
+                var cidToGidObj = cidFont.GetOptional("CIDToGIDMap");
+                if (cidToGidObj != null)
+                {
+                    var resolved = _page.Document.Resolve(cidToGidObj);
+                    if (resolved is Pdfe.Core.Primitives.PdfStream cidStream)
+                    {
+                        try
+                        {
+                            var data = cidStream.DecodedData;
+                            int count = data.Length / 2;
+                            var map = new ushort[count];
+                            for (int i = 0; i < count; i++)
+                                map[i] = (ushort)((data[i * 2] << 8) | data[i * 2 + 1]);
+                            _currentCidToGidMap = map;
+                        }
+                        catch { _currentCidToGidMap = null; }
+                    }
+                }
             }
         }
     }
@@ -828,14 +999,13 @@ internal class RenderContext
 
     // Load the font's embedded file (TrueType or OpenType/CFF) as an SKTypeface
     // so glyphs render in the face the PDF actually specifies, with the widths
-    // and kerning the PDF's /Widths table was authored against. Cached per-font
-    // for the life of this RenderContext; disposed at end of Render().
-    private SKTypeface? TryLoadEmbeddedTypeface(string fontName, Pdfe.Core.Primitives.PdfDictionary? fontDict)
+    // and kerning the PDF's /Widths table was authored against. Cached per-
+    // dict for the life of this RenderContext; disposed at end of Render().
+    private SKTypeface? TryLoadEmbeddedTypeface(Pdfe.Core.Primitives.PdfDictionary? fontDict)
     {
-        if (_embeddedTypefaces.TryGetValue(fontName, out var cached))
-            return cached;
-
         if (fontDict == null) return null;
+        if (_embeddedTypefaces.TryGetValue(fontDict, out var cached))
+            return cached;
 
         // Handle both simple and Type0 (CID) fonts: Type0 carries the embedded
         // file inside its /DescendantFonts[0]/FontDescriptor, not on itself.
@@ -880,10 +1050,15 @@ internal class RenderContext
         // so Skia can load it. The wrapper's cmap has been independently verified
         // (CffWrapperTests.Wrapped_CffSkiaCanResolveKnownGlyphs) — Skia resolves
         // every Unicode char to the correct CFF glyph index.
+        // For CID-keyed CFF (Adobe-Japan1 etc.) the wrapper produces a minimal
+        // cmap and returns the CID → glyph index map via cffCidToGlyph; the
+        // renderer threads that through SetFont so RenderCidBytes can dispatch
+        // glyph IDs directly.
         byte[] loadableBytes = fontBytes;
+        Dictionary<int, int>? cffCidToGlyph = null;
         if (isCff)
         {
-            var wrapped = TryWrapCffAsOpenType(fontBytes, fontDict, descriptor);
+            var wrapped = TryWrapCffAsOpenType(fontBytes, fontDict, descriptor, out cffCidToGlyph);
             if (wrapped != null) loadableBytes = wrapped;
         }
 
@@ -912,8 +1087,47 @@ internal class RenderContext
             }
         }
 
-        _embeddedTypefaces[fontName] = typeface;
+        _embeddedTypefaces[fontDict] = typeface;
+        _embeddedTypefaceByteToGlyph[fontDict] = ResolveByteCodeCmap(typeface, fontDict);
+        _embeddedCffCidToGlyph[fontDict] = cffCidToGlyph;
         return typeface;
+    }
+
+    /// <summary>
+    /// Detect typefaces that need the byte-coded glyph-ID draw path because
+    /// Skia's shaper can't read their cmap, and pre-compute the
+    /// byte→glyphId lookup once.
+    ///
+    /// We probe Skia first: if <c>SKFont.GetGlyph((int)c)</c> resolves
+    /// common Unicode codepoints to real glyphs, the font has Unicode
+    /// coverage Skia can shape and we don't need the workaround. Otherwise
+    /// we read any format-0 subtable from the cmap. Returns null when no
+    /// override is needed (the common case for modern Type 0 / CID fonts
+    /// with Identity-H or Unicode-mapped cmaps).
+    /// </summary>
+    private static ushort[]? ResolveByteCodeCmap(
+        SKTypeface typeface,
+        Pdfe.Core.Primitives.PdfDictionary? fontDict)
+    {
+        // Type0 (CID) fonts go through a separate draw path that already
+        // walks bytes 2 at a time and resolves through the descendant font;
+        // the format-0 workaround would double-encode.
+        if (fontDict?.GetNameOrNull("Subtype") == "Type0") return null;
+
+        using var probe = new SKFont(typeface, 12f);
+        int[] unicodeProbe = { 'A', 'a', 'M', 'e', '0', ' ', 'i' };
+        foreach (var cp in unicodeProbe)
+        {
+            if (probe.GetGlyph(cp) != 0)
+            {
+                // Skia can shape this font directly via its cmap.
+                return null;
+            }
+        }
+
+        // No Unicode coverage Skia can see — fall back to the format-0
+        // subtable if present.
+        return CmapFormat0Table.TryRead(typeface);
     }
 
     private static bool ProducesGlyphOutlines(SKTypeface typeface)
@@ -937,33 +1151,51 @@ internal class RenderContext
     private byte[]? TryWrapCffAsOpenType(
         byte[] cff,
         Pdfe.Core.Primitives.PdfDictionary fontDict,
-        Pdfe.Core.Primitives.PdfDictionary descriptor)
+        Pdfe.Core.Primitives.PdfDictionary descriptor,
+        out Dictionary<int, int>? cffCidToGlyph)
     {
+        cffCidToGlyph = null;
         var cffInfo = Fonts.CffParser.Parse(cff);
         if (cffInfo == null) return null;
 
-        // Build Unicode → glyph-index map and glyph-index → PDF-width map.
-        // Both derive from walking the PDF's character codes 0..255, resolving
-        // each to (Unicode, glyph name) and then looking up the glyph index in
-        // the CFF charset.
         var unicodeToGlyph = new Dictionary<char, int>(256);
         var glyphWidths = new Dictionary<int, ushort>(256);
-        for (int code = 0; code < 256; code++)
+
+        if (cffInfo.IsCidKeyed)
         {
-            char unicode = GetUnicodeForCode((byte)code);
-            if (unicode == '\0') continue;
-            if (!AdobeGlyphList.TryGetName(unicode, out var glyphName)) continue;
-            if (!cffInfo.GlyphNameToIndex.TryGetValue(glyphName, out var glyphIndex)) continue;
-
-            if (!unicodeToGlyph.ContainsKey(unicode))
-                unicodeToGlyph[unicode] = glyphIndex;
-
-            // If /Widths covers this code, use it as the per-glyph hmtx width.
-            if (_currentFontWidths != null)
+            // CID-keyed CFF (Adobe-Japan1 / Adobe-CNS1 / Adobe-Korea1). The
+            // CFF charset stores CIDs, not glyph names, so the AdobeGlyphList
+            // path doesn't apply — there's no Unicode → name → glyph chain
+            // to walk. Skip cmap construction and rely on the renderer
+            // dispatching glyphs via SKTextEncoding.GlyphId; CFF glyph
+            // ordering is preserved by the wrapper, so the OpenType glyph
+            // index Skia ultimately uses == the CFF glyph index ==
+            // CidToGlyph[cid] from the descendant font's CFF.
+            cffCidToGlyph = cffInfo.CidToGlyph;
+        }
+        else
+        {
+            // Build Unicode → glyph-index map and glyph-index → PDF-width map.
+            // Both derive from walking the PDF's character codes 0..255, resolving
+            // each to (Unicode, glyph name) and then looking up the glyph index in
+            // the CFF charset.
+            for (int code = 0; code < 256; code++)
             {
-                int idx = code - _currentFontFirstChar;
-                if (idx >= 0 && idx < _currentFontWidths.Length)
-                    glyphWidths[glyphIndex] = (ushort)Math.Clamp(_currentFontWidths[idx], 0, 65535);
+                char unicode = GetUnicodeForCode((byte)code);
+                if (unicode == '\0') continue;
+                if (!AdobeGlyphList.TryGetName(unicode, out var glyphName)) continue;
+                if (!cffInfo.GlyphNameToIndex.TryGetValue(glyphName, out var glyphIndex)) continue;
+
+                if (!unicodeToGlyph.ContainsKey(unicode))
+                    unicodeToGlyph[unicode] = glyphIndex;
+
+                // If /Widths covers this code, use it as the per-glyph hmtx width.
+                if (_currentFontWidths != null)
+                {
+                    int idx = code - _currentFontFirstChar;
+                    if (idx >= 0 && idx < _currentFontWidths.Length)
+                        glyphWidths[glyphIndex] = (ushort)Math.Clamp(_currentFontWidths[idx], 0, 65535);
+                }
             }
         }
 
@@ -1236,8 +1468,10 @@ internal class RenderContext
         var effectiveSize = GetEffectiveFontSize();
         var xyRatio = GetTextMatrixXYRatio();
 
+        // SkiaSharp 3 separated SKPaint and SKFont — draw calls now take
+        // both arguments rather than a paint that wraps a font.
         using var font = new SKFont(_currentTypeface, effectiveSize);
-        using var paint = new SKPaint(font)
+        using var paint = new SKPaint
         {
             Color = _state.FillColor,
             BlendMode = _state.BlendMode,
@@ -1259,10 +1493,20 @@ internal class RenderContext
         //         Y-down glyph drawing, which the outer flip turns into Y-up
         //         on screen exactly as the PDF intends.
         // Without this, browser-flipped text (and most CJK) renders upside-down.
+        //
+        // Per PDF 32000-2 §9.4.4 the text rendering matrix multiplies the
+        // X axis by Th (= Tz / 100). Tz=100 is the default and the no-op,
+        // but conformance fixtures use Tz=300, Tz=30000 etc. to test wide
+        // / condensed text. Without folding Th into this Scale the glyph
+        // itself is drawn at native width while the cursor advances by
+        // Th×width, leaving microscopic letters with huge gaps between
+        // them (visible as pdfe rendering only ~5% of the expected pixel
+        // count on TWG A001 / 6-1-12-t02 fixtures).
         float ySign = _textState.TextMatrixD >= 0 ? -1f : 1f;
+        float th = _textState.HorizontalScale / 100.0f;
         _canvas.Save();
         _canvas.Translate(x, y);
-        _canvas.Scale(xyRatio, ySign);
+        _canvas.Scale(xyRatio * th, ySign);
 
         bool drawWithPdfWidths =
             !_currentFontHasEmbeddedProgram &&
@@ -1296,24 +1540,40 @@ internal class RenderContext
             // With Tf=1 and Tm scale = effectiveSize, Tm_scale = effectiveSize.
             // Multiplying everything together puts cursor in the canvas frame
             // we just set up with Scale(xyRatio, -1).
+            // The outer Scale already folded Th into the canvas X axis, so
+            // cursor advances in the *pre-Th* frame: (w/1000 + spacing) * Tfs.
+            // Multiplying by Th again here would double-apply the horizontal
+            // scale and over-shoot per-glyph spacing under any non-default Tz.
             float cursor = 0f;
             float tc = _textState.CharSpacing;
             float tw = _textState.WordSpacing;
-            float th = _textState.HorizontalScale / 100.0f;
             for (int i = 0; i < sourceBytes!.Length; i++)
             {
-                _canvas.DrawText(text[i].ToString(), cursor, 0, paint);
+                _canvas.DrawText(text[i].ToString(), cursor, 0, font, paint);
                 int idx = sourceBytes[i] - _currentFontFirstChar;
                 float w = idx >= 0 && idx < _currentFontWidths!.Length
                     ? _currentFontWidths[idx]
                     : _currentFontMissingWidth;
                 float spacing = tc + (sourceBytes[i] == 0x20 ? tw : 0f);
-                cursor += (w / 1000f + spacing) * effectiveSize * th;
+                cursor += (w / 1000f + spacing) * effectiveSize;
             }
+        }
+        else if (_currentByteToGlyph != null && sourceBytes != null)
+        {
+            // The active typeface's cmap is byte-coded (Mac Roman / format-0)
+            // and Skia's shaper can't read it. Look each PDF byte code up in
+            // the parsed cmap and dispatch via SKTextBlob with explicit
+            // glyph IDs (SkiaSharp 3 dropped the DrawText(byte[], …)
+            // overload — SKTextBlob is the supported entry point).
+            // Without this branch every glyph would render as .notdef and
+            // the page would be blank.
+            var gids = BuildGlyphIds(sourceBytes, _currentByteToGlyph);
+            using var blob = BuildGlyphBlob(gids, font);
+            if (blob != null) _canvas.DrawText(blob, 0, 0, paint);
         }
         else
         {
-            _canvas.DrawText(text, 0, 0, paint);
+            _canvas.DrawText(text, 0, 0, font, paint);
         }
         _canvas.Restore();
 
@@ -1336,9 +1596,17 @@ internal class RenderContext
         {
             widthInFontUnits = SumPdfWidths(sourceBytes!) * effectiveSize;
         }
+        else if (_currentByteToGlyph != null && sourceBytes != null)
+        {
+            // Same byte-coded glyph-ID path as the draw branch above —
+            // SkiaSharp 3 moved MeasureText off SKPaint, the glyph-id
+            // overload now lives on SKFont.
+            var gids = BuildGlyphIds(sourceBytes, _currentByteToGlyph);
+            widthInFontUnits = font.MeasureText(new ReadOnlySpan<ushort>(gids), paint);
+        }
         else
         {
-            widthInFontUnits = paint.MeasureText(text);
+            widthInFontUnits = font.MeasureText(text, paint);
         }
 
         var width = widthInFontUnits * xyRatio;
@@ -1386,6 +1654,38 @@ internal class RenderContext
         return total;
     }
 
+    // Map PDF byte codes through the format-0 cmap into glyph IDs.
+    // Used for simple fonts whose embedded typeface has only a
+    // format-0 cmap; the byte→glyph map was parsed once at
+    // typeface-load time. SkiaSharp 3 routes glyph IDs through
+    // SKTextBlob (BuildGlyphBlob below) — the v2 byte-array
+    // SKTextEncoding.GlyphId path was removed.
+    private static ushort[] BuildGlyphIds(byte[] sourceBytes, ushort[] byteToGlyph)
+    {
+        var gids = new ushort[sourceBytes.Length];
+        for (int i = 0; i < sourceBytes.Length; i++)
+            gids[i] = byteToGlyph[sourceBytes[i]];
+        return gids;
+    }
+
+    /// <summary>
+    /// Wrap a glyph-id array in an <see cref="SKTextBlob"/> for
+    /// dispatch through <see cref="SKCanvas.DrawText(SKTextBlob,float,float,SKPaint)"/>.
+    /// SkiaSharp 3 dropped <c>SKCanvas.DrawText(byte[], …)</c>, and
+    /// <see cref="SKTextBlob.Create"/> has no <c>ReadOnlySpan&lt;ushort&gt;</c>
+    /// overload — only <c>SKTextBlobBuilder.AddRun</c> takes glyph IDs.
+    /// Origin (0, 0) since the caller has already concatenated the
+    /// right Translate/Scale onto the canvas; per-glyph advance comes
+    /// from the font's hmtx via the run's default positioning.
+    /// </summary>
+    private static SKTextBlob? BuildGlyphBlob(ushort[] gids, SKFont font)
+    {
+        if (gids.Length == 0) return null;
+        using var builder = new SKTextBlobBuilder();
+        builder.AddRun(new ReadOnlySpan<ushort>(gids), font, SKPoint.Empty);
+        return builder.Build();
+    }
+
     // Type0 rendering path. Content-stream bytes come in 2-at-a-time as
     // big-endian CIDs under /Identity-H (the only CMap we currently handle).
     // CIDs are rendered as glyph IDs directly — correct for /CIDToGIDMap
@@ -1396,20 +1696,45 @@ internal class RenderContext
             return;
 
         var count = bytes.Length / 2;
+        // Two parallel arrays: CIDs (used for /W width lookup, which is
+        // keyed by CID per spec) and GIDs (what Skia actually draws). The
+        // CID → GID resolution depends on the descendant font subtype:
+        //   - CIDFontType2 with /CIDToGIDMap stream → _currentCidToGidMap
+        //     is the array indexed by CID (handles Word / NotoSans / Office
+        //     subsets).
+        //   - CIDFontType0 (CFF-keyed, Adobe-Japan1 etc.) → the mapping is
+        //     inside the embedded CFF charset; CffCidToGlyph holds it.
+        //   - CIDFontType2 with /CIDToGIDMap = /Identity (or absent) → CID
+        //     equals GID and we draw straight through.
         var cids = new ushort[count];
+        var gids = new ushort[count];
         for (int i = 0; i < count; i++)
-            cids[i] = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+        {
+            ushort cid = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+            cids[i] = cid;
+            ushort gid;
+            if (_currentCidToGidMap != null && cid < _currentCidToGidMap.Length)
+                gid = _currentCidToGidMap[cid];
+            else if (_currentCffCidToGlyph != null
+                     && _currentCffCidToGlyph.TryGetValue(cid, out var cffGid))
+                gid = (ushort)cffGid;
+            else
+                gid = cid;
+            gids[i] = gid;
+        }
 
         var effectiveSize = GetEffectiveFontSize();
         var xyRatio = GetTextMatrixXYRatio();
 
+        // SkiaSharp 3: SKPaint no longer carries the font or text encoding;
+        // SKTextBlob (built below) embeds glyph IDs natively, so DrawText
+        // doesn't need a paint-side encoding hint anymore.
         using var font = new SKFont(_currentTypeface, effectiveSize);
-        using var paint = new SKPaint(font)
+        using var paint = new SKPaint
         {
             Color = _state.FillColor,
             BlendMode = _state.BlendMode,
             IsAntialias = _options.AntiAlias,
-            TextEncoding = SKTextEncoding.GlyphId,
         };
 
         // Match RenderText's Tm.d-aware Y-flip — without this, all CJK text
@@ -1420,11 +1745,12 @@ internal class RenderContext
         _canvas.Translate(_textState.TextMatrixE, _textState.TextMatrixF + _textState.TextRise);
         _canvas.Scale(xyRatio, ySign);
 
-        // SKTextEncoding.GlyphId reads the byte buffer as native-endian ushort
-        // glyph IDs. BlockCopy gives us exactly that on little-endian machines.
-        var glyphBytes = new byte[cids.Length * 2];
-        Buffer.BlockCopy(cids, 0, glyphBytes, 0, glyphBytes.Length);
-        _canvas.DrawText(glyphBytes, 0, 0, paint);
+        // Build a glyph-id text blob — SkiaSharp 3 routes glyph IDs
+        // through SKTextBlob (the v2 byte[] overload was removed). The
+        // GID array was already remapped through /CIDToGIDMap (or
+        // CFF charset) above, so we feed it straight in.
+        using var blob = BuildGlyphBlob(gids, font);
+        if (blob != null) _canvas.DrawText(blob, 0, 0, paint);
 
         _canvas.Restore();
 
@@ -1680,7 +2006,7 @@ internal class RenderContext
     {
         // Remove leading / if present
         var name = nameOperand.TrimStart('/');
-        var xobj = _page.GetXObject(name);
+        var xobj = ResolveXObjectFromActiveResources(name);
         if (xobj == null)
             return;
 
@@ -1718,13 +2044,20 @@ internal class RenderContext
             var filters = imageStream.Filters;
             if (filters.Contains("DCTDecode"))
             {
-                // JPEG data - decode directly
-                bitmap = SKBitmap.Decode(imageStream.EncodedData);
+                // JPEG data - decode directly. SafeDecode null-guards
+                // the encoded bytes and swallows SkiaSharp internal
+                // exceptions (ArgumentNullException 'codec', etc.) on
+                // malformed inputs so a single bad image doesn't kill
+                // the whole page.
+                bitmap = SafeDecode(imageStream.EncodedData);
             }
             else if (filters.Contains("JPXDecode"))
             {
-                // JPEG 2000 data - try platform codec, fall back to placeholder
-                bitmap = SKBitmap.Decode(imageStream.EncodedData);
+                // JPEG 2000 data — SkiaSharp's stock build has no JPX
+                // codec on Linux, so SKBitmap.Decode returns null or
+                // throws ArgumentNullException with codec=null. Either
+                // way we fall back to the placeholder.
+                bitmap = SafeDecode(imageStream.EncodedData);
                 if (bitmap == null && width > 0 && height > 0)
                     bitmap = CreatePlaceholderBitmap(width, height);
             }
@@ -1860,6 +2193,29 @@ internal class RenderContext
         return bitmap;
     }
 
+    /// <summary>
+    /// Wrap SKBitmap.Decode so any exception (ArgumentNullException
+    /// when SkiaSharp can't find a codec for this image format,
+    /// AccessViolationException on truncated/corrupt input, etc.)
+    /// returns null instead of propagating up and crashing the
+    /// page render. Found by the pdf.js corpus differential —
+    /// 8 fixtures with JPEG2000 inline images caused
+    /// "Value cannot be null. (Parameter 'codec')" because
+    /// SkiaSharp's Linux build ships without a JPX codec.
+    /// </summary>
+    private static SKBitmap? SafeDecode(byte[]? bytes)
+    {
+        if (bytes == null || bytes.Length == 0) return null;
+        try
+        {
+            return SKBitmap.Decode(bytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static SKBitmap CreatePlaceholderBitmap(int width, int height)
     {
         var bmp = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -1867,7 +2223,604 @@ internal class RenderContext
         return bmp;
     }
 
+    /// <summary>
+    /// Render every visible annotation on the page on top of the main
+    /// content. Each annotation's <c>/AP /N</c> stream is a Form XObject
+    /// in the appearance's own coordinate space; we compute the matrix
+    /// that maps its <c>/BBox</c> (transformed by /Matrix) onto the
+    /// annotation's <c>/Rect</c> per ISO 32000-2 §12.5.5, then dispatch
+    /// the appearance through the existing Form XObject pipeline.
+    /// Annotations without an /AP entry are skipped — synthesizing a
+    /// default appearance from /Subtype-specific properties (sticky-note
+    /// icon, link rectangles, etc.) is handled separately, if at all.
+    /// </summary>
+    private void RenderAnnotations()
+    {
+        IReadOnlyList<Pdfe.Core.Document.PdfAnnotation> annots;
+        try { annots = _page.GetAnnotations(); }
+        catch { return; }
+        if (annots.Count == 0) return;
+
+        foreach (var annot in annots)
+        {
+            // Skip annotations the spec says shouldn't be displayed.
+            // Print=4 is fine — that's an opt-in for *also* including
+            // the annotation in printed output, not a "screen only" flag.
+            var f = annot.Flags;
+            if ((f & (Pdfe.Core.Document.PdfAnnotationFlags.Hidden
+                    | Pdfe.Core.Document.PdfAnnotationFlags.NoView
+                    | Pdfe.Core.Document.PdfAnnotationFlags.Invisible)) != 0)
+                continue;
+
+            var appearance = ResolveAppearanceN(annot);
+            if (appearance == null)
+            {
+                // No baked /AP /N stream — synthesize a minimal default
+                // appearance for the subtypes commercial viewers
+                // routinely show (interactive widgets, link rectangles,
+                // shape annotations). Without this, signature widgets
+                // and unfilled form fields are invisible and PDFs look
+                // visibly less complete than in Acrobat / Preview /
+                // Chrome.
+                RenderDefaultAppearance(annot);
+                continue;
+            }
+
+            // Appearance bbox + matrix.
+            if (appearance.GetOptional("BBox") is not Pdfe.Core.Primitives.PdfArray bboxArr ||
+                bboxArr.Count < 4) continue;
+            float bx1 = (float)bboxArr.GetNumber(0);
+            float by1 = (float)bboxArr.GetNumber(1);
+            float bx2 = (float)bboxArr.GetNumber(2);
+            float by2 = (float)bboxArr.GetNumber(3);
+            float bMinX = Math.Min(bx1, bx2);
+            float bMinY = Math.Min(by1, by2);
+            float bMaxX = Math.Max(bx1, bx2);
+            float bMaxY = Math.Max(by1, by2);
+
+            var formMatrix = SKMatrix.Identity;
+            if (appearance.GetOptional("Matrix") is Pdfe.Core.Primitives.PdfArray mArr && mArr.Count >= 6)
+            {
+                formMatrix = new SKMatrix(
+                    (float)mArr.GetNumber(0), (float)mArr.GetNumber(2), (float)mArr.GetNumber(4),
+                    (float)mArr.GetNumber(1), (float)mArr.GetNumber(3), (float)mArr.GetNumber(5),
+                    0, 0, 1);
+            }
+
+            // Transform the four bbox corners through the form's /Matrix
+            // and take the axis-aligned bounding box of the result. Spec
+            // step from §12.5.5: "a quadrilateral whose corners are the
+            // four corners of BBox transformed by Matrix … then the
+            // smallest rectangle enclosing those four points."
+            var p1 = formMatrix.MapPoint(new SKPoint(bMinX, bMinY));
+            var p2 = formMatrix.MapPoint(new SKPoint(bMaxX, bMinY));
+            var p3 = formMatrix.MapPoint(new SKPoint(bMaxX, bMaxY));
+            var p4 = formMatrix.MapPoint(new SKPoint(bMinX, bMaxY));
+            float bbMinX = Math.Min(Math.Min(p1.X, p2.X), Math.Min(p3.X, p4.X));
+            float bbMinY = Math.Min(Math.Min(p1.Y, p2.Y), Math.Min(p3.Y, p4.Y));
+            float bbMaxX = Math.Max(Math.Max(p1.X, p2.X), Math.Max(p3.X, p4.X));
+            float bbMaxY = Math.Max(Math.Max(p1.Y, p2.Y), Math.Max(p3.Y, p4.Y));
+            if (bbMaxX <= bbMinX || bbMaxY <= bbMinY) continue;
+
+            // Annotation /Rect (PDF stores [llx lly urx ury], but some
+            // producers swap pairs — normalize both ways).
+            float rx1 = (float)Math.Min(annot.Rect.Left, annot.Rect.Right);
+            float ry1 = (float)Math.Min(annot.Rect.Bottom, annot.Rect.Top);
+            float rx2 = (float)Math.Max(annot.Rect.Left, annot.Rect.Right);
+            float ry2 = (float)Math.Max(annot.Rect.Bottom, annot.Rect.Top);
+            if (rx2 <= rx1 || ry2 <= ry1) continue;
+
+            // A = scale + translate that maps the AABB of the transformed
+            // bbox onto Rect. RenderFormXObject will additionally concat
+            // the form's own Matrix, so the final on-page transform is
+            // A · Matrix, which by construction takes BBox → Rect.
+            float sx = (rx2 - rx1) / (bbMaxX - bbMinX);
+            float sy = (ry2 - ry1) / (bbMaxY - bbMinY);
+            float tx = rx1 - bbMinX * sx;
+            float ty = ry1 - bbMinY * sy;
+            var fitMatrix = new SKMatrix(sx, 0, tx, 0, sy, ty, 0, 0, 1);
+
+            _canvas.Save();
+            try
+            {
+                _canvas.Concat(in fitMatrix);
+                RenderFormXObject(appearance);
+            }
+            catch
+            {
+                // Never let one malformed annotation kill the rest of
+                // the page; it's strictly an overlay on top of content
+                // we've already successfully rendered.
+            }
+            finally
+            {
+                _canvas.Restore();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolve <paramref name="annot"/>'s normal appearance to a Form
+    /// XObject stream. <c>/AP /N</c> is either:
+    /// <list type="bullet">
+    /// <item>a single stream — used regardless of state, or</item>
+    /// <item>a dictionary keyed by state name (Off / Yes / etc.) where
+    ///   <c>/AS</c> picks the active entry — Widget annotations and
+    ///   appearance-stateful ones use this.</item>
+    /// </list>
+    /// Returns null when no usable appearance is present.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfStream? ResolveAppearanceN(Pdfe.Core.Document.PdfAnnotation annot)
+    {
+        var apObj = annot.RawDictionary.GetOptional("AP");
+        if (apObj == null) return null;
+        if (_page.Document.Resolve(apObj) is not Pdfe.Core.Primitives.PdfDictionary ap) return null;
+        var nObj = ap.GetOptional("N");
+        if (nObj == null) return null;
+        var resolved = _page.Document.Resolve(nObj);
+
+        if (resolved is Pdfe.Core.Primitives.PdfStream stream)
+            return stream;
+
+        if (resolved is Pdfe.Core.Primitives.PdfDictionary stateDict)
+        {
+            var stateName = annot.RawDictionary.GetNameOrNull("AS");
+            if (stateName != null)
+            {
+                var stateObj = stateDict.GetOptional(stateName);
+                if (stateObj != null &&
+                    _page.Document.Resolve(stateObj) is Pdfe.Core.Primitives.PdfStream s)
+                    return s;
+            }
+            // No /AS or unknown state — fall through to first usable entry.
+            foreach (var kvp in stateDict)
+            {
+                if (_page.Document.Resolve(kvp.Value) is Pdfe.Core.Primitives.PdfStream s)
+                    return s;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Synthesize a minimum-viable visual for an annotation without
+    /// <c>/AP /N</c>. Modeled after what Acrobat / Preview / Chrome show
+    /// for interactive PDFs — a colored rectangle around the field —
+    /// not a full reproduction of the field's would-be value (we don't
+    /// interpret /DA + /V here; that's a substantial separate feature).
+    /// Covers:
+    /// <list type="bullet">
+    /// <item><c>/Widget</c>: form-field highlight rectangle (background
+    ///   from <c>/MK /BG</c> if present, border from <c>/MK /BC</c>
+    ///   plus the <c>/BS</c> width, falling back to a neutral
+    ///   light-blue field highlight similar to Acrobat's default).</item>
+    /// <item><c>/Link</c>: thin border using the annotation's <c>/C</c>
+    ///   color when present (links without /C are intentionally
+    ///   invisible in print, matching every commercial viewer).</item>
+    /// <item><c>/Square</c> / <c>/Circle</c>: stroked rectangle / ellipse
+    ///   using <c>/C</c> + <c>/BS</c>.</item>
+    /// </list>
+    /// </summary>
+    private void RenderDefaultAppearance(Pdfe.Core.Document.PdfAnnotation annot)
+    {
+        // PDF Y-up Rect; normalize so min < max.
+        float rx1 = (float)Math.Min(annot.Rect.Left, annot.Rect.Right);
+        float ry1 = (float)Math.Min(annot.Rect.Bottom, annot.Rect.Top);
+        float rx2 = (float)Math.Max(annot.Rect.Left, annot.Rect.Right);
+        float ry2 = (float)Math.Max(annot.Rect.Bottom, annot.Rect.Top);
+        if (rx2 - rx1 < 0.5f || ry2 - ry1 < 0.5f) return;
+
+        var rect = new SKRect(rx1, ry1, rx2, ry2);
+
+        switch (annot.Subtype)
+        {
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Widget:
+                RenderWidgetDefault(annot, rect);
+                break;
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Link:
+                RenderLinkDefault(annot, rect);
+                break;
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Square:
+                RenderShapeDefault(annot, rect, isEllipse: false);
+                break;
+            case Pdfe.Core.Document.PdfAnnotationSubtype.Circle:
+                RenderShapeDefault(annot, rect, isEllipse: true);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Resolve and cache the AcroForm <c>/DR</c> resources dict (where
+    /// the document's interactive form keeps its default fonts) plus
+    /// the AcroForm <c>/DA</c> default-appearance string. Both are used
+    /// when a widget annotation lacks its own <c>/AP</c> and falls back
+    /// to drawing the field value through the variable-text path.
+    /// Cached per-render-context so we don't re-resolve per widget.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfDictionary? _acroFormDr;
+    private string? _acroFormDa;
+    private bool _acroFormResolved;
+    private void ResolveAcroFormResources()
+    {
+        if (_acroFormResolved) return;
+        _acroFormResolved = true;
+        var afObj = _page.Document.Catalog.GetOptional("AcroForm");
+        if (afObj == null) return;
+        if (_page.Document.Resolve(afObj) is not Pdfe.Core.Primitives.PdfDictionary af) return;
+        _acroFormDa = af.GetStringOrNull("DA");
+        var drObj = af.GetOptional("DR");
+        if (drObj == null) return;
+        _acroFormDr = _page.Document.Resolve(drObj) as Pdfe.Core.Primitives.PdfDictionary;
+    }
+
+    /// <summary>
+    /// Render a default appearance for a Widget annotation that lacks
+    /// <c>/AP</c>. Two distinct cases:
+    ///
+    /// <list type="number">
+    /// <item><b>Signature widgets (<c>/FT /Sig</c>):</b> draw a visible
+    ///   placeholder border so the user can see "sign here." This
+    ///   matches mutool's behaviour and what every commercial viewer
+    ///   does for unsigned signature fields. Color comes from
+    ///   <c>/MK /BC</c> when set, falling back to a neutral border
+    ///   tone that's visible against white but not jarring.</item>
+    /// <item><b>Other widgets (<c>/Tx</c>, <c>/Btn</c>, <c>/Ch</c>) with
+    ///   <c>/MK</c> styling:</b> render background and/or border using
+    ///   the explicitly-supplied colors. Skip when no /MK is set —
+    ///   text fields in unfilled forms (IRS-1040, passport renewals,
+    ///   etc.) are intentionally invisible at print time and adding
+    ///   our own borders here makes pdfe's output diverge from mutool
+    ///   by ~10% on real-world form PDFs.</item>
+    /// </list>
+    /// </summary>
+    private void RenderWidgetDefault(Pdfe.Core.Document.PdfAnnotation annot, SKRect rect)
+    {
+        var fieldType = annot.RawDictionary.GetNameOrNull("FT");
+        var mk = annot.RawDictionary.GetOptional("MK") is { } mkObj
+            ? _page.Document.Resolve(mkObj) as Pdfe.Core.Primitives.PdfDictionary
+            : null;
+
+        var bgColor = mk != null ? ParseColorArray(mk.GetOptional("BG")) : null;
+        var bcColor = mk != null ? ParseColorArray(mk.GetOptional("BC")) : null;
+        bool isSignature = fieldType == "Sig";
+        bool hasExplicitStyle = bgColor.HasValue || bcColor.HasValue;
+
+        // Text fields with a value /V should render the value even
+        // without /AP — common in unflattened filled forms (Acrobat,
+        // Foxit and mutool all do this). Pull /V and route through the
+        // variable-text path before falling back to the empty-field
+        // policy.
+        if (fieldType == "Tx")
+        {
+            var rawV = annot.RawDictionary.GetOptional("V");
+            string? value = rawV != null
+                ? ExtractStringFromObject(_page.Document.Resolve(rawV))
+                : null;
+            if (!string.IsNullOrEmpty(value))
+            {
+                RenderTextFieldValue(annot, rect, value!);
+                if (!hasExplicitStyle) return;
+            }
+        }
+
+        // Only signature fields get a synthesized "sign here" placeholder
+        // border. Text / button / choice widgets in unfilled forms are
+        // routinely emitted without /AP and are intentionally invisible
+        // until filled — mutool, Poppler and Foxit all leave them blank
+        // unless the author opted into /MK styling.
+        if (!isSignature && !hasExplicitStyle) return;
+
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+        _canvas.Save();
+        try
+        {
+            using var paint = new SKPaint { IsAntialias = _options.AntiAlias };
+
+            if (bgColor.HasValue)
+            {
+                paint.Style = SKPaintStyle.Fill;
+                paint.Color = bgColor.Value;
+                _canvas.DrawRect(rect, paint);
+            }
+
+            // Border: use /MK /BC when supplied. For signature fields
+            // without /MK, fall back to a neutral medium-blue tone —
+            // the goal is "user can see the field exists," not pixel
+            // parity with any specific viewer.
+            paint.Style = SKPaintStyle.Stroke;
+            paint.StrokeWidth = borderWidth;
+            paint.Color = bcColor ?? new SKColor(0x66, 0x99, 0xFF, 0xFF);
+            _canvas.DrawRect(rect, paint);
+        }
+        finally
+        {
+            _canvas.Restore();
+        }
+    }
+
+    /// <summary>
+    /// Stroke a thin border around a /Link annotation when /C is set —
+    /// mimics Acrobat's "show all link borders" default. Without /C the
+    /// link is invisible in print, which matches every commercial viewer.
+    /// </summary>
+    private void RenderLinkDefault(Pdfe.Core.Document.PdfAnnotation annot, SKRect rect)
+    {
+        if (annot.Color is not { } color) return;
+        var (r, g, b) = color;
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = _options.AntiAlias,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = borderWidth,
+            Color = RgbToColor(r, g, b),
+        };
+        _canvas.DrawRect(rect, paint);
+    }
+
+    /// <summary>
+    /// Stroke a Square or Circle annotation outline using its /C color
+    /// and /BS width. These annotations are rare without /AP — most
+    /// authoring tools bake an appearance — but the few that don't
+    /// fall back here.
+    /// </summary>
+    private void RenderShapeDefault(
+        Pdfe.Core.Document.PdfAnnotation annot, SKRect rect, bool isEllipse)
+    {
+        if (annot.Color is not { } color) return;
+        var (r, g, b) = color;
+        float borderWidth = (float)(annot.BorderWidth ?? 1.0);
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = _options.AntiAlias,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = borderWidth,
+            Color = RgbToColor(r, g, b),
+        };
+        if (isEllipse) _canvas.DrawOval(rect, paint);
+        else _canvas.DrawRect(rect, paint);
+    }
+
+    /// <summary>
+    /// Parse a PDF color array (1, 3, or 4 components — gray / RGB /
+    /// CMYK) into an SKColor. Returns null when the value isn't a valid
+    /// array of numbers.
+    /// </summary>
+    private SKColor? ParseColorArray(Pdfe.Core.Primitives.PdfObject? obj)
+    {
+        if (obj == null) return null;
+        var resolved = _page.Document.Resolve(obj);
+        if (resolved is not Pdfe.Core.Primitives.PdfArray arr || arr.Count == 0) return null;
+        try
+        {
+            switch (arr.Count)
+            {
+                case 1:
+                    return GrayToColor(arr.GetNumber(0));
+                case 3:
+                    return RgbToColor(arr.GetNumber(0), arr.GetNumber(1), arr.GetNumber(2));
+                case 4:
+                    return CmykToColor(
+                        arr.GetNumber(0), arr.GetNumber(1),
+                        arr.GetNumber(2), arr.GetNumber(3));
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Render the <c>/V</c> value of a text field widget that has no
+    /// <c>/AP /N</c> to fall back on. Mirrors the variable-text
+    /// algorithm from PDF 32000-2 §12.7.4.3:
+    ///
+    /// <list type="number">
+    /// <item>Pick a default-appearance string — widget's <c>/DA</c> if
+    ///   set, else the AcroForm-level <c>/DA</c>.</item>
+    /// <item>Push the AcroForm <c>/DR</c> resources so font names in
+    ///   <c>/DA</c> resolve (the widget's own /Resources are usually
+    ///   empty for unfilled fields).</item>
+    /// <item>Tokenize <c>/DA</c> and execute its operators against a
+    ///   fresh text state — sets the active font, size, fill colour.</item>
+    /// <item>Position the value text inside the rect with horizontal
+    ///   alignment from <c>/Q</c> (0=left, 1=center, 2=right) and
+    ///   vertical centering.</item>
+    /// <item>Draw the string via the regular RenderText path so font
+    ///   substitution / cmap / CID handling all share the same code.</item>
+    /// </list>
+    /// </summary>
+    private void RenderTextFieldValue(
+        Pdfe.Core.Document.PdfAnnotation annot, SKRect rect, string value)
+    {
+        ResolveAcroFormResources();
+
+        var da = annot.RawDictionary.GetStringOrNull("DA") ?? _acroFormDa;
+        if (string.IsNullOrEmpty(da)) return;
+
+        // Auto-size 0 in /DA means "fit text to height" per spec; pick a
+        // pragmatic default (75% of rect height, capped at 16pt) so the
+        // value is at least visible. Real Acrobat does iterative fitting
+        // — we approximate.
+        float autoSize = Math.Min(rect.Height * 0.75f, 16f);
+        if (autoSize < 4f) autoSize = 4f;
+
+        _resourcesStack.Push(_acroFormDr);
+        _canvas.Save();
+        try
+        {
+            // Save and reset the text state so /DA's Tf / g / rg etc.
+            // don't leak back into the page-level text state we've been
+            // accumulating.
+            var savedTextState = CloneTextState();
+            var savedFillColor = _state.FillColor;
+            var savedStrokeColor = _state.StrokeColor;
+            var savedTypeface = _currentTypeface;
+            var savedFontHasEmbeddedProgram = _currentFontHasEmbeddedProgram;
+            var savedByteToGlyph = _currentByteToGlyph;
+            var savedCffCidToGlyph = _currentCffCidToGlyph;
+            var savedCidToGidMap = _currentCidToGidMap;
+            var savedFontIsType0 = _currentFontIsType0;
+            var savedCidWidths = _currentCidWidths;
+            var savedCurrentFontWidths = _currentFontWidths;
+            var savedFontFirstChar = _currentFontFirstChar;
+            var savedFontMissingWidth = _currentFontMissingWidth;
+            var savedFontEncoding = _currentFontEncoding;
+            var savedCodeToUnicode = _currentCodeToUnicode;
+            var savedUnicodeToCode = _currentUnicodeToCode;
+            try
+            {
+                _textState = new TextState();
+
+                // Run /DA — sets _textState.FontName/FontSize, fill colour, etc.
+                var tokens = Tokenize(da!);
+                var operands = new List<string>();
+                foreach (var token in tokens)
+                {
+                    if (IsOperator(token))
+                    {
+                        ExecuteOperator(token, operands);
+                        operands.Clear();
+                    }
+                    else operands.Add(token);
+                }
+
+                float fontSize = _textState.FontSize > 0.001f
+                    ? _textState.FontSize : autoSize;
+                if (_currentTypeface == null)
+                    _currentTypeface = GetTypeface("Helvetica");
+
+                // Measure text to compute alignment. Use the active
+                // typeface so the width matches what we're about to draw.
+                using var measureFont = new SKFont(_currentTypeface, fontSize);
+                using var measurePaint = new SKPaint();
+                float textWidth = measureFont.MeasureText(value, measurePaint);
+
+                int q = annot.RawDictionary.GetInt("Q", 0);
+                const float padX = 2f;
+                float textX;
+                if (q == 1)      textX = rect.Left + (rect.Width - textWidth) * 0.5f;
+                else if (q == 2) textX = rect.Right - textWidth - padX;
+                else             textX = rect.Left + padX;
+
+                // Vertical baseline: center the cap-height inside the
+                // rect. fontSize × 0.3 puts the baseline below center
+                // by roughly the descender's worth, which looks about
+                // right for typical fonts at typical sizes.
+                float textY = rect.Top + (rect.Height + fontSize * 0.7f) * 0.5f
+                              - fontSize * 0.5f;
+
+                // Drive RenderText through the standard text-block path.
+                _inTextBlock = true;
+                _textState.TextMatrixA = 1; _textState.TextMatrixB = 0;
+                _textState.TextMatrixC = 0; _textState.TextMatrixD = 1;
+                _textState.TextMatrixE = textX;
+                _textState.TextMatrixF = textY;
+                _textState.LineMatrixE = textX;
+                _textState.LineMatrixF = textY;
+                _textState.FontSize = fontSize;
+
+                // Latin-1 round-trip into bytes — same shape as a Tj
+                // operand. RenderText then handles cmap / encoding for
+                // the resolved typeface.
+                var bytes = Encoding.Latin1.GetBytes(value);
+                RenderText(value, bytes);
+                _inTextBlock = false;
+            }
+            finally
+            {
+                _textState = savedTextState;
+                _state.FillColor = savedFillColor;
+                _state.StrokeColor = savedStrokeColor;
+                _currentTypeface = savedTypeface;
+                _currentFontHasEmbeddedProgram = savedFontHasEmbeddedProgram;
+                _currentByteToGlyph = savedByteToGlyph;
+                _currentCffCidToGlyph = savedCffCidToGlyph;
+                _currentCidToGidMap = savedCidToGidMap;
+                _currentFontIsType0 = savedFontIsType0;
+                _currentCidWidths = savedCidWidths;
+                _currentFontWidths = savedCurrentFontWidths;
+                _currentFontFirstChar = savedFontFirstChar;
+                _currentFontMissingWidth = savedFontMissingWidth;
+                _currentFontEncoding = savedFontEncoding;
+                _currentCodeToUnicode = savedCodeToUnicode;
+                _currentUnicodeToCode = savedUnicodeToCode;
+            }
+        }
+        catch
+        {
+            // A malformed /DA shouldn't kill the rest of the page; the
+            // widget just stays unrendered.
+        }
+        finally
+        {
+            _canvas.Restore();
+            _resourcesStack.Pop();
+        }
+    }
+
+    /// <summary>
+    /// Pull a string out of a /V or similar value object — handles both
+    /// PDF string literals (most common) and PDF names (rare).
+    /// </summary>
+    private static string? ExtractStringFromObject(Pdfe.Core.Primitives.PdfObject? obj)
+    {
+        return obj switch
+        {
+            Pdfe.Core.Primitives.PdfString s => s.Value,
+            Pdfe.Core.Primitives.PdfName n => n.Value,
+            _ => null,
+        };
+    }
+
+    private TextState CloneTextState()
+    {
+        return new TextState
+        {
+            FontName = _textState.FontName,
+            FontSize = _textState.FontSize,
+            CharSpacing = _textState.CharSpacing,
+            WordSpacing = _textState.WordSpacing,
+            HorizontalScale = _textState.HorizontalScale,
+            TextLeading = _textState.TextLeading,
+            TextRise = _textState.TextRise,
+            TextMatrixA = _textState.TextMatrixA,
+            TextMatrixB = _textState.TextMatrixB,
+            TextMatrixC = _textState.TextMatrixC,
+            TextMatrixD = _textState.TextMatrixD,
+            TextMatrixE = _textState.TextMatrixE,
+            TextMatrixF = _textState.TextMatrixF,
+            LineMatrixE = _textState.LineMatrixE,
+            LineMatrixF = _textState.LineMatrixF,
+        };
+    }
+
     private void RenderFormXObject(Pdfe.Core.Primitives.PdfStream formStream)
+    {
+        // Cycle detection: a Form XObject that ends up invoking itself
+        // (transitively) would otherwise recurse until the .NET stack
+        // overflows, which is uncatchable and aborts the whole process.
+        if (!_formXObjectStack.Add(formStream)) return;
+        if (_formXObjectDepth >= MaxFormXObjectDepth)
+        {
+            _formXObjectStack.Remove(formStream);
+            return;
+        }
+        _formXObjectDepth++;
+
+        try
+        {
+            RenderFormXObjectInner(formStream);
+        }
+        finally
+        {
+            _formXObjectStack.Remove(formStream);
+            _formXObjectDepth--;
+        }
+    }
+
+    private void RenderFormXObjectInner(Pdfe.Core.Primitives.PdfStream formStream)
     {
         // Form XObjects contain their own content stream
         // Get the form's content and render it recursively
@@ -1877,39 +2830,56 @@ internal class RenderContext
 
         _canvas.Save();
 
-        // Apply the form's transformation matrix if present
-        var matrixArray = formStream.GetOptional("Matrix") as Pdfe.Core.Primitives.PdfArray;
-        if (matrixArray != null && matrixArray.Count >= 6)
+        // Push the form's own /Resources so font / XObject lookups inside
+        // its content stream resolve against the form's resource dict
+        // first (with fallback to outer scopes via the resources stack).
+        // PDF 32000-2 §7.8.3: a Form XObject inherits resources from its
+        // page, so falling through is required for forms that omit names
+        // their content references.
+        var formResources = formStream.GetOptional("Resources") is { } resObj
+            ? _page.Document.Resolve(resObj) as Pdfe.Core.Primitives.PdfDictionary
+            : null;
+        _resourcesStack.Push(formResources);
+
+        try
         {
-            var a = (float)matrixArray.GetNumber(0);
-            var b = (float)matrixArray.GetNumber(1);
-            var c = (float)matrixArray.GetNumber(2);
-            var d = (float)matrixArray.GetNumber(3);
-            var e = (float)matrixArray.GetNumber(4);
-            var f = (float)matrixArray.GetNumber(5);
-            var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
-            _canvas.Concat(ref matrix);
+            // Apply the form's transformation matrix if present
+            var matrixArray = formStream.GetOptional("Matrix") as Pdfe.Core.Primitives.PdfArray;
+            if (matrixArray != null && matrixArray.Count >= 6)
+            {
+                var a = (float)matrixArray.GetNumber(0);
+                var b = (float)matrixArray.GetNumber(1);
+                var c = (float)matrixArray.GetNumber(2);
+                var d = (float)matrixArray.GetNumber(3);
+                var e = (float)matrixArray.GetNumber(4);
+                var f = (float)matrixArray.GetNumber(5);
+                var matrix = new SKMatrix(a, c, e, b, d, f, 0, 0, 1);
+                _canvas.Concat(in matrix);
+            }
+
+            // Parse and render the form's content stream
+            var content = Encoding.Latin1.GetString(formContent);
+            var tokens = Tokenize(content);
+            var operands = new List<string>();
+
+            foreach (var token in tokens)
+            {
+                if (IsOperator(token))
+                {
+                    ExecuteOperator(token, operands);
+                    operands.Clear();
+                }
+                else
+                {
+                    operands.Add(token);
+                }
+            }
         }
-
-        // Parse and render the form's content stream
-        var content = Encoding.Latin1.GetString(formContent);
-        var tokens = Tokenize(content);
-        var operands = new List<string>();
-
-        foreach (var token in tokens)
+        finally
         {
-            if (IsOperator(token))
-            {
-                ExecuteOperator(token, operands);
-                operands.Clear();
-            }
-            else
-            {
-                operands.Add(token);
-            }
+            _resourcesStack.Pop();
+            _canvas.Restore();
         }
-
-        _canvas.Restore();
     }
 
     #endregion
@@ -2200,25 +3170,274 @@ internal class RenderContext
         return null;
     }
 
+    /// <summary>
+    /// Walk the resources stack top-down looking for a font definition.
+    /// The innermost Form XObject's /Resources wins; we fall through to
+    /// outer XObjects and finally the page when the name isn't defined
+    /// locally — matches the "inherit if not found" rule from PDF 32000-2
+    /// §7.8.3 for Form XObject resource resolution.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfDictionary? ResolveFontFromActiveResources(string fontName)
+    {
+        foreach (var resources in _resourcesStack)
+        {
+            if (resources == null) continue;
+            var fontsObj = resources.GetOptional("Font");
+            if (fontsObj == null) continue;
+            if (_page.Document.Resolve(fontsObj) is not Pdfe.Core.Primitives.PdfDictionary fonts)
+                continue;
+            var fontObj = fonts.GetOptional(fontName);
+            if (fontObj == null) continue;
+            return _page.Document.Resolve(fontObj) as Pdfe.Core.Primitives.PdfDictionary;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Stack-aware XObject lookup, same fallback rule as
+    /// <see cref="ResolveFontFromActiveResources"/>. Returns the resolved
+    /// XObject (typically a stream); caller checks /Subtype.
+    /// </summary>
+    private Pdfe.Core.Primitives.PdfObject? ResolveXObjectFromActiveResources(string name)
+    {
+        foreach (var resources in _resourcesStack)
+        {
+            if (resources == null) continue;
+            var xobjsObj = resources.GetOptional("XObject");
+            if (xobjsObj == null) continue;
+            if (_page.Document.Resolve(xobjsObj) is not Pdfe.Core.Primitives.PdfDictionary xobjs)
+                continue;
+            var x = xobjs.GetOptional(name);
+            if (x == null) continue;
+            return _page.Document.Resolve(x);
+        }
+        return null;
+    }
+
     #endregion
 
     #region Inline Images (BI, ID, EI operators) - Issue #297
 
-    private void RenderInlineImage(string content, ref int tokenIndex, List<string> tokens)
+    /// <summary>
+    /// Rasterize an inline image (§8.9.7) from the dict header text the
+    /// tokenizer captured between BI and ID, and the raw data bytes
+    /// captured between ID and EI. The dict uses abbreviated keys per
+    /// Table 91 (W/H/CS/F/BPC/D/DP/IM/I/L) and abbreviated filter /
+    /// colorspace values per Tables 92 and 90; we resolve them all to
+    /// their full forms and dispatch through a synthetic
+    /// <see cref="Pdfe.Core.Primitives.PdfStream"/> so the existing
+    /// image-XObject rasterizer does the actual decoding and drawing.
+    /// </summary>
+    private void RenderInlineImage(string headerText, byte[] dataBytes)
     {
-        // Inline images are complex to parse from tokenized content
-        // The format is: BI <dict entries> ID <image data> EI
-        // For now, we'll handle this by looking for the pattern in raw content
+        var dict = ParseInlineImageDict(headerText);
+        if (dict == null) return;
 
-        // This is a stub - inline images require special handling during tokenization
-        // because the image data between ID and EI is binary and not tokenized
+        // Inline image data may be filter-encoded the same way an
+        // image XObject's stream is (FlateDecode for raw RGB, DCTDecode
+        // for JPEG, etc.). Build a synthetic PdfStream so the existing
+        // RenderImageXObject pipeline handles colour-space resolution
+        // and rasterization uniformly.
+        var stream = new Pdfe.Core.Primitives.PdfStream(dict, dataBytes);
+        try
+        {
+            // PdfStream constructed in-process has no cached decoded
+            // bytes; PdfStream.DecodedData throws InvalidOperationException
+            // until something runs the filter chain. Run it now —
+            // RenderImageXObject reads DecodedData when the filter is
+            // FlateDecode / RunLength / etc., and EncodedData when it's
+            // DCTDecode / JPXDecode (JPEG path stays pass-through).
+            if (stream.IsFiltered)
+                new Pdfe.Core.Parsing.StreamDecompressor().Decompress(stream);
+            RenderImageXObject(stream);
+        }
+        catch
+        {
+            // Single bad inline image shouldn't kill the page.
+        }
     }
+
+    /// <summary>
+    /// Parse the dict-header text between BI and ID into a
+    /// <see cref="Pdfe.Core.Primitives.PdfDictionary"/> with abbreviated
+    /// keys/values normalized to their full forms (Table 91, Table 92,
+    /// Table 90). Returns null when the header is empty or unparseable.
+    /// </summary>
+    private static Pdfe.Core.Primitives.PdfDictionary? ParseInlineImageDict(string header)
+    {
+        var dict = new Pdfe.Core.Primitives.PdfDictionary();
+
+        // Tokenize the header just like the rest of the content stream.
+        // The dict body is just key/value pairs (`/Key value /Key value`)
+        // with no surrounding `<<` `>>`.
+        var toks = new List<string>();
+        int i = 0, len = header.Length;
+        while (i < len)
+        {
+            while (i < len && char.IsWhiteSpace(header[i])) i++;
+            if (i >= len) break;
+            char c = header[i];
+            if (c == '/' || c == '(' || c == '<' || c == '[')
+            {
+                // Use the same delimiter logic as the main tokenizer
+                // for names / strings / hex strings / arrays.
+                int start = i;
+                if (c == '/')
+                {
+                    i++;
+                    while (i < len && !IsDelimiterOrWhitespace(header[i])) i++;
+                    toks.Add(header[start..i]);
+                }
+                else if (c == '[')
+                {
+                    int depth = 1; i++;
+                    while (i < len && depth > 0)
+                    {
+                        if (header[i] == '[') depth++;
+                        else if (header[i] == ']') depth--;
+                        i++;
+                    }
+                    toks.Add(header[start..i]);
+                }
+                else if (c == '<')
+                {
+                    if (i + 1 < len && header[i + 1] == '<')
+                    {
+                        // Inline images don't normally contain nested dicts,
+                        // but be defensive — match >> to swallow and skip.
+                        int depth = 1; i += 2;
+                        while (i < len - 1 && depth > 0)
+                        {
+                            if (header[i] == '<' && header[i + 1] == '<') { depth++; i += 2; }
+                            else if (header[i] == '>' && header[i + 1] == '>') { depth--; i += 2; }
+                            else i++;
+                        }
+                        toks.Add(header[start..i]);
+                    }
+                    else
+                    {
+                        // Hex string </…>
+                        i++;
+                        while (i < len && header[i] != '>') i++;
+                        if (i < len) i++;
+                        toks.Add(header[start..i]);
+                    }
+                }
+                else if (c == '(')
+                {
+                    int depth = 1; i++;
+                    while (i < len && depth > 0)
+                    {
+                        if (header[i] == '\\' && i + 1 < len) i += 2;
+                        else if (header[i] == '(') { depth++; i++; }
+                        else if (header[i] == ')') { depth--; i++; }
+                        else i++;
+                    }
+                    toks.Add(header[start..i]);
+                }
+            }
+            else
+            {
+                int start = i;
+                while (i < len && !IsDelimiterOrWhitespace(header[i])) i++;
+                if (i > start) toks.Add(header[start..i]);
+            }
+        }
+
+        // Walk pairs (/Name value). Map abbreviated keys/values to their
+        // full forms before storing.
+        for (int p = 0; p < toks.Count - 1; p++)
+        {
+            var nameTok = toks[p];
+            if (!nameTok.StartsWith("/")) continue;
+            string key = NormalizeInlineKey(nameTok.Substring(1));
+            string valueTok = toks[p + 1];
+            p++; // consumed the value
+
+            var value = ParseInlineImageValue(key, valueTok);
+            if (value != null)
+                dict[new Pdfe.Core.Primitives.PdfName(key)] = value;
+        }
+
+        // Reject if no Width / Height — RenderImageXObject would early-out anyway.
+        if (!dict.ContainsKey("Width") || !dict.ContainsKey("Height"))
+            return null;
+        return dict;
+    }
+
+    /// <summary>
+    /// Per Table 91, inline image dicts may use one-or-two-letter
+    /// abbreviations in place of the full names — normalize to full so
+    /// downstream code (which expects /Width, /Filter, etc.) works.
+    /// </summary>
+    private static string NormalizeInlineKey(string abbr) => abbr switch
+    {
+        "W"   => "Width",
+        "H"   => "Height",
+        "CS"  => "ColorSpace",
+        "BPC" => "BitsPerComponent",
+        "F"   => "Filter",
+        "DP"  => "DecodeParms",
+        "D"   => "Decode",
+        "IM"  => "ImageMask",
+        "I"   => "Interpolate",
+        "L"   => "Length",
+        _     => abbr,
+    };
+
+    /// <summary>
+    /// Convert an inline-image dict value token into the corresponding
+    /// PdfObject. For /Filter and /ColorSpace we additionally expand
+    /// abbreviated single-token values per Tables 92 and 90 so
+    /// StreamDecompressor / PdfColorSpace see /FlateDecode rather than
+    /// /Fl, /DeviceRGB rather than /RGB.
+    /// </summary>
+    private static Pdfe.Core.Primitives.PdfObject? ParseInlineImageValue(string key, string token)
+    {
+        if (token.StartsWith("/"))
+        {
+            string name = token.Substring(1);
+            if (key == "Filter")        name = ExpandInlineFilter(name);
+            else if (key == "ColorSpace") name = ExpandInlineColorSpace(name);
+            return new Pdfe.Core.Primitives.PdfName(name);
+        }
+        if (token == "true")  return Pdfe.Core.Primitives.PdfBoolean.True;
+        if (token == "false") return Pdfe.Core.Primitives.PdfBoolean.False;
+        if (int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iv))
+            return new Pdfe.Core.Primitives.PdfInteger(iv);
+        if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv))
+            return new Pdfe.Core.Primitives.PdfReal(dv);
+        // Arrays, strings, etc. fall through unhandled — rare in inline
+        // image dicts (most use simple name/integer/bool values).
+        return null;
+    }
+
+    private static string ExpandInlineFilter(string abbr) => abbr switch
+    {
+        "A"   => "ASCIIHexDecode",
+        "A85" => "ASCII85Decode",
+        "LZW" => "LZWDecode",
+        "Fl"  => "FlateDecode",
+        "RL"  => "RunLengthDecode",
+        "CCF" => "CCITTFaxDecode",
+        "DCT" => "DCTDecode",
+        _     => abbr,
+    };
+
+    private static string ExpandInlineColorSpace(string abbr) => abbr switch
+    {
+        "G"    => "DeviceGray",
+        "RGB"  => "DeviceRGB",
+        "CMYK" => "DeviceCMYK",
+        "I"    => "Indexed",
+        _      => abbr,
+    };
 
     #endregion
 
     #region Tokenizer
 
-    private static List<string> Tokenize(string content)
+    private List<string> Tokenize(string content)
     {
         var tokens = new List<string>();
         var i = 0;
@@ -2315,7 +3534,99 @@ internal class RenderContext
                 i++;
 
             if (i > tokenStart)
-                tokens.Add(content[tokenStart..i]);
+            {
+                var tok = content[tokenStart..i];
+                tokens.Add(tok);
+
+                // Inline image fast-skip: when we see the BI operator,
+                // scan forward to the matching EI marker (after the ID
+                // separator) and discard the binary image bytes between
+                // them. Without this, the tokenizer turns the raw image
+                // data into thousands of garbage tokens that the
+                // dispatcher then iterates over — visible as a
+                // multi-minute hang on PDFs with large inline images
+                // (e.g. SafeDocs issue14256.pdf, which has eight 20×10
+                // hex-encoded images totaling 13 KB of "operators"
+                // that aren't actually operators).
+                //
+                // Capture the inline image dict header (between BI and
+                // ID) and the binary image data (between ID and EI) into
+                // _inlineImages, then re-emit as a numeric operand
+                // pointing into that side-table followed by the BI
+                // operator. RenderInlineImage looks the entry up. We
+                // can't pass binary bytes through the token list
+                // safely (Latin1 round-trip works, but binary 0x00 etc.
+                // bytes inside operand strings break later parsing).
+                if (tok == "BI")
+                {
+                    // Find the ID marker (single token "ID" followed
+                    // by exactly one whitespace per spec).
+                    int idIdx = content.IndexOf("\nID", i);
+                    if (idIdx < 0) idIdx = content.IndexOf(" ID", i);
+                    if (idIdx < 0) idIdx = content.IndexOf("\rID", i);
+                    if (idIdx >= 0)
+                    {
+                        // Header text spans from end of "BI " to start of "ID"
+                        // (excluding the BI/ID markers themselves).
+                        int headerStart = i; // i is just past "BI"
+                        int headerEnd = idIdx; // before the surrounding whitespace + "ID"
+                        string header = content.Substring(headerStart, headerEnd - headerStart);
+
+                        // Skip over the dict entries up to and including
+                        // ID + the one separator byte.
+                        int after = idIdx + 3;
+                        if (after < len && (content[after] == '\n' || content[after] == '\r' || content[after] == ' '))
+                            after++;
+                        // Now scan for "EI" at a word boundary.
+                        int eiIdx = -1;
+                        for (int j = after; j + 1 < len; j++)
+                        {
+                            if (content[j] == 'E' && content[j + 1] == 'I')
+                            {
+                                bool leftBoundary = j == 0 || char.IsWhiteSpace(content[j - 1]);
+                                bool rightBoundary = j + 2 >= len ||
+                                    char.IsWhiteSpace(content[j + 2]) ||
+                                    content[j + 2] == '/' || content[j + 2] == '<';
+                                if (leftBoundary && rightBoundary)
+                                {
+                                    eiIdx = j + 2;
+                                    break;
+                                }
+                            }
+                        }
+                        if (eiIdx > 0)
+                        {
+                            // Data bytes are content[after..(eiIdx-2)]
+                            // (eiIdx-2 = start of "EI"). Trim a single
+                            // trailing whitespace separator before EI
+                            // if present, per spec.
+                            int dataEnd = eiIdx - 2;
+                            if (dataEnd > after && (content[dataEnd - 1] == '\n' || content[dataEnd - 1] == '\r' || content[dataEnd - 1] == ' '))
+                                dataEnd--;
+                            // The renderer received content as a Latin1
+                            // string of original bytes; reverse the
+                            // mapping char-by-char to get the raw bytes
+                            // back without re-encoding.
+                            int dataLen = Math.Max(0, dataEnd - after);
+                            var dataBytes = new byte[dataLen];
+                            for (int k = 0; k < dataLen; k++)
+                                dataBytes[k] = (byte)content[after + k];
+
+                            int idx = _inlineImages.Count;
+                            _inlineImages.Add((header, dataBytes));
+                            // The "BI" was already pushed at line 2776;
+                            // insert the side-table index *before* it so
+                            // the dispatcher sees it as an operand of
+                            // BI when the BI token fires.
+                            tokens.Insert(tokens.Count - 1, idx.ToString(CultureInfo.InvariantCulture));
+                            i = eiIdx;
+                            continue;
+                        }
+                    }
+                    // Couldn't parse — leave BI alone (no operand) so the
+                    // dispatcher treats it as a no-op.
+                }
+            }
         }
 
         return tokens;

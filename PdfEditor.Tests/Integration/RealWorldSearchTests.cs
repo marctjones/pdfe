@@ -1,13 +1,11 @@
 using System.IO;
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pdfe.Core.Document;
 using PdfEditor.Services;
 using PdfEditor.Tests.Fixtures;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.Integration;
 
 /// <summary>
@@ -95,8 +93,8 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
         var sensitiveLower = svc.Search(doc, "open", caseSensitive: true);
 
         // Same letter sequence — case-insensitive sums upper + lower.
-        insensitive.Count.Should().BeGreaterOrEqualTo(sensitiveUpper.Count);
-        insensitive.Count.Should().BeGreaterOrEqualTo(sensitiveLower.Count);
+        insensitive.Count.Should().BeGreaterThanOrEqualTo(sensitiveUpper.Count);
+        insensitive.Count.Should().BeGreaterThanOrEqualTo(sensitiveLower.Count);
         sensitiveUpper.Should().NotBeEmpty("'Open' (capital O) must appear");
         sensitiveLower.Should().NotBeEmpty("'open' (lowercase o) must appear");
     }
@@ -186,10 +184,10 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public void CjkFixture_Search_FindsLatinWord()
     {
-        Skip.IfNot(File.Exists(CjkFixture), "CJK fixture missing");
+        Assert.SkipUnless(File.Exists(CjkFixture), "CJK fixture missing");
 
         // Known gap: the multilingual fixture is browser-flipped Tm + Type0
         // composite fonts, and our text extractor doesn't yet decode
@@ -199,10 +197,10 @@ public class RealWorldSearchTests : IClassFixture<PragmaticBookFixture>
         // (#313 fixed CJK rendering, but extraction lags).
         //
         // Test left in place so we'll know when extraction lands — at
-        // that point flip [SkippableFact] back to [Fact] and let it
+        // that point flip [Fact] back to [Fact] and let it
         // protect the regression.
         var matches = NewService().Search(CjkFixture, "English");
-        Skip.If(matches.Count == 0,
+        Assert.SkipWhen(matches.Count == 0,
             "Type0 text-extraction path doesn't yet decode CIDs in this " +
             "fixture. Search service finds 0 matches; this is a known " +
             "extraction gap, not a search-pipeline bug.");

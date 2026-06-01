@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
 
@@ -14,7 +14,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         // Act
         using var doc = PdfDocument.Open(pdfPath);
@@ -34,10 +34,10 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
-        Skip.If(doc.PageCount < 1, "PDF needs at least 1 page");
+        Assert.SkipWhen(doc.PageCount < 1, "PDF needs at least 1 page");
 
         // Act
         var page = doc.Pages[0];
@@ -52,7 +52,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
 
@@ -69,7 +69,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -94,7 +94,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -115,7 +115,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -130,7 +130,7 @@ public class PageCollectionTests
     {
         // Arrange
         var pdfPath = GetTestPdfPath();
-        Skip.If(string.IsNullOrEmpty(pdfPath), "No test PDF available");
+        Assert.SkipWhen(string.IsNullOrEmpty(pdfPath), "No test PDF available");
 
         using var doc = PdfDocument.Open(pdfPath);
         var page = doc.Pages[0];
@@ -398,5 +398,107 @@ public class PageCollectionTests
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Regression test for the page-tree cycle stack overflow uncovered
+    /// by the differential corpus harness against pdf.js's regression
+    /// PDFs. A malformed Pages dictionary whose /Kids array points back
+    /// at itself used to recurse infinitely in LoadPagesRecursive,
+    /// crashing the host (not even a catchable exception — bare stack
+    /// overflow). The fix added a reference-equality visited-set and a
+    /// MaxPageTreeDepth limit so the parser bails gracefully.
+    /// </summary>
+    [Fact]
+    public void Open_PageTreeWithSelfReferencingKids_DoesNotStackOverflow()
+    {
+        // Build a PDF where /Pages has /Kids [2 0 R] and obj 2 is the
+        // /Pages dict itself — a one-step cycle. Real-world malformed
+        // PDFs have hit this shape; the fuzzer / pdf.js corpus has it.
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+        long o1 = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine("<< /Type /Catalog /Pages 2 0 R >>");
+        sb.AppendLine("endobj");
+        long o2 = sb.Length;
+        sb.AppendLine("2 0 obj");
+        // /Kids points to obj 2 itself — the cycle.
+        sb.AppendLine("<< /Type /Pages /Kids [2 0 R] /Count 0 >>");
+        sb.AppendLine("endobj");
+        long xref = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 3");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{o1:D10} 00000 n ");
+        sb.AppendLine($"{o2:D10} 00000 n ");
+        sb.AppendLine("trailer << /Size 3 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xref.ToString());
+        sb.AppendLine("%%EOF");
+
+        var bytes = System.Text.Encoding.Latin1.GetBytes(sb.ToString());
+
+        // The bug: this used to stack-overflow. With cycle detection,
+        // it must complete and yield a 0-page document (the cycle
+        // contributed nothing).
+        Action act = () =>
+        {
+            using var doc = PdfDocument.Open(bytes);
+            // Force tree walk.
+            _ = doc.PageCount;
+        };
+
+        act.Should().NotThrow("circular /Pages tree must be detected, not crash the host");
+    }
+
+    [Fact]
+    public void Open_PathologicallyDeepPageTree_BailsAtDepthLimit()
+    {
+        // Build a PDF whose /Pages tree is 100 levels deep — exceeds
+        // MaxPageTreeDepth. Loader must terminate cleanly at the limit.
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+        var offsets = new System.Collections.Generic.List<long>();
+        offsets.Add(0); // obj 0 placeholder
+
+        // obj 1 = Catalog
+        offsets.Add(sb.Length);
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine("<< /Type /Catalog /Pages 2 0 R >>");
+        sb.AppendLine("endobj");
+
+        // obj 2..101 = nested Pages, each with Kids pointing to next.
+        for (int i = 2; i <= 101; i++)
+        {
+            offsets.Add(sb.Length);
+            sb.AppendLine($"{i} 0 obj");
+            if (i < 101)
+                sb.AppendLine($"<< /Type /Pages /Kids [{i + 1} 0 R] /Count 0 >>");
+            else
+                sb.AppendLine("<< /Type /Pages /Kids [] /Count 0 >>");
+            sb.AppendLine("endobj");
+        }
+
+        long xref = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 102");
+        sb.AppendLine("0000000000 65535 f ");
+        for (int i = 1; i < 102; i++)
+            sb.AppendLine($"{offsets[i]:D10} 00000 n ");
+        sb.AppendLine("trailer << /Size 102 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xref.ToString());
+        sb.AppendLine("%%EOF");
+
+        var bytes = System.Text.Encoding.Latin1.GetBytes(sb.ToString());
+
+        Action act = () =>
+        {
+            using var doc = PdfDocument.Open(bytes);
+            _ = doc.PageCount;
+        };
+
+        act.Should().NotThrow("deeply-nested page trees must bail at the depth limit, not blow the stack");
     }
 }

@@ -4,7 +4,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <NoWarn>CA1416</NoWarn>
+    <!-- CA1416: platform-specific API warnings — irrelevant for the
+         cross-platform PDF rendering test surface.
+         xUnit1051: nudges to thread TestContext.Current.CancellationToken
+         into every CT-accepting overload. The test responsiveness payoff is
+         marginal here (most tests are sub-second) and rolling it across the
+         600+ test methods would be churn for very little signal. -->
+    <NoWarn>$(NoWarn);CA1416;xUnit1051</NoWarn>
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -16,31 +22,31 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.msbuild" Version="6.0.0">
+    <PackageReference Include="coverlet.msbuild" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
-    <PackageReference Include="xunit" Version="2.5.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
-    <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
-
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
     <!-- Logging for Tests -->
-    <PackageReference Include="Serilog" Version="3.1.1" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
-    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
-    <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Serilog" Version="4.3.1" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
 
-    <!-- Assertions and Mocking -->
-    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <!-- Assertions and Mocking. AwesomeAssertions is the OSS fork of
+         FluentAssertions 7.x — FluentAssertions 8+ moved to a
+         non-commercial Xceed Community License. -->
+    <PackageReference Include="AwesomeAssertions" Version="9.4.0" />
 
-    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
 
-    <!-- Avalonia Headless Testing -->
-    <PackageReference Include="Avalonia.Headless" Version="11.2.5" />
-    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.2.5" />
+    <!-- Avalonia Headless Testing (synced with main app) -->
+    <PackageReference Include="Avalonia.Headless" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.0.4" />
   </ItemGroup>
 
   <ItemGroup>

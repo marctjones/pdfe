@@ -1,7 +1,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using Xunit;

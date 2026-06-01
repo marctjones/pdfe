@@ -3,13 +3,11 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Tests.Utilities;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -43,7 +41,7 @@ public class UserFlowAutomationTests
     /// document is now open. Tests TotalPages, CurrentPageIndex, and that
     /// the first page is selected.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OpenPdf_UpdatesDocumentState()
     {
         // Arrange
@@ -67,7 +65,7 @@ public class UserFlowAutomationTests
     /// <summary>
     /// Open a PDF, then close it. Verify the document state is cleared.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OpenThenClosePdf_ClearsDocumentState()
     {
         // Arrange
@@ -93,7 +91,7 @@ public class UserFlowAutomationTests
     /// Load a PDF, then load a second different PDF. Verify the document
     /// state updates to reflect the new document.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task LoadSecondPdf_ReplacesFirstDocument()
     {
         // Arrange
@@ -123,7 +121,7 @@ public class UserFlowAutomationTests
     /// <summary>
     /// Load a PDF and verify it appears in recent files.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OpenPdf_AddsToRecentFiles()
     {
         // Arrange
@@ -150,7 +148,7 @@ public class UserFlowAutomationTests
     /// Load a 5-page PDF, then advance the current page index directly.
     /// Verify CurrentPageIndex advances.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ManualPageNavigation_AdvancesCurrentPage()
     {
         // Arrange
@@ -177,7 +175,7 @@ public class UserFlowAutomationTests
     /// Load a 5-page PDF, set current page index to last page.
     /// Verify boundary is honored.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PageNavigation_RespectsBoundaries()
     {
         // Arrange
@@ -203,7 +201,7 @@ public class UserFlowAutomationTests
     /// Load a 5-page PDF and navigate to page 3 using direct assignment.
     /// Verify we can jump to arbitrary pages.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PageNavigation_JumpToArbitraryPage()
     {
         // Arrange
@@ -233,7 +231,7 @@ public class UserFlowAutomationTests
     /// Load a PDF and manually adjust zoom level.
     /// Verify ZoomLevel changes.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ZoomLevel_CanBeAdjusted()
     {
         // Arrange
@@ -260,7 +258,7 @@ public class UserFlowAutomationTests
     /// Load a PDF, zoom in, navigate pages, then check zoom persists.
     /// Verify zoom level is maintained across page changes.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ZoomLevel_PersistsAcrossPageNavigation()
     {
         // Arrange
@@ -295,7 +293,7 @@ public class UserFlowAutomationTests
     /// Load a multi-page PDF with known text, initiate search.
     /// Verify SearchMatches populates.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task Search_FindsMatchesInDocument()
     {
         // Arrange
@@ -326,7 +324,7 @@ public class UserFlowAutomationTests
     /// <summary>
     /// Load a PDF, search for text, verify result navigation works.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task Search_NavigatesToPageWithMatch()
     {
         // Arrange
@@ -358,7 +356,7 @@ public class UserFlowAutomationTests
     /// <summary>
     /// Search with empty term. Verify it doesn't crash and clears results.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task Search_WithEmptyTerm_ClearsResults()
     {
         // Arrange
@@ -394,7 +392,7 @@ public class UserFlowAutomationTests
     /// Load a PDF and toggle text selection mode on/off.
     /// Verify IsTextSelectionMode toggles correctly.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ToggleTextSelectionMode_TogglesMode()
     {
         // Arrange
@@ -425,7 +423,7 @@ public class UserFlowAutomationTests
     /// Load a PDF and toggle redaction mode on/off.
     /// Verify IsRedactionMode toggles correctly.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ToggleRedactionMode_TogglesMode()
     {
         // Arrange
@@ -456,7 +454,7 @@ public class UserFlowAutomationTests
     /// Load a PDF and toggle thumbnail sidebar visibility.
     /// Verify IsThumbnailsSidebarVisible toggles correctly.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ToggleThumbnailsSidebar_TogglesVisibility()
     {
         // Arrange
@@ -488,7 +486,7 @@ public class UserFlowAutomationTests
     /// Full workflow: open PDF → navigate pages → zoom → search → close.
     /// This is a realistic end-to-end scenario.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task FullWorkflow_OpenNavigateZoomSearchClose()
     {
         // Arrange
@@ -532,7 +530,7 @@ public class UserFlowAutomationTests
     /// Verify document state and modes work correctly together.
     /// Load PDF, toggle modes, verify state management.
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ModeToggling_MaintainsDocumentState()
     {
         // Arrange
@@ -569,7 +567,7 @@ public class UserFlowAutomationTests
     /// Sequential file operations: open, navigate, close, open another.
     /// Verify clean state transitions at the ViewModel level (not rendering).
     /// </summary>
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task SequentialFileOperations_HandlesStateCleanup()
     {
         // Arrange

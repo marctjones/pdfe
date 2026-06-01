@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Content;
 using Pdfe.Core.Document;
 using Pdfe.Core.Operations;

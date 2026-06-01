@@ -35,7 +35,7 @@
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBox Grid.Column="0"
                              Text="{Binding SaveFilePath}"
-                             Watermark="Choose location for redacted PDF"
+                             PlaceholderText="Choose location for redacted PDF"
                              Margin="0,0,8,0" />
 
                     <Button Grid.Column="1"

@@ -9,13 +9,11 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Models;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -34,7 +32,7 @@ public class OutlineTreeNavigationTests
     private const string PragmaticBook =
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OutlineTree_PopulatesAfterDocumentLoad()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -69,7 +67,7 @@ public class OutlineTreeNavigationTests
             "the TreeView's ItemsSource binding should resolve to OutlineNodes");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OutlineTree_SettingSelectedItem_NavigatesToPage()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -103,7 +101,7 @@ public class OutlineTreeNavigationTests
             $"to its destination ({nav.PageNumber} → index {nav.PageNumber - 1})");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OutlineTree_TreeViewSelectedItemSetter_NavigatesToPage()
     {
         // Same end goal as the previous test but exercises the binding
@@ -137,7 +135,7 @@ public class OutlineTreeNavigationTests
             $"after selecting via TreeView, CurrentPageIndex must equal node.PageNumber - 1");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OutlineTree_PointerClickOnRow_TriggersNavigation()
     {
         // The diagnostic test: simulate the actual pointer click the user

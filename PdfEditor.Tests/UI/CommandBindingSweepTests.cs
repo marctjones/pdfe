@@ -8,12 +8,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.LogicalTree;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -36,7 +34,7 @@ public class CommandBindingSweepTests
     private readonly ITestOutputHelper _out;
     public CommandBindingSweepTests(ITestOutputHelper o) { _out = o; }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void EveryButtonAndMenuItemCommand_ResolvesToNonNullCommand()
     {
         var vm = new MainWindowViewModel();

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Fonts;
 using System.Collections.Generic;
 using Xunit;

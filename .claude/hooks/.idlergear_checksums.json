@@ -1,8 +1,0 @@
-{
-  "ig_pre-tool-use.sh": "765c2a296e5673319fa84c64036718d9e2a18edf710eff119e5621e9a9f71aed",
-  "ig_post-tool-use.sh": "3cc7c0d754f08cb3be050e3a8f3780ddd1282353d9d8375c6f2f73f1e4024303",
-  "ig_session-start.sh": "fd4e2cfd6fc38378f48bdc9136a1f68cf529218c566ac6284dac71eb7228add8",
-  "ig_stop.sh": "e495c9788ad1d42cd6c910be086c2c49cf82cab50a248c1e229b2ae7ee270989",
-  "ig_user-prompt-submit.sh": "8dbd5090712a1875cfebc44c962a6ebcb1d8cc450b126c8349cb19aab4a83a50",
-  "ig_notification.sh": "226eb40fa124827149a114af5e9e7bf76523de1ddffa56ada73d596e5952f226"
-}

@@ -1,11 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Rendering.Tests;
 
 /// <summary>

@@ -2,13 +2,11 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pdfe.Core.Document;
 using PdfEditor.Services;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.Integration;
 
 /// <summary>

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using System.Text;
@@ -40,7 +40,7 @@ public class TextExtractionTests
 
         // Assert - Page should have a Letters collection
         page.Letters.Should().NotBeEmpty();
-        page.Letters.Should().HaveCountGreaterOrEqualTo(3);
+        page.Letters.Should().HaveCountGreaterThanOrEqualTo(3);
     }
 
     [Fact]

@@ -18,34 +18,77 @@
     <ApplicationIcon>Assets\pdfe_logo.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Release startup/responsiveness tuning (#339). These only take effect for
+       Release builds; PublishReadyToRun additionally only activates on a
+       `dotnet publish -r <rid>`, so a plain `dotnet build` is unaffected.
+       NativeAOT and full trimming are deliberately NOT enabled here — they are
+       blocked by the Roslyn scripting engine and ReactiveUI's reflection (see
+       the feasibility investigations in #342 / #343). Workstation (not Server)
+       GC with concurrent collection is the right tradeoff for a desktop UI:
+       it minimises pause times so the window never hitches. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Pre-JIT IL to native at publish time → faster cold start. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Profile-guided tiered compilation → better steady-state hot paths
+         (render + redaction loops). -->
+    <TieredCompilation>true</TieredCompilation>
+    <TieredPGO>true</TieredPGO>
+    <!-- Low-pause GC for a responsive UI thread. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="PdfEditor.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Avalonia UI Framework (MIT License) -->
-    <PackageReference Include="Avalonia" Version="11.2.5" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.2.5" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.5" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.5" />
-    <PackageReference Include="Avalonia.ReactiveUI" Version="11.2.5" />
-    <PackageReference Include="FluentAvaloniaUI" Version="2.4.1" />
-    <PackageReference Include="FluentIcons.Avalonia.Fluent" Version="1.2.313" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.0.0" />
+    <!-- Avalonia UI Framework (MIT License), on the 12.0.x line.
+         ReactiveUI.Avalonia provides the ReactiveUI integration; it is held
+         at 12.0.1 deliberately (14.x is a major jump that shifts the
+         Avalonia/ReactiveUI floors — see #340). -->
+    <PackageReference Include="Avalonia" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
+    <PackageReference Include="ReactiveUI.Avalonia" Version="12.0.1" />
+    <PackageReference Include="FluentAvaloniaUI" Version="3.0.0-preview2" />
+    <!-- FluentIcons.Avalonia.Fluent dropped: not referenced anywhere
+         in source/axaml. Page icons use emoji TextBlocks (📁💾🔍 etc.)
+         not the FluentIcons component library. Removing unblocks
+         eventual Avalonia 12 (FluentIcons.Avalonia.Fluent has no
+         Avalonia 12 release). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.3.0" />
 
-    <!-- Supporting libraries -->
-    <PackageReference Include="Portable.BouncyCastle" Version="1.9.0" /> <!-- MIT License -->
-    <PackageReference Include="SkiaSharp" Version="2.88.9" /> <!-- MIT License -->
+    <!-- Supporting libraries. BouncyCastle.Cryptography is the official
+         continuation of the C# port — Portable.BouncyCastle has been
+         unmaintained since 2020. Same Org.BouncyCastle.* namespaces, so
+         this is a drop-in replacement. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" /> <!-- MIT License -->
 
-    <!-- MVVM and Utilities -->
-    <PackageReference Include="ReactiveUI" Version="20.1.1" />
-    <PackageReference Include="ReactiveUI.Fody" Version="19.5.41" />
+    <!-- MVVM and Utilities. ReactiveUI on the 23.2.x line, compatible with
+         the ReactiveUI.Avalonia 12.0.1 integration glue above. -->
+    <PackageReference Include="ReactiveUI" Version="23.2.27" />
+    <!-- ReactiveUI.Fody dropped: no [Reactive] attribute or
+         `using ReactiveUI.Fody;` anywhere — viewmodels expose
+         properties through plain RaiseAndSetIfChanged or aren't
+         using the IL-weaving sugar. The Fody-19.x package is also
+         hard-pinned to ReactiveUI 19.5.41, which would block any
+         RxUI bump otherwise. The modern equivalent for new code
+         is ReactiveUI.SourceGenerators (Roslyn-based, no Fody). -->
 
-    <!-- Logging Infrastructure -->
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <!-- Logging Infrastructure (paired with .NET 10 BCL). -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+
+    <!-- Tmds.DBus.Protocol pin removed: Avalonia 12 already brings 0.92.0
+         transitively, which is past the GHSA-xrw6-gwf8-vvr9 cutoff
+         (< 0.92.0). 0.93.0 dropped the Tmds.DBus.Protocol.Connection
+         type that Avalonia.X11 reflects on, so over-pinning crashes
+         startup with a TypeLoadException. -->
   </ItemGroup>
 
   <ItemGroup>
@@ -54,6 +97,10 @@
     <!-- Application Assets (icons, logos) -->
     <AvaloniaResource Include="Assets\*.png" />
     <AvaloniaResource Include="Assets\*.svg" />
+    <!-- Third-party license manifest, generated by
+         scripts/generate-license-manifest.sh and read by AboutWindow at
+         runtime. Embedded so the dialog has nothing to load from disk. -->
+    <EmbeddedResource Include="Assets\third-party-licenses.json" />
   </ItemGroup>
 
   <ItemGroup>

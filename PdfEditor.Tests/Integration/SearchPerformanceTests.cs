@@ -4,12 +4,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using PdfEditor.Services;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.Integration;
 
 /// <summary>

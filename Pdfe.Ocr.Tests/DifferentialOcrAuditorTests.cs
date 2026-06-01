@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
 using Pdfe.Ocr;
@@ -39,10 +39,10 @@ public class DifferentialOcrAuditorTests
 
     private static bool TesseractAvailable => new PdfOcrService().IsAvailable();
 
-    [SkippableFact]
+    [Fact]
     public void Scan_RasterPdfWithBlackOverlay_RecoversHiddenDigits()
     {
-        Skip.IfNot(TesseractAvailable, "tesseract CLI not installed");
+        Assert.SkipUnless(TesseractAvailable, "tesseract CLI not installed");
 
         // Step 1: render text to a SKBitmap to use as the "scan."
         byte[] rgbBytes;

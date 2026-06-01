@@ -533,17 +533,17 @@ public partial class MainWindow : Window
     {
         try
         {
-            var infoBar = this.FindControl<FluentAvalonia.UI.Controls.InfoBar>("ToastInfoBar");
+            var infoBar = this.FindControl<FluentAvalonia.UI.Controls.FAInfoBar>("ToastInfoBar");
             if (infoBar == null)
                 return;
 
             // Set severity based on toast severity level
             infoBar.Severity = e.Severity switch
             {
-                PdfEditor.Services.ToastService.ToastSeverity.Error => FluentAvalonia.UI.Controls.InfoBarSeverity.Error,
-                PdfEditor.Services.ToastService.ToastSeverity.Warning => FluentAvalonia.UI.Controls.InfoBarSeverity.Warning,
-                PdfEditor.Services.ToastService.ToastSeverity.Success => FluentAvalonia.UI.Controls.InfoBarSeverity.Success,
-                _ => FluentAvalonia.UI.Controls.InfoBarSeverity.Informational
+                PdfEditor.Services.ToastService.ToastSeverity.Error => FluentAvalonia.UI.Controls.FAInfoBarSeverity.Error,
+                PdfEditor.Services.ToastService.ToastSeverity.Warning => FluentAvalonia.UI.Controls.FAInfoBarSeverity.Warning,
+                PdfEditor.Services.ToastService.ToastSeverity.Success => FluentAvalonia.UI.Controls.FAInfoBarSeverity.Success,
+                _ => FluentAvalonia.UI.Controls.FAInfoBarSeverity.Informational
             };
 
             // Set message and optional details

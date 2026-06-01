@@ -1,5 +1,5 @@
 using Avalonia;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Services;
 using Xunit;
 

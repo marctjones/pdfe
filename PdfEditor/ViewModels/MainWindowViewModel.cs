@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -2663,32 +2664,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Help Menu Commands
 
-    private async void ShowAbout()
+    private void ShowAbout()
     {
         _logger.LogInformation("About dialog requested");
+        var owner = GetMainWindow();
+        if (owner == null) return;
 
-        var window = GetMainWindow();
-        if (window != null)
-        {
-            var messageBox = new FluentAvalonia.UI.Controls.ContentDialog
-            {
-                Title = "About PDF Editor",
-                Content = "PDF Editor v1.3.0-dev\n\n" +
-                          "A cross-platform PDF editor with TRUE content-level redaction.\n\n" +
-                          "Features:\n" +
-                          "• View and navigate PDFs\n" +
-                          "• Mark-then-apply redaction workflow\n" +
-                          "• Text extraction and search\n" +
-                          "• Page management (add/remove/rotate)\n" +
-                          "• OCR support\n\n" +
-                          "License: MIT\n" +
-                          "Built with: .NET 8 + Avalonia UI",
-                CloseButtonText = "Close",
-                DefaultButton = FluentAvalonia.UI.Controls.ContentDialogButton.Close
-            };
-
-            await messageBox.ShowAsync();
-        }
+        // Pop the rich About window with the embedded third-party-license
+        // manifest. Modal so it acts like a standard "About…" dialog.
+        var dialog = new Views.AboutWindow();
+        _ = dialog.ShowDialog(owner);
     }
 
     private async void ShowKeyboardShortcuts()
@@ -2698,7 +2683,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var window = GetMainWindow();
         if (window != null)
         {
-            var messageBox = new FluentAvalonia.UI.Controls.ContentDialog
+            var messageBox = new FluentAvalonia.UI.Controls.FAContentDialog
             {
                 Title = "Keyboard Shortcuts",
                 Content = "File:\n" +
@@ -2719,7 +2704,7 @@ public partial class MainWindowViewModel : ViewModelBase
                           "Navigation:\n" +
                           "  PgUp/PgDn - Previous/Next Page",
                 CloseButtonText = "Close",
-                DefaultButton = FluentAvalonia.UI.Controls.ContentDialogButton.Close
+                DefaultButton = FluentAvalonia.UI.Controls.FAContentDialogButton.Close
             };
 
             await messageBox.ShowAsync();

@@ -3,11 +3,9 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.ViewModels;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.Integration;
 
 /// <summary>
@@ -17,7 +15,7 @@ namespace PdfEditor.Tests.Integration;
 /// found nothing in the GUI even though the underlying service finds
 /// hundreds of matches; these tests pin the VM bridge.
 ///
-/// Uses [AvaloniaFact] because <see cref="MainWindowViewModel"/>'s
+/// Uses [FixedAvaloniaFact] because <see cref="MainWindowViewModel"/>'s
 /// search code publishes results via Dispatcher.UIThread.Post — without
 /// a running Avalonia dispatcher the post never fires and SearchMatches
 /// stays empty.
@@ -31,7 +29,7 @@ public class SearchViewModelTests
     private const string PragmaticBook =
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PragmaticBook_VmSearch_PopulatesSearchMatches()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -60,7 +58,7 @@ public class SearchViewModelTests
             "if SearchMatches is empty the VM bridge is broken");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PragmaticBook_VmSearch_ComputesPageHighlights()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -95,7 +93,7 @@ public class SearchViewModelTests
         }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PragmaticBook_JumpToSearchMatch_NavigatesToMatchPage()
     {
         if (!File.Exists(PragmaticBook)) return;
@@ -128,7 +126,7 @@ public class SearchViewModelTests
             "selected-match index updates so prev/next resume from here");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public void RightSidebarPanelSelectors_AreMutuallyExclusive()
     {
         var vm = new MainWindowViewModel();
@@ -154,7 +152,7 @@ public class SearchViewModelTests
             "closing search returns to redaction view");
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task PragmaticBook_VmSearch_HighlightCoordsAreInBitmapDips()
     {
         // Highlights must be in the same DIP space the bitmap renders into

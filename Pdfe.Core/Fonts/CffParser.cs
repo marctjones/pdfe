@@ -22,10 +22,22 @@ internal static class CffParser
         public int NumGlyphs;
         public short XMin, YMin, XMax, YMax;
         // glyph name (e.g. "A", "space", ".notdef") → glyph index.
-        // Always contains ".notdef" at index 0.
+        // Always contains ".notdef" at index 0. Empty for CID-keyed fonts —
+        // those don't have glyph names; lookup is via <see cref="CidToGlyph"/>.
         public Dictionary<string, int> GlyphNameToIndex = new();
         // glyph index → glyph name (inverse of the above). Index 0 = .notdef.
+        // For CID-keyed fonts, all entries are null/unset.
         public string[] GlyphNames = Array.Empty<string>();
+        // True when the CFF Top DICT contains the /ROS operator (12 30),
+        // marking the font as CID-keyed (Adobe-Japan1 / Adobe-CNS1 etc.).
+        // CID-keyed CFFs store CIDs in their charset table where ordinary
+        // CFFs store SIDs (string IDs); the renderer needs to look glyphs
+        // up by CID rather than by Unicode → name → index.
+        public bool IsCidKeyed;
+        // CID → glyph index (the index Skia uses when DrawText is called
+        // with TextEncoding.GlyphId). Built from the charset table when
+        // <see cref="IsCidKeyed"/> is true. CID 0 → glyph 0 (.notdef).
+        public Dictionary<int, int>? CidToGlyph;
     }
 
     public static CffFontInfo? Parse(byte[] cff)
@@ -70,40 +82,74 @@ internal static class CffParser
             if (topDict.TryGetValue(15, out var csetOp) && csetOp.Count > 0)
                 charsetOffset = (int)csetOp[0];
 
-            var sidByGlyph = new int[numGlyphs];
-            sidByGlyph[0] = 0; // .notdef is always SID 0
+            // CID-keyed fonts (Adobe-Japan1 etc.) carry the /ROS operator
+            // (Registry-Ordering-Supplement, encoded as 12 30 → 1230) in
+            // the Top DICT. The charset values are then CIDs rather than
+            // SIDs, and there are no PostScript glyph names; lookup is via
+            // CID → glyph index.
+            bool isCidKeyed = topDict.ContainsKey(1230);
+
+            var charsetByGlyph = new int[numGlyphs];
+            charsetByGlyph[0] = 0; // .notdef is always glyph 0
             if (charsetOffset == 0)
             {
+                // For CID-keyed fonts the predefined charset 0 is documented
+                // as "Identity" — glyph index N → CID N — but in practice
+                // CID-keyed CFFs always supply a custom charset, so this
+                // branch only matters for simple SID-based CFFs.
                 for (int g = 1; g < numGlyphs && g < IsoAdobeCharset.Length; g++)
-                    sidByGlyph[g] = IsoAdobeCharset[g];
+                    charsetByGlyph[g] = IsoAdobeCharset[g];
             }
             else if (charsetOffset == 1)
             {
                 for (int g = 1; g < numGlyphs && g < ExpertCharset.Length; g++)
-                    sidByGlyph[g] = ExpertCharset[g];
+                    charsetByGlyph[g] = ExpertCharset[g];
             }
             else if (charsetOffset == 2)
             {
                 for (int g = 1; g < numGlyphs && g < ExpertSubsetCharset.Length; g++)
-                    sidByGlyph[g] = ExpertSubsetCharset[g];
+                    charsetByGlyph[g] = ExpertSubsetCharset[g];
             }
             else
             {
-                ReadCustomCharset(cff, charsetOffset, numGlyphs, sidByGlyph);
+                ReadCustomCharset(cff, charsetOffset, numGlyphs, charsetByGlyph);
             }
 
-            // Resolve SIDs to glyph-name strings.
-            var glyphNames = new string[numGlyphs];
-            var nameToIndex = new Dictionary<string, int>(numGlyphs);
-            for (int g = 0; g < numGlyphs; g++)
+            // For CID-keyed fonts we don't have SIDs to resolve; build the
+            // CID → glyph index inverse instead so the renderer can map a
+            // PDF CID through the descendant font's CFF charset to the
+            // glyph index Skia ultimately draws.
+            Dictionary<string, int> nameToIndex;
+            string[] glyphNames;
+            Dictionary<int, int>? cidToGlyph = null;
+            if (isCidKeyed)
             {
-                int sid = sidByGlyph[g];
-                string? name = ResolveSid(sid, stringIndex);
-                if (name == null) continue;
-                glyphNames[g] = name;
-                // First occurrence wins on duplicates (shouldn't happen in valid fonts).
-                if (!nameToIndex.ContainsKey(name))
-                    nameToIndex[name] = g;
+                cidToGlyph = new Dictionary<int, int>(numGlyphs);
+                cidToGlyph[0] = 0;
+                for (int g = 1; g < numGlyphs; g++)
+                {
+                    int cid = charsetByGlyph[g];
+                    if (!cidToGlyph.ContainsKey(cid))
+                        cidToGlyph[cid] = g;
+                }
+                nameToIndex = new Dictionary<string, int>();
+                glyphNames = Array.Empty<string>();
+            }
+            else
+            {
+                // Resolve SIDs to glyph-name strings (simple Type 1C path).
+                glyphNames = new string[numGlyphs];
+                nameToIndex = new Dictionary<string, int>(numGlyphs);
+                for (int g = 0; g < numGlyphs; g++)
+                {
+                    int sid = charsetByGlyph[g];
+                    string? name = ResolveSid(sid, stringIndex);
+                    if (name == null) continue;
+                    glyphNames[g] = name;
+                    // First occurrence wins on duplicates (shouldn't happen in valid fonts).
+                    if (!nameToIndex.ContainsKey(name))
+                        nameToIndex[name] = g;
+                }
             }
 
             // FontBBox, if present, lives at Top DICT operator 5 = [xMin yMin xMax yMax].
@@ -122,6 +168,8 @@ internal static class CffParser
                 XMin = xMin, YMin = yMin, XMax = xMax, YMax = yMax,
                 GlyphNameToIndex = nameToIndex,
                 GlyphNames = glyphNames,
+                IsCidKeyed = isCidKeyed,
+                CidToGlyph = cidToGlyph,
             };
         }
         catch

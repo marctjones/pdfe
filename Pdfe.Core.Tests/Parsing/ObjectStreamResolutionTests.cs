@@ -1,9 +1,7 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace Pdfe.Core.Tests.Parsing;
 
 /// <summary>

@@ -17,7 +17,6 @@ public class ContentStreamParser
     // Graphics state tracking
     private readonly Stack<GraphicsState> _stateStack = new();
     private GraphicsState _state = new();
-    private bool _inCompatibilitySection;
 
     // Text state tracking
     private double _fontSize = 12;
@@ -479,12 +478,10 @@ public class ContentStreamParser
             case "EMC":
                 break;
 
-            // Compatibility operators
+            // Compatibility operators (BX/EX) — accepted as no-ops so the
+            // parser consumes them without flagging them as unknown.
             case "BX":
-                _inCompatibilitySection = true;
-                break;
             case "EX":
-                _inCompatibilitySection = false;
                 break;
         }
     }
@@ -599,16 +596,62 @@ public class ContentStreamParser
     }
 
     /// <summary>
+    /// PDF spec ISO 32000-2:2020, Table 91 — inline image dict
+    /// abbreviations. PDF allows either spelling on every key, but when
+    /// BOTH appear in the same inline-image dict the spec was silent
+    /// from PDF 1.0 (1993) until 2020. The PDF Association resolved
+    /// (pdf-association/pdf-issues#3) that <b>the abbreviated key shall
+    /// take precedence</b>. Without this, parsers that pick the wrong
+    /// key get out of sync with the content stream — most viewers
+    /// (Acrobat, Firefox, Chrome/PDFium, mutool) all needed fixes;
+    /// see the SafeDocs test fixture <c>issue14256.pdf</c> which is
+    /// specifically designed to exercise the eight semantic
+    /// collisions in Table 91.
+    /// </summary>
+    private static readonly Dictionary<string, string> InlineImageFullToAbbrev = new()
+    {
+        ["BitsPerComponent"] = "BPC",
+        ["ColorSpace"]       = "CS",
+        ["Decode"]           = "D",
+        ["DecodeParms"]      = "DP",
+        ["Filter"]           = "F",
+        ["Height"]           = "H",
+        ["ImageMask"]        = "IM",
+        ["Interpolate"]      = "I",
+        ["Length"]           = "L",
+        ["Width"]            = "W",
+    };
+
+    /// <summary>
+    /// The set of abbreviated forms (RHS of <see cref="InlineImageFullToAbbrev"/>)
+    /// for fast O(1) "is this an abbreviated key?" lookups during parse.
+    /// </summary>
+    private static readonly HashSet<string> InlineImageAbbreviatedKeys =
+        new(InlineImageFullToAbbrev.Values);
+
+    /// <summary>
     /// Parse an inline image (§8.9.7).
     /// Called immediately after the BI token is consumed.
     /// Reads the image-parameter key-value pairs, skips past ID, and
     /// consumes the binary image data up to (and including) EI.
     /// Returns a BI operator whose first operand is the image-parameter dict.
+    ///
+    /// Key normalization: full-form keys (e.g. <c>/Width</c>) are
+    /// stored under their abbreviated equivalent (<c>/W</c>) so
+    /// downstream code only sees one spelling. When both forms appear
+    /// in the same dict, the abbreviated wins regardless of source
+    /// order — implements the PDF Association's pdf-issues#3 ruling.
     /// </summary>
     private ContentOperator? ParseInlineImage()
     {
         // --- 1. Parse abbreviated image parameters until 'ID' ---
         var imageParams = new PdfDictionary();
+        // Tracks which abbreviated keys were *explicitly* set by the
+        // source (i.e. an entry like `/W 10`, not `/Width 10` mapped).
+        // When an explicit abbreviated key is present, later full-form
+        // entries for the same semantic are ignored — abbreviated wins.
+        var explicitlyAbbreviated = new HashSet<string>();
+
         while (_pos < _content.Length)
         {
             SkipWhitespaceAndComments();
@@ -627,11 +670,42 @@ public class ContentStreamParser
 
             var keyToken = ParseToken();
             if (keyToken is not PdfName keyName) continue;
+            var rawKey = keyName.Value;
+
+            // Determine the canonical (abbreviated) storage key and
+            // whether this key would be ignored under the precedence
+            // rule. A full-form key is ignored iff its abbreviated
+            // counterpart was explicitly set earlier.
+            string canonicalKey = rawKey;
+            bool ignore = false;
+            if (InlineImageFullToAbbrev.TryGetValue(rawKey, out var ab))
+            {
+                canonicalKey = ab;
+                if (explicitlyAbbreviated.Contains(ab)) ignore = true;
+            }
+            else if (InlineImageAbbreviatedKeys.Contains(rawKey))
+            {
+                explicitlyAbbreviated.Add(rawKey);
+            }
 
             SkipWhitespaceAndComments();
             var valToken = ParseToken();
-            if (valToken is PdfObject valObj)
-                imageParams[keyName.Value] = valObj;
+            if (ignore) continue;                   // abbreviated already won
+
+            // ParseToken returns a `string` for keywords (because that's
+            // how operator names propagate back to the main loop). For
+            // inline-image dict values the only legal keywords are
+            // booleans — promote those into proper PdfBoolean so
+            // dict.GetBool("IM") works downstream.
+            PdfObject? valObj = valToken switch
+            {
+                PdfObject obj => obj,
+                "true"  => PdfBoolean.True,
+                "false" => PdfBoolean.False,
+                _ => null,
+            };
+            if (valObj != null)
+                imageParams[canonicalKey] = valObj;
         }
 
         // --- 2. Scan for 'EI' at a word boundary, consuming raw image data ---
@@ -748,9 +822,13 @@ public class ContentStreamParser
                     {
                         _toUnicodeMap = Text.ToUnicodeCMapParser.Parse(stream.DecodedData);
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
-                        // Ignore CMap parsing errors
+                        // ToUnicode CMaps are optional best-effort metadata used
+                        // for text extraction; tolerate malformed ones rather
+                        // than failing the whole content-stream parse. We still
+                        // let fatal resource exhaustion (OOM) propagate instead
+                        // of silently swallowing it. See issue #345.
                     }
                 }
             }

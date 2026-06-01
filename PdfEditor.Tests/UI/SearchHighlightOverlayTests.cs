@@ -6,13 +6,11 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using PdfEditor.Controls;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -34,7 +32,7 @@ public class SearchHighlightOverlayTests
     private const string PragmaticBook =
         "/home/marc/Downloads/business-success-with-open-source_P1.0.pdf";
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task SearchInPragmaticBook_DrawsHighlightRectangles()
     {
         if (!File.Exists(PragmaticBook)) return;

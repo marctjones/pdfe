@@ -34,10 +34,15 @@ class Program
             CreateAutodetectFieldsCommand(),
             CreateAuditCommand(),
             CreateOcrCommand(),
-            CreateDemoCommand()
+            CreateDemoCommand(),
+            CreateCorpusScanCommand(),
         };
 
-        return rootCommand.InvokeAsync(args);
+        // System.CommandLine 2.0 split parsing from invocation: build a
+        // ParseResult first, then run its action. Wrap with Task.FromResult
+        // because handlers are sync; if any command goes async later we'll
+        // switch to Parse(args).InvokeAsync().
+        return Task.FromResult(rootCommand.Parse(args).Invoke());
     }
 
     /// <summary>
@@ -45,14 +50,15 @@ class Program
     /// </summary>
     static Command CreateInfoCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file to analyze");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file to analyze" };
         var command = new Command("info", "Show PDF document information")
         {
             fileArg
         };
 
-        command.SetHandler((FileInfo file) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -92,7 +98,7 @@ class Program
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
             }
-        }, fileArg);
+        });
 
         return command;
     }
@@ -102,9 +108,8 @@ class Program
     /// </summary>
     static Command CreateTextCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file");
-        var pageOption = new Option<int?>("--page", "Specific page number (1-based)");
-        pageOption.AddAlias("-p");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file" };
+        var pageOption = new Option<int?>("--page", "-p") { Description = "Specific page number (1-based)" };
 
         var command = new Command("text", "Extract text from PDF")
         {
@@ -112,8 +117,10 @@ class Program
             pageOption
         };
 
-        command.SetHandler((FileInfo file, int? page) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
+            var page = parseResult.GetValue(pageOption);
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -152,7 +159,7 @@ class Program
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
             }
-        }, fileArg, pageOption);
+        });
 
         return command;
     }
@@ -162,11 +169,17 @@ class Program
     /// </summary>
     static Command CreateLettersCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file");
-        var pageOption = new Option<int>("--page", () => 1, "Page number (1-based)");
-        pageOption.AddAlias("-p");
-        var limitOption = new Option<int>("--limit", () => 50, "Maximum letters to show");
-        limitOption.AddAlias("-n");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file" };
+        var pageOption = new Option<int>("--page", "-p")
+        {
+            Description = "Page number (1-based)",
+            DefaultValueFactory = _ => 1,
+        };
+        var limitOption = new Option<int>("--limit", "-n")
+        {
+            Description = "Maximum letters to show",
+            DefaultValueFactory = _ => 50,
+        };
 
         var command = new Command("letters", "Show letters with position information")
         {
@@ -175,8 +188,11 @@ class Program
             limitOption
         };
 
-        command.SetHandler((FileInfo file, int page, int limit) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
+            var page = parseResult.GetValue(pageOption);
+            var limit = parseResult.GetValue(limitOption);
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -216,7 +232,7 @@ class Program
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
             }
-        }, fileArg, pageOption, limitOption);
+        });
 
         return command;
     }
@@ -226,12 +242,22 @@ class Program
     /// </summary>
     static Command CreateRenderCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file");
-        var outputOption = new Option<FileInfo>("--output", "Output image file (PNG)") { IsRequired = true };
-        outputOption.AddAlias("-o");
-        var pageOption = new Option<int>("--page", () => 1, "Page number (1-based)");
-        pageOption.AddAlias("-p");
-        var dpiOption = new Option<int>("--dpi", () => 150, "Resolution in DPI");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file" };
+        var outputOption = new Option<FileInfo>("--output", "-o")
+        {
+            Description = "Output image file (PNG)",
+            Required = true,
+        };
+        var pageOption = new Option<int>("--page", "-p")
+        {
+            Description = "Page number (1-based)",
+            DefaultValueFactory = _ => 1,
+        };
+        var dpiOption = new Option<int>("--dpi")
+        {
+            Description = "Resolution in DPI",
+            DefaultValueFactory = _ => 150,
+        };
 
         var command = new Command("render", "Render PDF page to image")
         {
@@ -241,8 +267,12 @@ class Program
             dpiOption
         };
 
-        command.SetHandler((FileInfo file, FileInfo output, int page, int dpi) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
+            var output = parseResult.GetValue(outputOption)!;
+            var page = parseResult.GetValue(pageOption);
+            var dpi = parseResult.GetValue(dpiOption);
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -278,7 +308,7 @@ class Program
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
             }
-        }, fileArg, outputOption, pageOption, dpiOption);
+        });
 
         return command;
     }
@@ -288,11 +318,18 @@ class Program
     /// </summary>
     static Command CreateDrawCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file");
-        var outputOption = new Option<FileInfo>("--output", "Output PDF file") { IsRequired = true };
-        outputOption.AddAlias("-o");
-        var rectOption = new Option<string?>("--rect", "Add rectangle: x,y,w,h (in points)");
-        var colorOption = new Option<string>("--color", () => "black", "Fill color: black, red, green, blue");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file" };
+        var outputOption = new Option<FileInfo>("--output", "-o")
+        {
+            Description = "Output PDF file",
+            Required = true,
+        };
+        var rectOption = new Option<string?>("--rect") { Description = "Add rectangle: x,y,w,h (in points)" };
+        var colorOption = new Option<string>("--color")
+        {
+            Description = "Fill color: black, red, green, blue",
+            DefaultValueFactory = _ => "black",
+        };
 
         var command = new Command("draw", "Add shapes to PDF (demo of graphics API)")
         {
@@ -302,8 +339,12 @@ class Program
             colorOption
         };
 
-        command.SetHandler((FileInfo file, FileInfo output, string? rect, string color) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
+            var output = parseResult.GetValue(outputOption)!;
+            var rect = parseResult.GetValue(rectOption);
+            var color = parseResult.GetValue(colorOption)!;
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -359,7 +400,7 @@ class Program
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
             }
-        }, fileArg, outputOption, rectOption, colorOption);
+        });
 
         return command;
     }
@@ -372,13 +413,14 @@ class Program
     /// </summary>
     static Command CreateRedactCommand()
     {
-        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
-        var outputArg = new Argument<FileInfo>("output", "Output PDF path");
-        var textArg = new Argument<string>("text", "Text to remove (all occurrences)");
-        var caseSensitiveOption = new Option<bool>(
-            "--case-sensitive",
-            () => false,
-            "Match case exactly (default: case-insensitive)");
+        var inputArg = new Argument<FileInfo>("input") { Description = "Input PDF file" };
+        var outputArg = new Argument<FileInfo>("output") { Description = "Output PDF path" };
+        var textArg = new Argument<string>("text") { Description = "Text to remove (all occurrences)" };
+        var caseSensitiveOption = new Option<bool>("--case-sensitive")
+        {
+            Description = "Match case exactly (default: case-insensitive)",
+            DefaultValueFactory = _ => false,
+        };
 
         var command = new Command(
             "redact",
@@ -387,8 +429,12 @@ class Program
             inputArg, outputArg, textArg, caseSensitiveOption
         };
 
-        command.SetHandler((FileInfo input, FileInfo output, string text, bool caseSensitive) =>
+        command.SetAction(parseResult =>
         {
+            var input = parseResult.GetValue(inputArg)!;
+            var output = parseResult.GetValue(outputArg)!;
+            var text = parseResult.GetValue(textArg)!;
+            var caseSensitive = parseResult.GetValue(caseSensitiveOption);
             if (!input.Exists)
             {
                 Console.Error.WriteLine($"File not found: {input.FullName}");
@@ -413,7 +459,7 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, inputArg, outputArg, textArg, caseSensitiveOption);
+        });
 
         return command;
     }
@@ -439,17 +485,18 @@ class Program
     /// </summary>
     static Command CreateFillFormCommand()
     {
-        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
-        var outputArg = new Argument<FileInfo>("output", "Output PDF path");
-        var fieldOption = new Option<string[]>(
-            "--field",
-            "Field assignment in the form 'FullName=Value'. May be repeated for multiple fields.")
-        { AllowMultipleArgumentsPerToken = false };
-        fieldOption.AddAlias("-f");
-        var flattenOption = new Option<bool>(
-            "--flatten",
-            () => false,
-            "Bake values into page content and remove the form (non-interactive output)");
+        var inputArg = new Argument<FileInfo>("input") { Description = "Input PDF file" };
+        var outputArg = new Argument<FileInfo>("output") { Description = "Output PDF path" };
+        var fieldOption = new Option<string[]>("--field", "-f")
+        {
+            Description = "Field assignment in the form 'FullName=Value'. May be repeated for multiple fields.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+        var flattenOption = new Option<bool>("--flatten")
+        {
+            Description = "Bake values into page content and remove the form (non-interactive output)",
+            DefaultValueFactory = _ => false,
+        };
 
         var command = new Command(
             "fill-form",
@@ -458,8 +505,12 @@ class Program
             inputArg, outputArg, fieldOption, flattenOption
         };
 
-        command.SetHandler((FileInfo input, FileInfo output, string[] fields, bool flatten) =>
+        command.SetAction(parseResult =>
         {
+            var input = parseResult.GetValue(inputArg)!;
+            var output = parseResult.GetValue(outputArg)!;
+            var fields = parseResult.GetValue(fieldOption);
+            var flatten = parseResult.GetValue(flattenOption);
             if (!input.Exists)
             {
                 Console.Error.WriteLine($"File not found: {input.FullName}");
@@ -485,7 +536,7 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, inputArg, outputArg, fieldOption, flattenOption);
+        });
 
         return command;
     }
@@ -533,18 +584,37 @@ class Program
     /// </summary>
     static Command CreateAddFieldCommand()
     {
-        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
-        var outputArg = new Argument<FileInfo>("output", "Output PDF path");
-        var typeOption = new Option<string>("--type", () => "Text",
-            "Field type: Text, Checkbox, Choice, Signature");
-        var nameOption = new Option<string>("--name", "Full field name") { IsRequired = true };
-        var pageOption = new Option<int>("--page", () => 1, "1-based page number");
-        var rectOption = new Option<string>("--rect",
-            "Rect in PDF points as 'left,bottom,right,top' (bottom-left origin)") { IsRequired = true };
-        var valueOption = new Option<string?>("--value", "Default value (Text/Choice) or 'Yes'/'Off' (Checkbox)");
-        var optionsOption = new Option<string[]>("--option",
-            "Choice option (repeatable). At least one required for --type Choice.")
-        { AllowMultipleArgumentsPerToken = false };
+        var inputArg = new Argument<FileInfo>("input") { Description = "Input PDF file" };
+        var outputArg = new Argument<FileInfo>("output") { Description = "Output PDF path" };
+        var typeOption = new Option<string>("--type")
+        {
+            Description = "Field type: Text, Checkbox, Choice, Signature",
+            DefaultValueFactory = _ => "Text",
+        };
+        var nameOption = new Option<string>("--name")
+        {
+            Description = "Full field name",
+            Required = true,
+        };
+        var pageOption = new Option<int>("--page")
+        {
+            Description = "1-based page number",
+            DefaultValueFactory = _ => 1,
+        };
+        var rectOption = new Option<string>("--rect")
+        {
+            Description = "Rect in PDF points as 'left,bottom,right,top' (bottom-left origin)",
+            Required = true,
+        };
+        var valueOption = new Option<string?>("--value")
+        {
+            Description = "Default value (Text/Choice) or 'Yes'/'Off' (Checkbox)",
+        };
+        var optionsOption = new Option<string[]>("--option")
+        {
+            Description = "Choice option (repeatable). At least one required for --type Choice.",
+            AllowMultipleArgumentsPerToken = false,
+        };
 
         var command = new Command("add-field",
             "Add a new AcroForm field (Text/Checkbox/Choice/Signature) to a PDF")
@@ -552,16 +622,16 @@ class Program
             inputArg, outputArg, typeOption, nameOption, pageOption, rectOption, valueOption, optionsOption
         };
 
-        command.SetHandler(ctx =>
+        command.SetAction(parseResult =>
         {
-            var input = ctx.ParseResult.GetValueForArgument(inputArg);
-            var output = ctx.ParseResult.GetValueForArgument(outputArg);
-            var type = ctx.ParseResult.GetValueForOption(typeOption)!;
-            var name = ctx.ParseResult.GetValueForOption(nameOption)!;
-            var page = ctx.ParseResult.GetValueForOption(pageOption);
-            var rectStr = ctx.ParseResult.GetValueForOption(rectOption)!;
-            var value = ctx.ParseResult.GetValueForOption(valueOption);
-            var options = ctx.ParseResult.GetValueForOption(optionsOption) ?? Array.Empty<string>();
+            var input = parseResult.GetValue(inputArg)!;
+            var output = parseResult.GetValue(outputArg)!;
+            var type = parseResult.GetValue(typeOption)!;
+            var name = parseResult.GetValue(nameOption)!;
+            var page = parseResult.GetValue(pageOption);
+            var rectStr = parseResult.GetValue(rectOption)!;
+            var value = parseResult.GetValue(valueOption);
+            var options = parseResult.GetValue(optionsOption) ?? Array.Empty<string>();
 
             if (!input.Exists)
             {
@@ -646,11 +716,17 @@ class Program
     /// </summary>
     static Command CreateAutodetectFieldsCommand()
     {
-        var inputArg = new Argument<FileInfo>("input", "Input PDF file");
-        var outputArg = new Argument<FileInfo?>("output",
-            () => null, "Output PDF (required with --apply)");
-        var applyOption = new Option<bool>("--apply", () => false,
-            "Add the detected fields to the PDF and save to <output>");
+        var inputArg = new Argument<FileInfo>("input") { Description = "Input PDF file" };
+        var outputArg = new Argument<FileInfo?>("output")
+        {
+            Description = "Output PDF (required with --apply)",
+            DefaultValueFactory = _ => null,
+        };
+        var applyOption = new Option<bool>("--apply")
+        {
+            Description = "Add the detected fields to the PDF and save to <output>",
+            DefaultValueFactory = _ => false,
+        };
 
         var command = new Command("autodetect-fields",
             "Heuristically detect likely form-field locations on each page")
@@ -658,8 +734,11 @@ class Program
             inputArg, outputArg, applyOption
         };
 
-        command.SetHandler((FileInfo input, FileInfo? output, bool apply) =>
+        command.SetAction(parseResult =>
         {
+            var input = parseResult.GetValue(inputArg)!;
+            var output = parseResult.GetValue(outputArg);
+            var apply = parseResult.GetValue(applyOption);
             if (!input.Exists)
             {
                 Console.Error.WriteLine($"File not found: {input.FullName}");
@@ -698,7 +777,7 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, inputArg, outputArg, applyOption);
+        });
 
         return command;
     }
@@ -712,19 +791,22 @@ class Program
     /// </summary>
     static Command CreateAuditCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file to audit");
-        var jsonOption = new Option<bool>(
-            "--json",
-            () => false,
-            "Emit machine-readable JSON instead of the human-readable report");
-        var deepOption = new Option<bool>(
-            "--deep",
-            () => false,
-            "Also run differential OCR: render the page twice (with and " +
-            "without overlays stripped), OCR both, and report words " +
-            "recoverable from the underlying image but hidden in the " +
-            "displayed render. Catches rasterized-leak cases the " +
-            "structural detector can't see. Requires `tesseract` on PATH.");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file to audit" };
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Emit machine-readable JSON instead of the human-readable report",
+            DefaultValueFactory = _ => false,
+        };
+        var deepOption = new Option<bool>("--deep")
+        {
+            Description =
+                "Also run differential OCR: render the page twice (with and " +
+                "without overlays stripped), OCR both, and report words " +
+                "recoverable from the underlying image but hidden in the " +
+                "displayed render. Catches rasterized-leak cases the " +
+                "structural detector can't see. Requires `tesseract` on PATH.",
+            DefaultValueFactory = _ => false,
+        };
 
         var command = new Command(
             "audit",
@@ -733,8 +815,11 @@ class Program
             fileArg, jsonOption, deepOption,
         };
 
-        command.SetHandler((FileInfo file, bool json, bool deep) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
+            var json = parseResult.GetValue(jsonOption);
+            var deep = parseResult.GetValue(deepOption);
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -781,7 +866,7 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, fileArg, jsonOption, deepOption);
+        });
 
         return command;
     }
@@ -867,20 +952,35 @@ class Program
     /// </summary>
     static Command CreateOcrCommand()
     {
-        var fileArg = new Argument<FileInfo>("file", "PDF file to OCR");
-        var pageOption = new Option<int?>("--page", "Page to OCR (1-based). Omit for all pages.");
-        pageOption.AddAlias("-p");
-        var dpiOption = new Option<int>("--dpi", () => 300, "Render DPI for OCR (higher = slower, more accurate)");
-        var langOption = new Option<string>("--lang", () => "eng", "Tesseract language code (e.g. eng, deu, eng+spa)");
-        var tessdataOption = new Option<string?>("--tessdata", "Path to a directory containing <lang>.traineddata. Defaults to TESSDATA_PREFIX.");
+        var fileArg = new Argument<FileInfo>("file") { Description = "PDF file to OCR" };
+        var pageOption = new Option<int?>("--page", "-p") { Description = "Page to OCR (1-based). Omit for all pages." };
+        var dpiOption = new Option<int>("--dpi")
+        {
+            Description = "Render DPI for OCR (higher = slower, more accurate)",
+            DefaultValueFactory = _ => 300,
+        };
+        var langOption = new Option<string>("--lang")
+        {
+            Description = "Tesseract language code (e.g. eng, deu, eng+spa)",
+            DefaultValueFactory = _ => "eng",
+        };
+        var tessdataOption = new Option<string?>("--tessdata")
+        {
+            Description = "Path to a directory containing <lang>.traineddata. Defaults to TESSDATA_PREFIX.",
+        };
 
         var command = new Command("ocr", "Render and OCR a PDF page via tesseract")
         {
             fileArg, pageOption, dpiOption, langOption, tessdataOption,
         };
 
-        command.SetHandler((FileInfo file, int? page, int dpi, string lang, string? tessdata) =>
+        command.SetAction(parseResult =>
         {
+            var file = parseResult.GetValue(fileArg)!;
+            var page = parseResult.GetValue(pageOption);
+            var dpi = parseResult.GetValue(dpiOption);
+            var lang = parseResult.GetValue(langOption)!;
+            var tessdata = parseResult.GetValue(tessdataOption);
             if (!file.Exists)
             {
                 Console.Error.WriteLine($"File not found: {file.FullName}");
@@ -924,7 +1024,7 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, fileArg, pageOption, dpiOption, langOption, tessdataOption);
+        });
 
         return command;
     }
@@ -936,7 +1036,7 @@ class Program
     {
         var command = new Command("demo", "Run interactive demos of Pdfe.Core capabilities");
 
-        command.SetHandler(() =>
+        command.SetAction(_ =>
         {
             Console.WriteLine("=== Pdfe.Core Demo ===");
             Console.WriteLine();
@@ -1068,5 +1168,386 @@ class Program
         writer.Flush();
 
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// pdfe corpus-scan &lt;corpus-dir&gt; --output out.json
+    ///                  [--chunk N] [--total M] [--dpi 150]
+    ///
+    /// Internal-use subcommand that powers the chunked exploratory
+    /// differential harness without the overhead of `dotnet test`.
+    /// Replaces the per-chunk dotnet test invocation
+    /// (~3 min startup × 14 chunks = 40+ min wasted) with a published
+    /// pdfe binary call (~500 ms startup × 14 = 7 sec).
+    ///
+    /// Renders page 1 of each PDF in the corpus's chunk-slice with
+    /// pdfe's SkiaRenderer and with `mutool draw`, computes diff
+    /// metrics, and writes a per-chunk JSON. The shell driver
+    /// scripts/run-exploratory-corpus.sh merges the slices.
+    ///
+    /// Memory budget: chunk index `i` mod total `M` selects the
+    /// chunk's PDFs; one process per chunk keeps SkiaSharp's native
+    /// allocations bounded by process exit.
+    /// </summary>
+    static Command CreateCorpusScanCommand()
+    {
+        var corpusArg = new Argument<DirectoryInfo>("corpus") { Description = "Directory of PDFs to scan" };
+        var outputOption = new Option<FileInfo>("--output")
+        {
+            Description = "Output JSON path",
+            Required = true,
+        };
+        var chunkOption = new Option<int>("--chunk")
+        {
+            Description = "0-based chunk index",
+            DefaultValueFactory = _ => 0,
+        };
+        var totalOption = new Option<int>("--total")
+        {
+            Description = "Total number of chunks",
+            DefaultValueFactory = _ => 1,
+        };
+        var dpiOption = new Option<int>("--dpi")
+        {
+            Description = "Render DPI",
+            DefaultValueFactory = _ => 150,
+        };
+        var diffPctOption = new Option<double>("--max-diff-fraction")
+        {
+            Description = "Pass-fail threshold for differing-pixel fraction",
+            DefaultValueFactory = _ => 0.10,
+        };
+        var maxMaeOption = new Option<double>("--max-mae")
+        {
+            Description = "Pass-fail threshold for mean-absolute-error per channel",
+            DefaultValueFactory = _ => 32.0,
+        };
+        var parallelOption = new Option<int>("--parallel")
+        {
+            Description = "Concurrent PDFs within this chunk. 0 = auto (ProcessorCount/2).",
+            DefaultValueFactory = _ => 0,
+        };
+        var perPdfTimeoutOption = new Option<int>("--pdf-timeout-ms")
+        {
+            Description = "Mutool timeout per PDF render. Lower = skip slow PDFs faster.",
+            DefaultValueFactory = _ => 15_000,
+        };
+
+        var command = new Command("corpus-scan",
+            "Render each PDF with pdfe + mutool, compute pixel-diff, write JSON report")
+        {
+            corpusArg, outputOption, chunkOption, totalOption,
+            dpiOption, diffPctOption, maxMaeOption, parallelOption, perPdfTimeoutOption,
+        };
+
+        command.SetAction(parseResult =>
+        {
+            var corpus = parseResult.GetValue(corpusArg)!;
+            var output = parseResult.GetValue(outputOption)!;
+            var chunk = parseResult.GetValue(chunkOption);
+            var total = parseResult.GetValue(totalOption);
+            var dpi = parseResult.GetValue(dpiOption);
+            var diffPct = parseResult.GetValue(diffPctOption);
+            var maxMae = parseResult.GetValue(maxMaeOption);
+            var parallel = parseResult.GetValue(parallelOption);
+            var pdfTimeoutMs = parseResult.GetValue(perPdfTimeoutOption);
+
+            if (parallel <= 0) parallel = Math.Max(1, Environment.ProcessorCount / 2);
+
+            if (!corpus.Exists)
+            {
+                Console.Error.WriteLine($"Corpus not found: {corpus.FullName}");
+                Environment.ExitCode = 1; return;
+            }
+            if (total < 1 || chunk < 0 || chunk >= total)
+            {
+                Console.Error.WriteLine($"Bad chunk: --chunk {chunk} --total {total}");
+                Environment.ExitCode = 1; return;
+            }
+            if (!Pdfe.Rendering.Differential.MutoolReferenceRenderer.IsAvailable)
+            {
+                Console.Error.WriteLine("mutool not on PATH — install mupdf-tools");
+                Environment.ExitCode = 2; return;
+            }
+
+            try
+            {
+                var ok = RunCorpusScan(corpus.FullName, output.FullName,
+                    chunk, total, dpi, diffPct, maxMae, parallel, pdfTimeoutMs);
+                Environment.ExitCode = ok ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        });
+
+        return command;
+    }
+
+    /// <summary>
+    /// Walk the corpus's chunk-slice, render each PDF with pdfe and
+    /// mutool, diff, and write a single JSON file. Mirrors
+    /// ExploratoryDifferentialTests.GenerateCorpusReportChunk minus
+    /// xunit overhead.
+    /// </summary>
+    internal static bool RunCorpusScan(
+        string corpusDir, string outputPath,
+        int chunkIndex, int chunkTotal,
+        int dpi, double maxDiffFraction, double maxMae,
+        int parallel, int pdfTimeoutMs)
+    {
+        var pdfs = Directory.EnumerateFiles(corpusDir, "*.pdf")
+            .OrderBy(p => p)
+            .Select((path, idx) => (path, idx))
+            .Where(t => t.idx % chunkTotal == chunkIndex)
+            .Select(t => t.path)
+            .ToList();
+
+        Console.Out.WriteLine(
+            $"chunk {chunkIndex + 1}/{chunkTotal}: scanning {pdfs.Count} PDFs in {corpusDir} " +
+            $"({parallel}-way parallel, {pdfTimeoutMs}ms mutool timeout)");
+
+        // Use a thread-safe collector. Order in the final JSON is
+        // restored by sort-on-write since Parallel.ForEach completion
+        // order is non-deterministic.
+        var entries = new System.Collections.Concurrent.ConcurrentBag<CorpusScanEntry>();
+        long peakBytes = 0;
+        int processed = 0;
+
+        var po = new ParallelOptions { MaxDegreeOfParallelism = parallel };
+        Parallel.ForEach(pdfs, po, pdf =>
+        {
+            var rel = Path.GetFileName(pdf);
+            // Wall-clock budget covers pdfe's render (no internal
+            // timeout) AND mutool's render together. Some pdf.js
+            // fixtures have pathological pdfe-side rendering that
+            // would otherwise grind chunks for minutes per PDF.
+            // Budget is 2× the mutool timeout — generous for normal
+            // PDFs, hard cap on the bad ones.
+            var wallBudgetMs = pdfTimeoutMs * 2;
+            CorpusScanEntry entry;
+            var task = Task.Run(() => ScanOne(rel, pdf, dpi, maxDiffFraction, maxMae, pdfTimeoutMs));
+            if (task.Wait(wallBudgetMs))
+            {
+                entry = task.Result;
+            }
+            else
+            {
+                entry = new CorpusScanEntry
+                {
+                    path = rel,
+                    status = "TIMEOUT",
+                    errorType = "WallClockTimeout",
+                    errorMessage = $"Per-PDF budget {wallBudgetMs}ms exceeded — pdfe or mutool got stuck.",
+                };
+                // Note: the underlying ScanOne task may keep running
+                // until the process exits. That's acceptable here:
+                // we're not sharing state, and process exit at chunk
+                // end reaps the orphan.
+            }
+            entries.Add(entry);
+            int n = System.Threading.Interlocked.Increment(ref processed);
+
+            // Cheap RSS sample.
+            var rss = Environment.WorkingSet;
+            if (rss > System.Threading.Interlocked.Read(ref peakBytes))
+                System.Threading.Interlocked.Exchange(ref peakBytes, rss);
+
+            // Periodic GC to keep SkiaSharp's native memory bounded.
+            // Less aggressive than the serial version because parallel
+            // workers naturally interleave finalization.
+            if (n % 20 == 0)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        });
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        var counts = new Dictionary<string, int>();
+        foreach (var e in entries)
+        {
+            counts.TryGetValue(e.status, out var c);
+            counts[e.status] = c + 1;
+        }
+
+        Console.Out.WriteLine();
+        foreach (var kv in counts.OrderByDescending(kv => kv.Value))
+            Console.Out.WriteLine($"  {kv.Value,4}  {kv.Key}");
+        Console.Out.WriteLine($"  total processed: {entries.Count}");
+        Console.Out.WriteLine($"  peak RSS: {peakBytes / 1024 / 1024} MB");
+
+        // Sort entries by path so parallel completion order doesn't make
+        // diffs noisy across runs.
+        var sortedEntries = entries.OrderBy(e => e.path).ToList();
+        var report = new
+        {
+            generatedUtc = DateTime.UtcNow.ToString("o"),
+            corpus = corpusDir,
+            chunkIndex,
+            chunkTotal,
+            counts,
+            total = entries.Count,
+            peakRssBytes = peakBytes,
+            entries = sortedEntries,
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(report,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        File.WriteAllText(outputPath, json);
+        Console.Out.WriteLine($"  wrote {outputPath}");
+        return true;
+    }
+
+    private static CorpusScanEntry ScanOne(
+        string relPath, string pdfPath, int dpi,
+        double maxDiffFraction, double maxMae, int oracleTimeoutMs = 30_000)
+    {
+        var entry = new CorpusScanEntry { path = relPath };
+
+        SkiaSharp.SKBitmap? pdfeBmp = null;
+        SkiaSharp.SKBitmap? mutoolBmp = null;
+        SkiaSharp.SKBitmap? cairoBmp = null;
+        try
+        {
+            try
+            {
+                using var doc = PdfDocument.Open(pdfPath);
+                entry.pageCount = doc.PageCount;
+                if (doc.PageCount == 0) { entry.status = "EMPTY_DOC"; return entry; }
+                var renderer = new SkiaRenderer();
+                pdfeBmp = renderer.RenderPage(doc.GetPage(1), new RenderOptions { Dpi = dpi });
+            }
+            catch (Exception ex)
+            {
+                entry.status = "PARSE_ERROR";
+                entry.errorType = ex.GetType().Name;
+                entry.errorMessage = Trunc(ex.Message, 200);
+                return entry;
+            }
+
+            if (pdfeBmp == null) { entry.status = "RENDER_NULL"; return entry; }
+
+            // Two oracles: mutool (MuPDF) and pdftocairo (Poppler). pdfe
+            // is judged correct if it agrees with EITHER. A disagreement
+            // with both is a real bug; a disagreement with one but not
+            // the other is more likely a viewer-specific quirk.
+            mutoolBmp = Pdfe.Rendering.Differential.MutoolReferenceRenderer.RenderPage(
+                pdfPath, 1, dpi, oracleTimeoutMs);
+            cairoBmp = Pdfe.Rendering.Differential.PdftocairoReferenceRenderer.RenderPage(
+                pdfPath, 1, dpi, oracleTimeoutMs);
+
+            if (mutoolBmp == null && cairoBmp == null)
+            {
+                entry.status = "ALL_ORACLES_REFUSED";
+                return entry;
+            }
+
+            // Compute pdfe-vs-mutool and pdfe-vs-cairo separately,
+            // then take the BEST agreement (lowest diff). This is
+            // "best of two oracles" voting.
+            (double diff, double mae)? mutoolMetrics = null;
+            (double diff, double mae)? cairoMetrics = null;
+
+            if (mutoolBmp != null)
+            {
+                var (a, b) = MatchAndCompare(pdfeBmp, mutoolBmp);
+                mutoolMetrics = (a, b);
+                entry.diffFractionMutool = a;
+                entry.maeMutool = b;
+            }
+            if (cairoBmp != null)
+            {
+                var (a, b) = MatchAndCompare(pdfeBmp, cairoBmp);
+                cairoMetrics = (a, b);
+                entry.diffFractionCairo = a;
+                entry.maeCairo = b;
+            }
+
+            // Best-of-two: if pdfe agrees with either oracle within
+            // thresholds, that's a PASS. Take the better of the two
+            // for the headline diffFraction/mae fields.
+            double bestDiff = double.MaxValue, bestMae = double.MaxValue;
+            if (mutoolMetrics is var (md, mm)) { if (md < bestDiff) { bestDiff = md; bestMae = mm; } }
+            if (cairoMetrics  is var (cd, cm)) { if (cd < bestDiff) { bestDiff = cd; bestMae = cm; } }
+            entry.diffFraction = bestDiff;
+            entry.mae = bestMae;
+
+            bool passMutool = mutoolMetrics is var (md2, mm2)
+                && md2 <= maxDiffFraction && mm2 <= maxMae;
+            bool passCairo = cairoMetrics is var (cd2, cm2)
+                && cd2 <= maxDiffFraction && cm2 <= maxMae;
+
+            if (passMutool && passCairo)        entry.status = "PASS";
+            else if (passMutool || passCairo)   entry.status = "PASS_ONE";  // partial agreement
+            else                                entry.status = "DIFF";
+        }
+        catch (Exception ex)
+        {
+            entry.status = "COMPARE_ERROR";
+            entry.errorType = ex.GetType().Name;
+            entry.errorMessage = Trunc(ex.Message, 200);
+        }
+        finally
+        {
+            pdfeBmp?.Dispose();
+            mutoolBmp?.Dispose();
+            cairoBmp?.Dispose();
+        }
+        return entry;
+    }
+
+    /// <summary>
+    /// Resize the first bitmap to match the second (if dimensions
+    /// disagree) and compute the diff metrics. Returns
+    /// (differingPixelFraction, meanAbsoluteError).
+    /// </summary>
+    private static (double diffFraction, double mae) MatchAndCompare(
+        SkiaSharp.SKBitmap pdfeBmp, SkiaSharp.SKBitmap reference)
+    {
+        SkiaSharp.SKBitmap probe = pdfeBmp;
+        bool needDispose = false;
+        if (pdfeBmp.Width != reference.Width || pdfeBmp.Height != reference.Height)
+        {
+            probe = Pdfe.Rendering.Differential.DifferentialMetrics
+                .ResizeMatch(pdfeBmp, reference.Width, reference.Height).Copy();
+            needDispose = true;
+        }
+        try
+        {
+            var report = Pdfe.Rendering.Differential.DifferentialMetrics.Compare(probe, reference);
+            return (report.DifferingPixelFraction, report.MeanAbsoluteError);
+        }
+        finally
+        {
+            if (needDispose) probe.Dispose();
+        }
+    }
+
+    private static string Trunc(string s, int n) =>
+        s.Length <= n ? s : s.Substring(0, n) + "…";
+
+    internal sealed class CorpusScanEntry
+    {
+        public string path { get; set; } = "";
+        public string status { get; set; } = "UNKNOWN";
+        public int pageCount { get; set; }
+        // Best-of-two oracle metrics (pdfe vs whichever oracle pdfe
+        // agrees with most closely). Used by the gating logic.
+        public double diffFraction { get; set; }
+        public double mae { get; set; }
+        // Per-oracle metrics — null when that oracle refused. The
+        // distinction between PASS (both agree) and PASS_ONE (one
+        // agrees) lives here.
+        public double? diffFractionMutool { get; set; }
+        public double? maeMutool { get; set; }
+        public double? diffFractionCairo { get; set; }
+        public double? maeCairo { get; set; }
+        public string? errorType { get; set; }
+        public string? errorMessage { get; set; }
     }
 }

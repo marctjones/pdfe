@@ -6,14 +6,12 @@ using System.Reactive.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using PdfEditor.Controls;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;
-using Xunit.Abstractions;
-
 namespace PdfEditor.Tests.UI;
 
 /// <summary>
@@ -72,7 +70,7 @@ public class FormAuthoringTests
         return path;
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task ToggleFormAuthoringMode_FlipsInteractionMode()
     {
         var path = WritePdf(BarePdf());
@@ -95,7 +93,7 @@ public class FormAuthoringTests
         finally { try { File.Delete(path); } catch { } }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OnFormFieldRectDrawn_CreatesTextFieldWithUniqueName()
     {
         var path = WritePdf(BarePdf());
@@ -120,7 +118,7 @@ public class FormAuthoringTests
         finally { try { File.Delete(path); } catch { } }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task OnFormFieldRectDrawn_CheckboxType_CreatesButtonField()
     {
         var path = WritePdf(BarePdf());
@@ -142,7 +140,7 @@ public class FormAuthoringTests
         finally { try { File.Delete(path); } catch { } }
     }
 
-    [AvaloniaFact]
+    [FixedAvaloniaFact]
     public async Task AutoDetectFieldsCommand_ScansAndAppliesSuggestions()
     {
         // PDF with one underline and one checkbox-sized outline.

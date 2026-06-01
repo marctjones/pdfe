@@ -296,6 +296,8 @@ Test categories:
 
 ## Building
 
+### Plain self-contained binaries
+
 ```bash
 # Linux
 dotnet publish PdfEditor -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
@@ -309,6 +311,35 @@ dotnet publish PdfEditor -c Release -r osx-arm64  --self-contained true -p:Publi
 ```
 
 Published binaries land in `bin/Release/net10.0/<runtime>/publish/`.
+
+### Installers
+
+```bash
+# Ubuntu / Debian .deb (requires dpkg-deb; preinstalled on Ubuntu)
+scripts/build-deb.sh                          # → dist/pdfe_<version>_amd64.deb
+scripts/build-deb.sh --arch arm64             # arm64 variant
+scripts/build-deb.sh --version 2.1.0-rc8      # explicit version
+
+# Windows .exe (requires Inno Setup 6: choco install innosetup)
+pwsh scripts/build-windows-installer.ps1      # → dist/pdfe-<version>-win-x64-setup.exe
+```
+
+### Release automation
+
+`.github/workflows/release.yml` builds both installers and attaches
+them to a GitHub Release whenever a `v*` tag is pushed (or a release is
+published manually):
+
+1. `linux-deb` job (ubuntu-latest) → `pdfe_<version>_amd64.deb` + portable `.tar.gz`
+2. `windows-exe` job (windows-latest) → `pdfe-<version>-win-x64-setup.exe` + portable `.zip`
+3. `publish` job uploads all artifacts with `.sha256` files; tags containing `-rc`/`-beta`/`-alpha` are flagged as pre-releases.
+
+```bash
+# Cut a new release
+git tag v2.1.0
+git push origin v2.1.0           # workflow runs, attaches installers
+# Or via the GitHub UI: Releases → Draft a new release → choose tag
+```
 
 ## Documentation
 

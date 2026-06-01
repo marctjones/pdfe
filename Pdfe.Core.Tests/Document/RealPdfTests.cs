@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Xunit;
 
@@ -9,15 +9,21 @@ namespace Pdfe.Core.Tests.Document;
 /// </summary>
 public class RealPdfTests
 {
-    private const string CorpusPath = "../../../test-pdfs/verapdf-corpus/veraPDF-corpus-master/PDF_A-1b";
+    // Path resolves from the test DLL's bin/Debug/net10.0/ up four levels
+    // to the repo root, then into test-pdfs. Matches the convention every
+    // other test file in this repo uses (PdfAnnotationTests, CjkRenderingTests,
+    // CorpusConformanceTests, etc.). Pre-fix: only three "../" — landed in
+    // Pdfe.Core.Tests/test-pdfs/ which never exists, so the corpus-presence
+    // gate always reported "not available" and these tests always skipped.
+    private const string CorpusPath = "../../../../test-pdfs/verapdf-corpus/veraPDF-corpus-master/PDF_A-1b";
 
     private static bool CorpusAvailable => Directory.Exists(Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, CorpusPath)));
 
-    [SkippableFact]
+    [Fact]
     public void Open_VeraPdfCorpusFile_ParsesSuccessfully()
     {
-        Skip.IfNot(CorpusAvailable, "veraPDF corpus not available");
+        Assert.SkipUnless(CorpusAvailable, "veraPDF corpus not available");
 
         var corpusDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, CorpusPath));
         var pdfFiles = Directory.GetFiles(corpusDir, "*.pdf", SearchOption.AllDirectories)
@@ -45,10 +51,10 @@ public class RealPdfTests
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public void GetContentStreamBytes_VeraPdfCorpusFile_ReturnsContent()
     {
-        Skip.IfNot(CorpusAvailable, "veraPDF corpus not available");
+        Assert.SkipUnless(CorpusAvailable, "veraPDF corpus not available");
 
         var corpusDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, CorpusPath));
         var pdfFiles = Directory.GetFiles(corpusDir, "*pass*.pdf", SearchOption.AllDirectories)
