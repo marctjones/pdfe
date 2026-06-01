@@ -4,6 +4,43 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [2.1.0] — 2026-06-01
+
+Graduates the `v2.1.0-rc1..rc8` line to a final release. v2.1 builds out the
+pure-.NET stack with encryption, forms, advanced transparency, full CJK, and a
+much broader content-stream operator set, then this release caps it with a
+performance pass, dependency hygiene, and a round of stability/security
+hardening.
+
+### Added
+- PDF **encryption/decryption** — RC4 (V1/V2) and AES-128/256 (V4/V5). (#237)
+- **AcroForm** read, edit, and authoring — fill, flatten, create fields. (#272)
+- **Advanced transparency** — soft masks, transparency groups, full blend-mode set. (#274)
+- **Type0 / CID (CJK)** fonts — Identity-H/V, ToUnicode CMap, vertical writing, CFF wiring. (#327, #328)
+- **Optional content groups** (OCGs) + **XMP** metadata extraction. (#329)
+- **Embedded-file** extraction. (#330)
+- Full content-stream **operator coverage** — text-state ops, color spaces, marked content, shading. (#326, #333)
+- veraPDF / corpus **conformance harness**. (#332)
+
+### Changed / Performance
+- GUI **Release startup profile** — ReadyToRun + TieredPGO + concurrent GC; **~36% faster cold start** (1.18 s → 0.75 s). (#339)
+- ReadyToRun for `Pdfe.Cli`. (#334)
+- Moved off preview packages and bumped to latest stable: **Avalonia 12.0.4, ReactiveUI 23.2.27, SkiaSharp 3.119.4, .NET 10.0.8**. (#340)
+- Removed the IdlerGear integration; refreshed stale docs (versions/architecture) and archived obsolete plan docs. (#349)
+
+### Fixed (stability & security hardening)
+- Parser **recursion-depth guard** — deeply nested hostile PDFs throw instead of StackOverflow. (#346)
+- Inline-image **`/L` length** used to avoid false-positive `EI` in binary data. (#347)
+- **Redaction re-encodes kept CID/CJK text** with original codes instead of unrenderable Unicode. (#353)
+- ToUnicode CMap parse no longer swallows fatal exceptions. (#345)
+- Headless test harness wires ReactiveUI to the Avalonia dispatcher — fixes a cross-thread `CanExecute` crash. (#358)
+
+### Tests
+- +18 tests: parser recursion limits, inline-image `/L`, CID-redaction pipeline, and previously-untested operators (`sh`, marked content, `BX`/`EX`, `d0`/`d1`). Full Pdfe.Core suite: 2562 passing.
+
+### Known limitations / deferred
+- Inline-image redaction round-trip (#354), Form XObject redaction (#355, flatten-then-redact), and rotated-page redaction (#356) remain open.
+
 ## [2.0.0] — 2026-04-25
 
 The headline of v2.0 is **a complete rewrite of the PDF stack**. v1.0 sat on
