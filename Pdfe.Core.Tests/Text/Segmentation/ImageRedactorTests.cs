@@ -308,6 +308,92 @@ public class ImageRedactorTests
 
     #endregion
 
+    #region Inline Image (BI) Removal Tests (#354)
+
+    [Fact]
+    public void ProcessOperations_InlineImageOverlapping_Removed()
+    {
+        // Any page works — BI redaction needs no resource lookup.
+        var pdfData = CreatePdfWithImageXObject(100, 600, 100, 100);
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        var operations = BuildInlineImageOps(100, 600, 100, 100);
+        var redactionArea = new PdfRectangle(50, 550, 250, 750); // covers the image
+
+        var result = ImageRedactor.ProcessOperations(
+            operations, page, redactionArea, GlyphRemovalStrategy.AnyOverlap, out int removed);
+
+        removed.Should().Be(1);
+        result.Should().NotContain(op => op.Name == "BI",
+            "an inline image overlapping the redaction area must be dropped");
+    }
+
+    [Fact]
+    public void ProcessOperations_InlineImageNoOverlap_Kept()
+    {
+        var pdfData = CreatePdfWithImageXObject(100, 600, 100, 100);
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        var operations = BuildInlineImageOps(100, 600, 100, 100);
+        var redactionArea = new PdfRectangle(0, 0, 50, 50); // far from the image
+
+        var result = ImageRedactor.ProcessOperations(
+            operations, page, redactionArea, GlyphRemovalStrategy.AnyOverlap, out int removed);
+
+        removed.Should().Be(0);
+        var bi = result.Single(op => op.Name == "BI");
+        bi.InlineImageData.Should().NotBeNullOrEmpty("a non-overlapping image keeps its data");
+    }
+
+    [Fact]
+    public void ProcessOperations_InlineImagePartialOverlap_FullyContainedKeeps()
+    {
+        var pdfData = CreatePdfWithImageXObject(100, 600, 100, 100);
+        using var doc = PdfDocument.Open(pdfData);
+        var page = doc.GetPage(1);
+
+        var operations = BuildInlineImageOps(100, 600, 100, 100);
+        var redactionArea = new PdfRectangle(90, 590, 150, 650); // partial only
+
+        var result = ImageRedactor.ProcessOperations(
+            operations, page, redactionArea, GlyphRemovalStrategy.FullyContained, out int removed);
+
+        removed.Should().Be(0, "FullyContained must keep a partially-overlapping inline image");
+        result.Should().Contain(op => op.Name == "BI");
+    }
+
+    /// <summary>
+    /// Build q / cm / BI / Q operations placing a unit-square inline image at
+    /// the given page-space rectangle. The BI carries embedded pixel bytes so
+    /// the test exercises the same operator shape the parser produces.
+    /// </summary>
+    private static List<ContentOperator> BuildInlineImageOps(
+        double x, double y, double w, double h)
+    {
+        var dict = new PdfDictionary
+        {
+            ["W"] = new PdfInteger(2),
+            ["H"] = new PdfInteger(2),
+            ["BPC"] = new PdfInteger(8),
+            ["CS"] = new PdfName("G"),
+        };
+        var bi = new ContentOperator("BI", new PdfObject[] { dict })
+        {
+            InlineImageData = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF },
+        };
+        return new List<ContentOperator>
+        {
+            ContentOperator.SaveState(),
+            ContentOperator.Transform(w, 0, 0, h, x, y),
+            bi,
+            ContentOperator.RestoreState(),
+        };
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static byte[] CreatePdfWithImageXObject(

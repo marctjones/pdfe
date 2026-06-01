@@ -7,10 +7,11 @@ using Pdfe.Core.Primitives;
 namespace Pdfe.Core.Text.Segmentation;
 
 /// <summary>
-/// Removes image XObject invocations (<c>Do</c>) whose page-space
-/// bounding box overlaps a redaction rectangle. Complements
-/// <see cref="GlyphRemover"/>, which handles text. Together they cover
-/// the two commonly-leakable content types on a PDF page.
+/// Removes image invocations whose page-space bounding box overlaps a
+/// redaction rectangle — both named image XObjects (<c>Do</c>) and
+/// inline images (<c>BI…ID…EI</c>). Complements <see cref="GlyphRemover"/>,
+/// which handles text. Together they cover the commonly-leakable content
+/// types on a PDF page.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,14 +21,16 @@ namespace Pdfe.Core.Text.Segmentation;
 /// <c>/Resources /XObject</c> dictionary; if the subtype is
 /// <c>/Image</c>, use the CTM-transformed unit square as the image's
 /// page-space quad, AABB that, and test the chosen overlap strategy
-/// against the redaction area. If it hits, drop the <c>Do</c> op.
+/// against the redaction area. If it hits, drop the <c>Do</c> op. A
+/// <c>BI</c> op is treated the same way — it always fills the unit square
+/// mapped by the CTM — and dropping it removes the embedded pixel bytes
+/// the parser captured on <see cref="ContentOperator.InlineImageData"/>
+/// (#354).
 /// </para>
 /// <para>
-/// Inline images (<c>BI…ID…EI</c>) are out of scope for this pass and
-/// pass through unchanged — see the follow-up tracked alongside #279.
-/// Form XObjects (non-image Do targets) also pass through unchanged;
-/// redacting the contents of a form would require recursing into its
-/// own content stream, which is a larger change.
+/// Form XObjects (non-image Do targets) pass through unchanged; redacting
+/// the contents of a form would require recursing into its own content
+/// stream, which is a larger change (tracked in #355).
 /// </para>
 /// </remarks>
 internal static class ImageRedactor
@@ -85,6 +88,19 @@ internal static class ImageRedactor
                     {
                         removedCount++;
                         continue; // drop it
+                    }
+                    output.Add(op);
+                    continue;
+                case "BI":
+                    // Inline image (#354): it fills the unit square mapped by
+                    // the current CTM, exactly like a named image XObject. Drop
+                    // the whole BI…ID…EI operator (and its embedded bytes) when
+                    // that quad overlaps the redaction area.
+                    if (OverlapsByStrategy(
+                            TransformedUnitSquareAabb(ctm), redactionArea, strategy))
+                    {
+                        removedCount++;
+                        continue; // drop it — embedded pixel data goes with it
                     }
                     output.Add(op);
                     continue;
