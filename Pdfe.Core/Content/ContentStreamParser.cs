@@ -822,9 +822,13 @@ public class ContentStreamParser
                     {
                         _toUnicodeMap = Text.ToUnicodeCMapParser.Parse(stream.DecodedData);
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
-                        // Ignore CMap parsing errors
+                        // ToUnicode CMaps are optional best-effort metadata used
+                        // for text extraction; tolerate malformed ones rather
+                        // than failing the whole content-stream parse. We still
+                        // let fatal resource exhaustion (OOM) propagate instead
+                        // of silently swallowing it. See issue #345.
                     }
                 }
             }
