@@ -43,6 +43,24 @@ public static class PdfPageRedactionExtensions
         // stream that was there.
         if (content.Operators.Count == 0) return;
 
+        // Pass 0: flatten Form XObjects overlapping the area (#355). Form
+        // content streams are invisible to the text/image passes below, so a
+        // form drawing over the redaction area would only be covered, not
+        // removed. Inlining the form into the page stream — and re-extracting
+        // letters from it — is what lets the glyph pass find and delete that
+        // text. Idempotent: a second RedactArea call sees no forms left.
+        if (FormXObjectFlattener.FlattenOverlapping(
+                page, content.Operators, area, out var flattened, out var inlinedForms))
+        {
+            page.SetContentStream(new ContentStream(flattened));
+            content = page.GetContentStream(); // re-parse: bounds + letters now in page space
+            // Drop the now-orphaned form objects so the writer can't re-emit
+            // their content — flattening alone would leak the redacted text,
+            // since the writer serializes every in-use object (no GC).
+            FormXObjectFlattener.PruneInlinedForms(page, content.Operators, inlinedForms);
+            if (content.Operators.Count == 0) return;
+        }
+
         IReadOnlyList<ContentOperator> working = content.Operators;
 
         // Pass 1: text glyph removal (if there's any text on the page).
