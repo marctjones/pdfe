@@ -6,9 +6,29 @@ semantic versioning.
 
 ## [2.2.1] — 2026-06-03
 
-Maintenance release: parser-robustness hardening, CI test-flake fixes, and
-documentation refresh. No new user-facing features; closes the remaining
-open **bug/fix** issues on top of v2.2.0.
+Maintenance release: parser-robustness hardening, a rotated-page render fix,
+CI test-flake fixes, and a documentation refresh. No new user-facing features;
+closes the remaining open **bug/fix** issues on top of v2.2.0 (the v2.2.0
+release shipped the redaction-security trio; this release adds the
+parser-hardening / known-issues batch that landed afterward).
+
+### Fixed
+- **Rotated PDFs render unrotated** — `SkiaRenderer` now honours the page
+  `/Rotate` entry (0/90/180/270), sizing the bitmap in visual dimensions, so
+  rotated pages display the right way up. (#364)
+- **Writer re-emitted cross-reference plumbing** — `/ObjStm` and `/XRef`
+  streams are no longer copied into the rewritten body, so a Form XObject
+  flattened out of a compressed object stream can't survive redaction. (#359)
+- **Inline-image `EI` scan was unbounded** on malformed image data lacking a
+  `/L` length, causing O(n²) blowup; the scan is now bounded. (#347)
+- **Parser hardening against hostile input** — content-stream array recursion
+  is depth-bounded and a `CancellationToken` is threaded through parsing so a
+  malicious/degenerate document can't hang or stack-overflow. (#346)
+- **Exception-swallowing audit** — best-effort `catch` blocks no longer
+  swallow `OutOfMemoryException` (and other critical failures) during the
+  ToUnicode-CMap parse and related paths. (#345)
+- Added an end-to-end CID/Type0 (CJK) redaction regression test on a real
+  Identity-H PDF, locking in the v2.1.0 `RawBytes` reconstruction fix. (#353)
 
 ### Security / robustness
 - **Malformed-PDF fuzz / property tests** for the parsers (`ParserFuzzTests`):
