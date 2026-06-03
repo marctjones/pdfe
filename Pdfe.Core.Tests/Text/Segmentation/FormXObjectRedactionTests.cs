@@ -290,6 +290,63 @@ public class FormXObjectRedactionTests
                 "the form's colliding /GS0 must be merged under a fresh name, keeping both");
     }
 
+    [Fact]
+    public void FlattenOverlapping_FormCollidingEveryResourceCategory_RenamesAndRewritesAllOps()
+    {
+        // A form colliding with the page across ExtGState/ColorSpace/Shading/
+        // Pattern/Properties/XObject (each name → a different object) plus an
+        // inline image whose /CS names a colliding colorspace. Drives every
+        // resource-rewrite branch (gs/cs/sh/scn/BDC/Do/BI-CS) and the rename
+        // machinery. Calls the flattener directly to avoid text-extraction.
+        var pageRes =
+            "/Resources << /XObject << /Fm0 6 0 R /Im0 7 0 R >> " +
+            "/ExtGState << /GS0 << /ca 1 >> >> /ColorSpace << /CS0 /DeviceRGB >> " +
+            "/Shading << /Sh0 << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 1 1] >> >> " +
+            "/Pattern << /Pat0 << /PatternType 1 >> >> /Properties << /MC0 << /Type /OCG >> >> >>";
+        var formRes =
+            "/Resources << /ExtGState << /GS0 << /ca 0.5 >> >> /ColorSpace << /CS0 /DeviceGray >> " +
+            "/Shading << /Sh0 << /ShadingType 3 /ColorSpace /DeviceGray /Coords [0 0 0 0 1 1] >> >> " +
+            "/Pattern << /Pat0 << /PatternType 2 >> >> /Properties << /MC0 << /Type /Pagination >> >> " +
+            "/XObject << /Im0 8 0 R >> /Font << /F1 5 0 R >> >>";
+        var formContent =
+            "/GS0 gs /CS0 cs /Pat0 scn /Sh0 sh /OC /MC0 BDC /Im0 Do EMC " +
+            "BI /W 1 /H 1 /BPC 8 /CS /CS0 /L 1 ID \xFF EI " +
+            "BT /F1 12 Tf 100 700 Td (X) Tj ET";
+        var img = "/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray";
+
+        var pdf = Build(
+            Obj("<< /Type /Catalog /Pages 2 0 R >>"),
+            Obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            Obj($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R {pageRes} >>"),
+            Stream("", "q /Fm0 Do Q"),
+            Obj(HelveticaFont),
+            Stream($"/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Matrix [1.0 0 0 1.0 5.5 0] {formRes}",
+                   formContent),
+            Stream(img, "\xFF"),   // page's /Im0
+            Stream(img, "\x80"));  // form's /Im0 (different object)
+
+        using var doc = PdfDocument.Open(pdf);
+        var page = doc.GetPage(1);
+        var ops = page.GetContentStream().Operators;
+
+        bool changed = FormXObjectFlattener.FlattenOverlapping(
+            page, ops, new PdfRectangle(90, 695, 300, 716), out var output, out var inlined);
+
+        changed.Should().BeTrue("the overlapping form must be inlined");
+        inlined.Should().Contain(6, "the form object number is recorded for pruning");
+        output.Should().Contain(o => o.Name == "BI", "the form's inline image is inlined");
+
+        // Each colliding category gained a renamed entry, so the form's content
+        // resolves against the page after flattening.
+        foreach (var cat in new[] { "ExtGState", "ColorSpace", "Shading", "Pattern", "Properties" })
+            page.Resources!.GetDictionaryOrNull(cat)!.Count
+                .Should().BeGreaterThanOrEqualTo(2, $"{cat} should hold both the page's and the renamed form's entry");
+
+        // The form's `gs` operand was rewritten away from the original name.
+        var gs = output.First(o => o.Name == "gs");
+        gs.GetName(0).Should().NotBe("GS0", "the colliding ExtGState name must be rewritten");
+    }
+
     // ---- builders ----
 
     private const string HelveticaFont =
