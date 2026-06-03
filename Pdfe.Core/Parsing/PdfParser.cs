@@ -28,6 +28,14 @@ public class PdfParser : IDisposable
     public int MaxNestingDepth { get; set; } = 512;
 
     /// <summary>
+    /// Cooperative cancellation for runaway parses of hostile/huge input.
+    /// Checked at object-parse entry and inside the array/dictionary element
+    /// loops, so a caller's timeout can bound a single pathological object
+    /// rather than only the whole document. See issue #346.
+    /// </summary>
+    public System.Threading.CancellationToken CancellationToken { get; set; } = default;
+
+    /// <summary>
     /// Creates a new parser with the specified lexer.
     /// </summary>
     public PdfParser(PdfLexer lexer, bool ownsLexer = false)
@@ -78,6 +86,7 @@ public class PdfParser : IDisposable
     /// </summary>
     public PdfObject ParseObject()
     {
+        CancellationToken.ThrowIfCancellationRequested();
         var token = _lexer.NextToken();
         return ParseObjectFromToken(token);
     }
@@ -168,6 +177,7 @@ public class PdfParser : IDisposable
 
             while (true)
             {
+                CancellationToken.ThrowIfCancellationRequested();
                 var token = _lexer.NextToken();
 
                 if (token.Type == PdfTokenType.ArrayEnd)
@@ -221,6 +231,7 @@ public class PdfParser : IDisposable
 
             while (true)
             {
+                CancellationToken.ThrowIfCancellationRequested();
                 var token = _lexer.NextToken();
 
                 if (token.Type == PdfTokenType.DictionaryEnd)
@@ -364,7 +375,7 @@ public class PdfParser : IDisposable
             _lexer.Seek(savedPos);
             return ParseIndirectObject();
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             _lexer.Seek(savedPos);
             return null;

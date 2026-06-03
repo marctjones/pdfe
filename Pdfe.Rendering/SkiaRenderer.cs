@@ -25,10 +25,15 @@ public class SkiaRenderer
     /// </summary>
     public SKBitmap RenderPage(PdfPage page, RenderOptions options)
     {
-        // Calculate pixel dimensions
         var scale = options.Dpi / 72.0;
-        var width = (int)Math.Round(page.Width * scale);
-        var height = (int)Math.Round(page.Height * scale);
+        float s = (float)scale, W = (float)page.Width, H = (float)page.Height;
+
+        // The page /Rotate entry rotates the page clockwise when displayed.
+        // The output bitmap is in *visual* dimensions (W/H swap for 90/270).
+        int rot = ((page.Rotation % 360) + 360) % 360;
+        bool quarter = rot is 90 or 270;
+        var width = (int)Math.Round((quarter ? page.Height : page.Width) * scale);
+        var height = (int)Math.Round((quarter ? page.Width : page.Height) * scale);
 
         // Create bitmap
         var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -37,12 +42,20 @@ public class SkiaRenderer
         // Fill background
         canvas.Clear(options.BackgroundColor);
 
-        // Set up coordinate transformation:
-        // PDF: origin at bottom-left, Y increases upward
-        // Skia: origin at top-left, Y increases downward
-        // We need to: scale, then flip Y, then translate
-        canvas.Scale((float)scale, -(float)scale);
-        canvas.Translate(0, -(float)page.Height);
+        // Map content space (PDF: bottom-left origin, Y up) to device pixels
+        // (top-left origin, Y down) of the visual bitmap, applying /Rotate.
+        // Derived as the inverse of PdfPage.ToContentStreamCoordinates (#356);
+        // the 0° case is the classic scale+flip+translate. SKMatrix args are
+        // (scaleX, skewX, transX, skewY, scaleY, transY, persp0, persp1, persp2)
+        // where px = scaleX*cx + skewX*cy + transX, py = skewY*cx + scaleY*cy + transY.
+        SKMatrix m = rot switch
+        {
+            90  => new SKMatrix(0, s, 0,   s, 0, 0,     0, 0, 1),
+            180 => new SKMatrix(-s, 0, s * W,   0, s, 0,    0, 0, 1),
+            270 => new SKMatrix(0, -s, s * H,   -s, 0, s * W,  0, 0, 1),
+            _   => new SKMatrix(s, 0, 0,   0, -s, s * H,   0, 0, 1),
+        };
+        canvas.SetMatrix(m);
 
         // Render content
         var context = new RenderContext(canvas, page, options);

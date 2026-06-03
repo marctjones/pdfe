@@ -106,7 +106,7 @@ public class PdfDocument : IDisposable
                     {
                         PdfObject target;
                         try { target = GetObject(r.ObjectNum); }
-                        catch { break; }
+                        catch (Exception __ex) when (__ex is not OutOfMemoryException) { break; }
                         stack.Push(target);
                     }
                     break;
@@ -250,7 +250,7 @@ public class PdfDocument : IDisposable
         {
             return Open(stream, ownsStream: true, allowEncrypted: allowEncrypted);
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             stream.Dispose();
             throw;
@@ -596,7 +596,7 @@ public class PdfDocument : IDisposable
                 {
                     _decompressor.Decompress(s);
                 }
-                catch
+                catch (Exception __ex) when (__ex is not OutOfMemoryException)
                 {
                     // Some streams can't be decompressed (images, etc.) - that's OK
                 }
@@ -661,7 +661,7 @@ public class PdfDocument : IDisposable
     private PdfObject? ResolveLengthReference(int objectNumber)
     {
         try { return GetObject(objectNumber); }
-        catch { return null; }
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { return null; }
     }
 
     /// <summary>
@@ -839,7 +839,7 @@ public class PdfDocument : IDisposable
         if (metaObj == null) return null;
         if (Resolve(metaObj) is not PdfStream stream) return null;
         try { return stream.DecodedData; }
-        catch { return null; }
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { return null; }
     }
 
     /// <summary>

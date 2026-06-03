@@ -178,7 +178,7 @@ internal static class PdfAnnotationParser
 
         byte[]? bytes;
         try { bytes = stream.DecodedData; }
-        catch { bytes = null; }
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { bytes = null; }
 
         var mime = stream.GetNameOrNull("Subtype");
         return (fileName, bytes, mime);
@@ -368,7 +368,7 @@ internal static class PdfAnnotationParser
 
             return new DateTimeOffset(year, month, day, hour, minute, second, offset);
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return null;
         }
