@@ -118,8 +118,9 @@ internal static class FormXObjectFlattener
         // mutate a Resources node shared via inheritance.
         var ownResourcesObj = page.Dictionary.GetOptional("Resources");
         var ownResources = ownResourcesObj != null ? doc.Resolve(ownResourcesObj) as PdfDictionary : null;
-        if (ownResources != null &&
-            doc.Resolve(ownResources.GetOptional("XObject")) is PdfDictionary xobj && xobj.Count > 0)
+        var xobjObj = ownResources?.GetOptional("XObject");
+        if (ownResources != null && xobjObj != null &&
+            doc.Resolve(xobjObj) is PdfDictionary xobj && xobj.Count > 0)
         {
             var local = new PdfDictionary();
             foreach (var kvp in xobj) local[kvp.Key] = kvp.Value;
