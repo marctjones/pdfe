@@ -4,6 +4,35 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [2.2.1] — 2026-06-03
+
+Maintenance release: parser-robustness hardening, CI test-flake fixes, and
+documentation refresh. No new user-facing features; closes the remaining
+open **bug/fix** issues on top of v2.2.0.
+
+### Security / robustness
+- **Malformed-PDF fuzz / property tests** for the parsers (`ParserFuzzTests`):
+  on hostile or malformed bytes the parser must parse them or fail with a
+  *typed* `PdfParseException` — never a raw CLR crash. The tests surfaced and
+  fixed four genuine robustness bugs: a `FormatException` in content-stream
+  hex-string parsing (`Uri.IsHexDigit`), a `KeyNotFoundException` on a
+  `/Root`-less trailer, an `InvalidOperationException` on a catalog with no
+  `/Pages`, and an `ArgumentOutOfRangeException` from a negative/past-EOF xref
+  seek offset (`PdfLexer.Seek` now bounds-checks). (#352)
+
+### CI / tests
+- Removed a redundant 15s `OperationStatus` wait in the AcroForm overlay test
+  and raised over-tight GUI timeouts (3s → 15s) that masked CI slowness as a
+  hang; raised the cold-CI first-render budget (15s → 60s) in the headless
+  render baseline test, which renders in ~2s locally but can exceed 15s on a
+  cold CI runner (JIT + xvfb + SkiaSharp native init). (#363)
+
+### Docs
+- Refreshed stale `CLAUDE.md` notes: the redaction-engine architecture now
+  points at `Pdfe.Core` (not the removed `PdfEditor/Services/Redaction/`), and
+  the frozen "Current Status (v1.4.0)" block now points at `CHANGELOG.md` /
+  GitHub Releases so the version no longer goes stale in-file. (#349)
+
 ## [2.2.0] — 2026-06-03
 
 Redaction-security release: closes the remaining content-type and
