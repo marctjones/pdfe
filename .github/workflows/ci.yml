@@ -11,6 +11,13 @@ jobs:
   build-test-coverage:
     name: Build, Test & Coverage Gates
     runs-on: ubuntu-latest
+    env:
+      # ReactiveUI/Splat's author signing certificate was revoked upstream,
+      # so a fresh `dotnet restore` fails with NU3012 (revoked cert) for
+      # packages that are otherwise the correct published versions. Skip NuGet
+      # signature verification in CI so a third-party cert revocation can't
+      # block the build. Tracked alongside the ReactiveUI removal in #343.
+      DOTNET_NUGET_SIGNATURE_VERIFICATION: false
     steps:
       - uses: actions/checkout@v4
 
