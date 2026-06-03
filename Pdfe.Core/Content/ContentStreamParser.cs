@@ -26,6 +26,13 @@ public class ContentStreamParser
     /// <summary>Max nesting depth for content-stream arrays before bailing.</summary>
     public int MaxNestingDepth { get; set; } = 256;
 
+    /// <summary>
+    /// Upper bound on an inline image's data scan when no <c>/L</c> length is
+    /// declared (#347). Inline images are meant to be small (§8.9.7); this is
+    /// far larger than any legitimate one and just bounds malicious input.
+    /// </summary>
+    private const int MaxInlineImageScanBytes = 64 * 1024 * 1024;
+
     // Graphics state tracking
     private readonly Stack<GraphicsState> _stateStack = new();
     private GraphicsState _state = new();
@@ -761,12 +768,20 @@ public class ContentStreamParser
         }
 
         // 2b. No usable length: scan for 'EI' at a word boundary, consuming raw
-        // image data. This is O(n) in the data size and always terminates.
+        // image data. Each iteration advances _pos by at least one byte and
+        // does a constant-time boundary check, so this is O(n) in the data size
+        // and always terminates. A safety bound bails on absurd input — an
+        // inline image with no /L that exceeds MaxInlineImageScanBytes without a
+        // boundary EI is treated as malformed rather than scanned to the end of
+        // a huge stream. (#347)
         if (!consumed)
         {
             dataEnd = _content.Length;
             while (_pos < _content.Length)
             {
+                if (_pos - dataStart > MaxInlineImageScanBytes)
+                    throw new PdfParseException(
+                        $"Inline image (no /L) exceeded {MaxInlineImageScanBytes} bytes without an EI marker");
                 if (IsWhitespaceByte(_content[_pos]) || _pos == dataStart)
                 {
                     // Consume the whitespace, then check for 'EI'
