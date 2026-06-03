@@ -294,4 +294,45 @@ public class InlineImageTests
         tj[0].TextContent.Should().Be("before");
         tj[1].TextContent.Should().Be("after");
     }
+
+    [Fact]
+    public void Parse_LargeInlineImage_NoLength_ScansLinearly_FindsRealEI()
+    {
+        // 8 MB of binary data WITHOUT /L, sprinkled with non-boundary "EI"
+        // byte sequences that must NOT be mistaken for the end marker. An
+        // O(n^2) scan would take minutes here; the O(n) boundary scan finds the
+        // real EI quickly. (#347)
+        const int size = 8 * 1024 * 1024;
+        var raw = new byte[size];
+        for (int i = 0; i < size; i++) raw[i] = (byte)((i % 251) + 1); // non-zero, no whitespace
+        for (int i = 1000; i < size - 1000; i += 4096) { raw[i] = (byte)'E'; raw[i + 1] = (byte)'I'; }
+
+        var header = Encoding.ASCII.GetBytes("BI /W 1 /H 1 /BPC 8 /CS /G ID ");
+        var footer = Encoding.ASCII.GetBytes("\nEI\nBT (after) Tj ET\n");
+        var content = header.Concat(raw).Concat(footer).ToArray();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = new ContentStreamParser(content).Parse();
+        sw.Stop();
+
+        result.Operators.Should().ContainSingle(op => op.Name == "BI");
+        result.Operators.Should().Contain(op => op.Name == "Tj",
+            "the operator after the real word-boundary EI must be reached");
+        sw.Elapsed.Should().BeLessThan(System.TimeSpan.FromSeconds(10),
+            "the scan must be linear, not O(n^2)");
+    }
+
+    [Fact]
+    public void Parse_InlineImage_NoLength_NoEI_ScansToEndGracefully()
+    {
+        // No /L and no EI marker: the scan runs to end-of-content (bounded by
+        // the safety cap) and still yields exactly one BI without hanging. (#347)
+        var raw = new byte[1024];
+        for (int i = 0; i < raw.Length; i++) raw[i] = (byte)((i % 200) + 1);
+        var content = Encoding.ASCII.GetBytes("BI /W 1 /H 1 /BPC 8 /CS /G ID ").Concat(raw).ToArray();
+
+        var result = new ContentStreamParser(content).Parse();
+
+        result.Operators.Count(op => op.Name == "BI").Should().Be(1);
+    }
 }
