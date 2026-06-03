@@ -1,6 +1,9 @@
+using System;
 using System.Text;
+using System.Threading;
 using Pdfe.Core.Document;
 using Pdfe.Core.Primitives;
+using Pdfe.Core.Parsing;
 
 namespace Pdfe.Core.Content;
 
@@ -13,6 +16,15 @@ public class ContentStreamParser
     private readonly byte[] _content;
     private readonly PdfPage? _page;
     private int _pos;
+
+    // Hostile-input guards (#346): bound recursion (nested arrays) and offer a
+    // cooperative cancellation point so a pathological stream can't spin or
+    // overflow the stack past the caller's timeout.
+    private int _nestingDepth;
+    private CancellationToken _cancellationToken;
+
+    /// <summary>Max nesting depth for content-stream arrays before bailing.</summary>
+    public int MaxNestingDepth { get; set; } = 256;
 
     // Graphics state tracking
     private readonly Stack<GraphicsState> _stateStack = new();
@@ -56,14 +68,19 @@ public class ContentStreamParser
     /// <summary>
     /// Parse the content stream into a ContentStream object.
     /// </summary>
-    public ContentStream Parse()
+    /// <param name="cancellationToken">Cooperatively cancels a runaway parse of
+    /// hostile/huge input (#346).</param>
+    public ContentStream Parse(CancellationToken cancellationToken = default)
     {
+        _cancellationToken = cancellationToken;
+        _nestingDepth = 0;
         _pos = 0;
         var operators = new List<ContentOperator>();
         var operands = new List<PdfObject>();
 
         while (_pos < _content.Length)
         {
+            _cancellationToken.ThrowIfCancellationRequested();
             SkipWhitespaceAndComments();
             if (_pos >= _content.Length) break;
 
@@ -1218,24 +1235,38 @@ public class ContentStreamParser
 
     private PdfArray ParseArray()
     {
-        var result = new PdfArray();
-        _pos++; // Skip '['
-
-        while (_pos < _content.Length)
+        // Bound recursion: ParseArray -> ParseToken -> ParseArray for nested
+        // arrays. A deeply nested array in hostile input would otherwise drive
+        // a StackOverflow. (#346)
+        if (++_nestingDepth > MaxNestingDepth)
         {
-            SkipWhitespaceAndComments();
-            if (_pos >= _content.Length || _content[_pos] == ']')
+            _nestingDepth--;
+            throw new PdfParseException(
+                $"Maximum nesting depth ({MaxNestingDepth}) exceeded while parsing content-stream array");
+        }
+        try
+        {
+            var result = new PdfArray();
+            _pos++; // Skip '['
+
+            while (_pos < _content.Length)
             {
-                _pos++;
-                break;
+                _cancellationToken.ThrowIfCancellationRequested();
+                SkipWhitespaceAndComments();
+                if (_pos >= _content.Length || _content[_pos] == ']')
+                {
+                    _pos++;
+                    break;
+                }
+
+                var item = ParseToken();
+                if (item is PdfObject pdfObj)
+                    result.Add(pdfObj);
             }
 
-            var item = ParseToken();
-            if (item is PdfObject pdfObj)
-                result.Add(pdfObj);
+            return result;
         }
-
-        return result;
+        finally { _nestingDepth--; }
     }
 
     private PdfName ParseName()
