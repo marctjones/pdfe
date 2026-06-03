@@ -1,3 +1,4 @@
+using Pdfe.Core.Parsing;
 using Pdfe.Core.Primitives;
 using System.Collections;
 
@@ -22,13 +23,15 @@ public class PageCollection : IReadOnlyList<PdfPage>
         _document = document;
         _pages = new List<PdfPage>();
 
-        // Get the Pages dictionary from catalog
+        // Get the Pages dictionary from catalog. A hostile/malformed catalog
+        // may lack a valid /Pages — fail with a typed PdfParseException so
+        // callers see graceful failure, not a raw InvalidOperationException. (#352)
         var pagesRef = document.Catalog.GetReferenceOrNull("Pages");
         if (pagesRef == null)
-            throw new InvalidOperationException("Document has no Pages dictionary");
+            throw new PdfParseException("Document has no Pages dictionary");
 
         _pagesDict = document.GetObject(pagesRef) as PdfDictionary
-            ?? throw new InvalidOperationException("Pages is not a dictionary");
+            ?? throw new PdfParseException("Pages is not a dictionary");
 
         // Get or create Kids array
         var kidsObj = _pagesDict.GetOptional("Kids");

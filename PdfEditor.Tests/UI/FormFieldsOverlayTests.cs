@@ -100,9 +100,11 @@ public class FormFieldsOverlayTests
 
             await vm.LoadDocumentAsync(path);
 
-            var deadline = DateTime.UtcNow.AddSeconds(15);
-            while (DateTime.UtcNow < deadline && !string.IsNullOrEmpty(vm.OperationStatus))
-                await Task.Delay(50);
+            // No need to wait on OperationStatus: the form-field overlay doesn't
+            // depend on the background search index, and in headless mode the
+            // index-build Progress callback may never pump, so that wait just
+            // burned its full timeout. We wait on the real signal — the form
+            // inputs appearing — below. (#363)
 
             var viewer = window.FindControl<PdfViewerControl>("PdfViewerControl");
             viewer.Should().NotBeNull();
@@ -142,9 +144,11 @@ public class FormFieldsOverlayTests
             await Task.Delay(100);
 
             await vm.LoadDocumentAsync(path);
-            var deadline = DateTime.UtcNow.AddSeconds(15);
-            while (DateTime.UtcNow < deadline && !string.IsNullOrEmpty(vm.OperationStatus))
-                await Task.Delay(50);
+            // No need to wait on OperationStatus: the form-field overlay doesn't
+            // depend on the background search index, and in headless mode the
+            // index-build Progress callback may never pump, so that wait just
+            // burned its full timeout. We wait on the real signal — the form
+            // inputs appearing — below. (#363)
 
             var viewer = window.FindControl<PdfViewerControl>("PdfViewerControl");
             var formLayer = FindNamedDescendant<Canvas>(viewer!, "FormFieldsLayer");
