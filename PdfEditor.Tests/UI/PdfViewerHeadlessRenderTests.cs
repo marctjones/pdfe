@@ -108,7 +108,12 @@ public class PdfViewerHeadlessRenderTests
         var pdfImage = viewer.FindControl<Image>("PdfImage");
         pdfImage.Should().NotBeNull("PdfViewerControl must expose the PdfImage element");
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        // Render completes in ~2s locally, but the first render on a cold CI
+        // runner (JIT + xvfb + SkiaSharp native init) can take far longer, so a
+        // 15s budget intermittently failed in CI while passing everywhere else.
+        // Use a generous 60s budget — we're asserting "it renders", not "it
+        // renders fast" (perf is covered by the benchmark suite). (#363)
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
         while (DateTime.UtcNow < deadline)
         {
             if (!viewer.IsLoading && pdfImage!.Source != null)
@@ -116,7 +121,7 @@ public class PdfViewerHeadlessRenderTests
             await Task.Delay(50);
         }
 
-        pdfImage!.Source.Should().NotBeNull("viewer should have rendered the first page within 15s");
+        pdfImage!.Source.Should().NotBeNull("viewer should have rendered the first page within 60s");
         viewer.IsLoading.Should().BeFalse();
         viewer.HasError.Should().BeFalse($"viewer reported error: {viewer.ErrorMessage}");
 
