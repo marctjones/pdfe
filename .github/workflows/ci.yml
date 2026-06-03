@@ -112,7 +112,11 @@ jobs:
             -reporttypes:Cobertura
 
       - name: Coverage Gate (Pdfe.Core >= 94%)
-        run: scripts/check-coverage.sh coverage/report/coverage.cobertura.xml 0.94 Pdfe.Core
+        # reportgenerator's Cobertura output is named Cobertura.xml (not
+        # coverage.cobertura.xml — that's coverlet's raw collector name). The
+        # old path never matched; it was masked because earlier steps (veraPDF)
+        # failed before the gate ran.
+        run: scripts/check-coverage.sh coverage/report/Cobertura.xml 0.94 Pdfe.Core
 
       - name: Run Pdfe.Cli.Tests
         run: |
