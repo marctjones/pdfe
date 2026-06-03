@@ -7,6 +7,12 @@
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!-- xUnit1051 asks every call to a CancellationToken-accepting method (e.g.
+         the new ContentStreamParser.Parse(ct), #346) to thread
+         TestContext.Current.CancellationToken. That's noise for unit tests that
+         intentionally call the parameterless overload. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
