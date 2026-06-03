@@ -734,7 +734,12 @@ public class ContentStreamWriterTests
     [Fact]
     public void Write_StringWithAllEscapeTypes_RoundTrips()
     {
-        var complexString = "Path\\(test)\\file\nWith\rWhitespace\tAnd\x01Control";
+        // Use U+0001 (not \x01): C#'s \x escape is greedy, so "\x01Control"
+        // parses as U+001C + "ontrol", and 0x1C is a PDFDocEncoding special
+        // (U+02DD) that legitimately does NOT round-trip as identity. U+0001
+        // is a plain control char the writer octal-escapes and round-trips
+        // cleanly. (#361)
+        var complexString = "Path\\(test)\\file\nWith\rWhitespace\tAnd\u0001Control";
         var op = new ContentOperator("Tj", new PdfObject[] { new PdfString(complexString) });
         var content = new ContentStream(new[] { op });
 
