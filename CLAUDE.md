@@ -180,7 +180,18 @@ When modifying the UI, update the XAML and bind to ViewModel properties. Never p
 
 ## Redaction Engine Architecture
 
-This is the most complex part of the codebase. Located in `Services/Redaction/`:
+This is the most complex part of the codebase. As of v2.0 the redaction engine
+lives in **`Pdfe.Core`** (pure .NET), not the GUI project. The authoritative
+glyph-level pipeline is in `Pdfe.Core/Text/Segmentation/` (GlyphRemover,
+LetterFinder, OperationReconstructor) and the content-stream machinery in
+`Pdfe.Core/Content/` (ContentStreamParser, ContentStreamWriter). The GUI's
+`PdfEditor/Services/RedactionService.cs` only orchestrates and mirrors the
+rewrite onto the rendered page — see the "Critical Files" box at the top of
+this document for the canonical paths.
+
+The component descriptions below are kept as a conceptual reference for the
+parse → filter → rebuild → replace → draw flow; the class names map onto the
+`Pdfe.Core` types above (e.g. ContentStreamBuilder → ContentStreamWriter).
 
 ### Components
 
@@ -559,28 +570,16 @@ This redaction implementation:
 
 For maximum security, also remove metadata and flatten the PDF after redaction.
 
-## Current Status (v1.4.0)
+## Current Status
 
-### v1.4.0 Release Status
+For the authoritative, version-by-version status see `CHANGELOG.md` and the
+GitHub Releases page (`gh release list`). The current line is **v2.x**: the PDF
+stack is pure-.NET and pdfe-owned (Pdfe.Core / Pdfe.Rendering / Pdfe.Ocr) and
+the legacy PdfPig/PDFsharp/PDFtoImage dependencies were removed in v2.0. Do not
+hard-code a "current release" version into this file — it goes stale; check the
+changelog instead.
 
 **Glyph-Level Redaction Implementation:** ✅ Complete
-
-#### ✅ What's Working
-
-1. **Build Status**: Perfect (0 errors, 0 warnings)
-2. **Library Tests**: 300/301 passing (1 skipped)
-3. **CLI Tests**: 74/74 passing
-4. **Birth Certificate Tests**: 8/8 passing
-5. **Integration**: Code compiles and runs
-
-#### Recently Fixed Bugs
-
-| Issue | Problem | Fix |
-|-------|---------|-----|
-| **#167** | Font reference corruption after glyph-level redaction | ContentStreamBuilder injects Tf operators |
-| **#93** | Corpus tests hang on malformed PDFs | LoadDocumentTimeoutSeconds with CancellationToken |
-| **#90** | Birth certificate fee redaction failing | LetterFinder uses text matching, not position-only |
-| **#138** | UI state persists after closing document | Enhanced CloseDocument() state clearing |
 
 #### Implementation Files
 
@@ -592,7 +591,7 @@ For maximum security, also remove metadata and flatten the PDF after redaction.
 
 **GUI Integration** (`PdfEditor/`):
 - ✅ `Services/RedactionService.cs` - Unified area + text redaction; mirrors the
-  rewritten content stream onto the PDFsharp page
+  rewritten content stream onto the rendered page
 - ✅ `ViewModels/MainWindowViewModel.Scripting.cs` - Scripting surface
 
 The separate `PdfEditor.Redaction` library (the PdfPig/PDFsharp-based

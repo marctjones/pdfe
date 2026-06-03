@@ -112,6 +112,44 @@ public class SkiaRendererTests
         pixel.Should().NotBe(SKColors.White, "rectangle area should be filled");
     }
 
+    // ---- page /Rotate support (#356 rendering follow-up) ----
+
+    [Theory]
+    [InlineData(0, 612, 792)]
+    [InlineData(90, 792, 612)]
+    [InlineData(180, 612, 792)]
+    [InlineData(270, 792, 612)]
+    public void RenderPage_Rotation_ProducesVisualDimensions(int rotation, int expectedW, int expectedH)
+    {
+        using var doc = PdfDocument.Open(CreatePdfWithRectangle(0, 0, 50, 50));
+        var page = doc.GetPage(1);
+        page.Rotation = rotation;
+
+        using var bitmap = new SkiaRenderer().RenderPage(page, new RenderOptions { Dpi = 72 });
+
+        // 90/270 swap width and height (the page is displayed quarter-turned).
+        bitmap.Width.Should().Be(expectedW);
+        bitmap.Height.Should().Be(expectedH);
+    }
+
+    [Fact]
+    public void RenderPage_Rotation90_MovesContentBottomLeftToBitmapTopLeft()
+    {
+        // A black square in the content's bottom-left corner...
+        using var doc = PdfDocument.Open(CreatePdfWithRectangle(0, 0, 60, 60));
+        var page = doc.GetPage(1);
+        page.Rotation = 90;
+
+        using var bitmap = new SkiaRenderer().RenderPage(page, new RenderOptions { Dpi = 72 });
+
+        // ...lands in the bitmap's top-left under a clockwise 90° rotation,
+        // and the opposite corner stays background.
+        bitmap.GetPixel(15, 15).Should().NotBe(SKColors.White,
+            "the rotated content's bottom-left square renders in the top-left");
+        bitmap.GetPixel(bitmap.Width - 15, bitmap.Height - 15).Should().Be(SKColors.White,
+            "the opposite corner is background");
+    }
+
     [Fact]
     public void RenderPage_StrokedRectangle_ShowsOutline()
     {

@@ -106,7 +106,7 @@ public class PdfDocument : IDisposable
                     {
                         PdfObject target;
                         try { target = GetObject(r.ObjectNum); }
-                        catch { break; }
+                        catch (Exception __ex) when (__ex is not OutOfMemoryException) { break; }
                         stack.Push(target);
                     }
                     break;
@@ -227,8 +227,10 @@ public class PdfDocument : IDisposable
         Trailer = trailer;
         Version = version;
 
-        // Load catalog
-        var catalogRef = trailer.Get<PdfReference>("Root");
+        // Load catalog. A hostile/truncated trailer may lack a valid /Root —
+        // fail with a typed PdfParseException, not a raw KeyNotFound/cast. (#352)
+        var catalogRef = trailer.GetReferenceOrNull("Root")
+            ?? throw new PdfParseException("Trailer has no valid /Root reference");
         Catalog = GetObject(catalogRef) as PdfDictionary
             ?? throw new PdfParseException("Could not load document catalog");
 
@@ -250,7 +252,7 @@ public class PdfDocument : IDisposable
         {
             return Open(stream, ownsStream: true, allowEncrypted: allowEncrypted);
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             stream.Dispose();
             throw;
@@ -596,7 +598,7 @@ public class PdfDocument : IDisposable
                 {
                     _decompressor.Decompress(s);
                 }
-                catch
+                catch (Exception __ex) when (__ex is not OutOfMemoryException)
                 {
                     // Some streams can't be decompressed (images, etc.) - that's OK
                 }
@@ -661,7 +663,7 @@ public class PdfDocument : IDisposable
     private PdfObject? ResolveLengthReference(int objectNumber)
     {
         try { return GetObject(objectNumber); }
-        catch { return null; }
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { return null; }
     }
 
     /// <summary>
@@ -839,7 +841,7 @@ public class PdfDocument : IDisposable
         if (metaObj == null) return null;
         if (Resolve(metaObj) is not PdfStream stream) return null;
         try { return stream.DecodedData; }
-        catch { return null; }
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { return null; }
     }
 
     /// <summary>
