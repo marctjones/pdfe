@@ -79,7 +79,7 @@ public class TextExtractor
     {
         IReadOnlyList<PdfField> fields;
         try { fields = _page.GetFormFields(); }
-        catch { return; }
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { return; }
 
         foreach (var field in fields)
         {
@@ -932,7 +932,7 @@ public class TextExtractor
         {
             return ToUnicodeCMapParser.Parse(stream.DecodedData);
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             // If CMap parsing fails, fall back to encoding
             return null;

@@ -364,7 +364,7 @@ public class PdfParser : IDisposable
             _lexer.Seek(savedPos);
             return ParseIndirectObject();
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             _lexer.Seek(savedPos);
             return null;

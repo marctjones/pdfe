@@ -172,7 +172,7 @@ internal static class CffParser
                 CidToGlyph = cidToGlyph,
             };
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return null;
         }
