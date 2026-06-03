@@ -709,6 +709,12 @@ public class ContentStreamParser
         }
 
         // --- 2. Locate the end of the image data (past 'EI') ---
+        // dataStart is the first byte of binary image data (the byte after
+        // the single whitespace following ID, already consumed above).
+        // dataEnd is the exclusive end of that data; the slice in between is
+        // captured verbatim so the round-trip (rewrite) is lossless. (#354)
+        int dataStart = _pos;
+        int dataEnd;
         bool consumed = false;
 
         // 2a. Trust an explicit data length when present (/L — PDF 2.0 §8.9.7;
@@ -716,6 +722,7 @@ public class ContentStreamParser
         // that many bytes and confirm EI follows. This avoids false-positive
         // 'EI' matches inside binary image data, which the byte-scan below
         // cannot reliably distinguish. (Issue #347)
+        dataEnd = _content.Length;
         if (imageParams.GetOptional("L") is PdfInteger lenObj &&
             lenObj.Value > 0 && lenObj.Value <= int.MaxValue)
         {
@@ -728,7 +735,8 @@ public class ContentStreamParser
                     _content[probe] == 'E' && _content[probe + 1] == 'I' &&
                     (probe + 2 >= _content.Length || IsWordBoundaryByte(_content[probe + 2])))
                 {
-                    _pos = probe + 2; // consume 'EI'
+                    dataEnd = afterData; // data is exactly /L bytes
+                    _pos = probe + 2;    // consume 'EI'
                     consumed = true;
                 }
                 // length present but EI didn't line up → fall back to scanning
@@ -739,7 +747,7 @@ public class ContentStreamParser
         // image data. This is O(n) in the data size and always terminates.
         if (!consumed)
         {
-            var dataStart = _pos;
+            dataEnd = _content.Length;
             while (_pos < _content.Length)
             {
                 if (IsWhitespaceByte(_content[_pos]) || _pos == dataStart)
@@ -752,6 +760,10 @@ public class ContentStreamParser
                         _content[_pos] == 'E' && _content[_pos + 1] == 'I' &&
                         (_pos + 2 >= _content.Length || IsWordBoundaryByte(_content[_pos + 2])))
                     {
+                        // Data ends at the delimiter whitespace before EI
+                        // (wsPos); the empty-data case (_pos == dataStart on
+                        // the first iteration) leaves dataEnd == dataStart.
+                        dataEnd = wsPos;
                         _pos += 2; // consume 'EI'
                         break;
                     }
@@ -765,11 +777,22 @@ public class ContentStreamParser
             }
         }
 
+        // Capture the raw image data verbatim so ContentStreamWriter can
+        // re-emit BI…ID<data>EI on round-trip. Clamp defensively in case a
+        // malformed stream left the indices crossed or out of range.
+        byte[] imageData = Array.Empty<byte>();
+        if (dataEnd > dataStart && dataStart >= 0 && dataEnd <= _content.Length)
+        {
+            imageData = new byte[dataEnd - dataStart];
+            Array.Copy(_content, dataStart, imageData, 0, dataEnd - dataStart);
+        }
+
         // Compute operator bounds from current CTM (inline image fills the unit square
         // mapped through the CTM, i.e. the four corners (0,0),(1,0),(1,1),(0,1))
         var b = TransformBounds(0, 0, 1, 1);
         var op = new ContentOperator("BI", new PdfObject[] { imageParams });
         op.BoundingBox = b;
+        op.InlineImageData = imageData;
         return op;
     }
 

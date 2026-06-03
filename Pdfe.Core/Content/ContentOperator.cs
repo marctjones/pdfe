@@ -40,6 +40,17 @@ public class ContentOperator
     public string? TextContent { get; internal set; }
 
     /// <summary>
+    /// For inline-image operators (<c>BI</c>), the raw binary image data
+    /// that appeared between <c>ID</c> and <c>EI</c> in the source content
+    /// stream. The single <see cref="Operands"/> entry holds the image
+    /// parameter dictionary; this holds the pixel bytes. Null for every
+    /// other operator. Preserving these bytes is what makes a content-stream
+    /// round-trip (parse → rewrite) lossless for inline images — without it
+    /// the data would be silently dropped. See <see cref="ContentStreamWriter"/>.
+    /// </summary>
+    public byte[]? InlineImageData { get; internal set; }
+
+    /// <summary>
     /// Creates a new content operator.
     /// </summary>
     public ContentOperator(string name, IReadOnlyList<PdfObject> operands)

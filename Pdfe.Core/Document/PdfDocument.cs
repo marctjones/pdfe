@@ -71,6 +71,60 @@ public class PdfDocument : IDisposable
     }
 
     /// <summary>
+    /// Mark an indirect object as free so it is no longer serialized.
+    /// Used by flatten-then-redact (#355) to drop a Form XObject that has
+    /// been inlined into a page and is no longer reachable from the trailer —
+    /// otherwise the writer (which serializes every in-use object, with no
+    /// garbage collection) would re-emit the orphan's content and leak the
+    /// very text the redaction removed. Callers must confirm the object is
+    /// unreachable before calling this.
+    /// </summary>
+    internal void RemoveObject(int objectNumber)
+    {
+        _xref.Remove(objectNumber);
+        _objectCache.Remove(objectNumber);
+    }
+
+    /// <summary>
+    /// Object numbers reachable from the trailer by walking the object graph
+    /// (mark phase of a mark-and-sweep). Used to confirm an inlined Form
+    /// XObject is truly orphaned before <see cref="RemoveObject"/> frees it.
+    /// </summary>
+    internal HashSet<int> ComputeReachableObjects()
+    {
+        var reachable = new HashSet<int>();
+        var stack = new Stack<PdfObject>();
+        foreach (var v in Trailer.Values) stack.Push(v);
+
+        while (stack.Count > 0)
+        {
+            var o = stack.Pop();
+            switch (o)
+            {
+                case PdfReference r:
+                    if (reachable.Add(r.ObjectNum))
+                    {
+                        PdfObject target;
+                        try { target = GetObject(r.ObjectNum); }
+                        catch { break; }
+                        stack.Push(target);
+                    }
+                    break;
+                case PdfStream s:           // PdfStream is a PdfDictionary
+                    foreach (var v in s.Values) stack.Push(v);
+                    break;
+                case PdfDictionary d:
+                    foreach (var v in d.Values) stack.Push(v);
+                    break;
+                case PdfArray a:
+                    foreach (var v in a) stack.Push(v);
+                    break;
+            }
+        }
+        return reachable;
+    }
+
+    /// <summary>
     /// Whether this document is encrypted.
     /// </summary>
     public bool IsEncrypted => Trailer.ContainsKey("Encrypt");
