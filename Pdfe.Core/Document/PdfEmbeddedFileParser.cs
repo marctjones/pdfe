@@ -135,7 +135,7 @@ internal static class PdfEmbeddedFileParser
             if (fileStreamObj != null && doc.Resolve(fileStreamObj) is PdfStream stream)
             {
                 try { bytes = stream.DecodedData; }
-                catch { bytes = null; }
+                catch (Exception __ex) when (__ex is not OutOfMemoryException) { bytes = null; }
 
                 mimeType = stream.GetNameOrNull("Subtype");
 
@@ -206,7 +206,7 @@ internal static class PdfEmbeddedFileParser
             var dt = new DateTime(year, month, day, hour, minute, second);
             return new DateTimeOffset(dt, offset);
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return null;
         }

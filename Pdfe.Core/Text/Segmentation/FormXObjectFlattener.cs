@@ -258,7 +258,7 @@ internal static class FormXObjectFlattener
 
         byte[] formBytes;
         try { formBytes = form.DecodedData; }
-        catch { output.Add(Rewrite(op, rename)); return; } // can't decode → leave as-is
+        catch (Exception __ex) when (__ex is not OutOfMemoryException) { output.Add(Rewrite(op, rename)); return; } // can't decode → leave as-is
 
         var formOps = new ContentStreamParser(formBytes, null).Parse().Operators;
         var formResources = ctx.Resolve(form.GetOptional("Resources")) as PdfDictionary

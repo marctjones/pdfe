@@ -549,7 +549,7 @@ public class StreamDecompressor
                 return DecodeGroup3_2D(data, columns, rows, K, blackIs1);
             }
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return new byte[0];
         }
@@ -587,7 +587,7 @@ public class StreamDecompressor
 
             return output.ToArray();
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return new byte[0];
         }
@@ -671,7 +671,7 @@ public class StreamDecompressor
 
             return output.ToArray();
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return new byte[0];
         }
@@ -731,7 +731,7 @@ public class StreamDecompressor
 
             return output.ToArray();
         }
-        catch
+        catch (Exception __ex) when (__ex is not OutOfMemoryException)
         {
             return new byte[0];
         }
