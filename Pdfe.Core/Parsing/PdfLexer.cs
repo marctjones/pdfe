@@ -55,6 +55,11 @@ public class PdfLexer : IDisposable
     /// </summary>
     public void Seek(long position)
     {
+        // A malformed xref table or hostile offset can yield a negative or
+        // past-EOF position. Reject it with a typed PdfParseException instead
+        // of letting MemoryStream throw a raw ArgumentOutOfRangeException. (#352)
+        if (position < 0 || position > _stream.Length)
+            throw new PdfParseException($"Invalid seek offset {position} (stream length {_stream.Length})");
         _stream.Position = position;
         _bufferPos = 0;
         _bufferLen = 0;

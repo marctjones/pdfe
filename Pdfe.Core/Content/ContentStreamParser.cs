@@ -1227,9 +1227,13 @@ public class ContentStreamParser
 
         while (_pos < _content.Length && _content[_pos] != '>')
         {
-            var c = _content[_pos];
-            if (char.IsLetterOrDigit((char)c))
-                hex.Append((char)c);
+            var c = (char)_content[_pos];
+            // Per §7.3.4.3 a hex string holds only hex digits (whitespace is
+            // ignored). Collect ONLY hex digits — letters G–Z would otherwise
+            // reach Convert.ToInt32(.,16) and throw FormatException on hostile
+            // input. (#352)
+            if (Uri.IsHexDigit(c))
+                hex.Append(c);
             _pos++;
         }
         _pos++; // Skip '>'
