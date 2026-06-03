@@ -128,19 +128,21 @@ jobs:
           dotnet test Pdfe.Cli.Tests --no-build -c Debug \
             --logger "console;verbosity=normal"
 
-      - name: Run Pdfe.Rendering.Tests (no Corpus, Differential, or Benchmarks)
+      - name: Run Pdfe.Rendering.Tests (deterministic only)
         run: |
-          # Exclude:
+          # The PR gate runs only environment-independent rendering tests
+          # (root SkiaRenderer "renders without error", string-escape, Fonts
+          # table parsing). The following are environment-sensitive and owned
+          # by the nightly visual-regression job, not a deterministic PR gate:
           # - Corpus: too slow.
           # - Differential: compares against the external `mutool` binary +
-          #   sample PDFs absent in CI; their [Theory] data sources are empty
-          #   here, which xUnit reports as "No data found" failures.
-          # - Benchmark: Performance/Memory benchmarks assert timing/allocation
-          #   thresholds that are environment- and process-contention-sensitive
-          #   (they pass in isolation but flake under the full parallel suite),
-          #   so they're not a reliable PR gate. They run in the nightly job.
+          #   sample PDFs absent in CI → empty [Theory] → "No data found".
+          # - Benchmark: timing/allocation thresholds that flake under the
+          #   full parallel suite (pass in isolation).
+          # - Visual: pixel-baseline comparisons that differ with CI's fonts /
+          #   Skia/freetype build.
           dotnet test Pdfe.Rendering.Tests --no-build -c Debug \
-            --filter "FullyQualifiedName!~Corpus&FullyQualifiedName!~Differential&FullyQualifiedName!~Benchmark" \
+            --filter "FullyQualifiedName!~Corpus&FullyQualifiedName!~Differential&FullyQualifiedName!~Benchmark&FullyQualifiedName!~Visual" \
             --logger "console;verbosity=normal"
 
       - name: Run Performance Benchmark Tests (informational)
