@@ -427,4 +427,65 @@ public class PdfStringTests
 
         result.Should().Contain("\\000");
     }
+
+    // ---- PDFDocEncoding (ISO 32000-1 Annex D.3): the 0x80–0x9F / 0x18–0x1F
+    // / 0xA0 code points are typographic characters, not the C1 control
+    // characters a plain (char)b cast produces. Decoding them wrong showed
+    // tofu boxes in outline titles etc. (#361). ----
+
+    [Fact]
+    public void PdfDocEncoding_EmDash_DecodesToU2014()
+    {
+        // "Part I—Fundamentals": byte 0x84 is an em dash, not a C1 control box.
+        var str = new PdfString(new byte[]
+            { (byte)'P', (byte)'a', (byte)'r', (byte)'t', (byte)' ', (byte)'I', 0x84,
+              (byte)'F', (byte)'O', (byte)'S', (byte)'S' });
+
+        str.Value.Should().Be("Part I—FOSS");
+        str.Value.Should().NotContain("", "0x84 must not decode to the C1 control char");
+    }
+
+    [Fact]
+    public void PdfDocEncoding_RightSingleQuote_DecodesToU2019()
+    {
+        var str = new PdfString(new byte[] { (byte)'D', 0x90, (byte)'t' });
+
+        str.Value.Should().Be("D’t"); // Doesn’t-style apostrophe
+    }
+
+    [Theory]
+    [InlineData(0x80, '•')] // bullet
+    [InlineData(0x85, '–')] // en dash
+    [InlineData(0x8D, '“')] // left double quote
+    [InlineData(0x8E, '”')] // right double quote
+    [InlineData(0x92, '™')] // trademark
+    [InlineData(0x96, 'Œ')] // OE ligature
+    [InlineData(0xA0, '€')] // euro
+    [InlineData(0x1A, 'ˆ')] // modifier circumflex
+    public void PdfDocEncoding_SpecialCodePoints_MapToUnicode(int rawByte, char expected)
+    {
+        var str = new PdfString(new byte[] { (byte)rawByte });
+
+        str.Value.Should().Be(expected.ToString());
+    }
+
+    [Fact]
+    public void PdfDocEncoding_PlainAsciiAndLatin1_Unchanged()
+    {
+        // Printable ASCII and printable Latin-1 high range still pass through.
+        var str = new PdfString(Encoding.Latin1.GetBytes("Café (déjà) 2024"));
+
+        str.Value.Should().Be("Café (déjà) 2024");
+    }
+
+    [Fact]
+    public void Utf16BomString_TakesPrecedenceOverPdfDocEncoding()
+    {
+        // A string with the UTF-16BE BOM must decode as UTF-16, never via the
+        // PDFDocEncoding table.
+        var str = new PdfString("Hello世界");
+
+        str.Bytes.Should().StartWith(new byte[] { 0xFE, 0xFF });
+        str.Value.Should().Be("Hello世界");
+    }
 }
