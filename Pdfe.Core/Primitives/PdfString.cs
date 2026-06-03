@@ -96,19 +96,88 @@ public sealed class PdfString : PdfObject, IEquatable<PdfString>
     }
 
     /// <summary>
-    /// Decode bytes using PDFDocEncoding.
+    /// Decode bytes using PDFDocEncoding (ISO 32000-1 Annex D.3).
     /// </summary>
+    /// <remarks>
+    /// PDFDocEncoding agrees with Latin-1 across the printable Latin-1 range,
+    /// but assigns typographic characters to code points that Latin-1 leaves
+    /// as control characters — notably 0x80–0x9F (bullet, dagger, em/en dash,
+    /// curly quotes, ligatures, …), 0x18–0x1F (spacing diacritics) and 0xA0
+    /// (€). Decoding those with a plain <c>(char)b</c> cast yields C1 control
+    /// characters that render as tofu boxes (e.g. a bookmark titled
+    /// "Part I—Fundamentals" came out as "Part I□Fundamentals"). See
+    /// <see cref="PdfDocEncodingTable"/>.
+    /// </remarks>
     private static string DecodePdfDocEncoding(byte[] bytes)
     {
         var sb = new StringBuilder(bytes.Length);
         foreach (byte b in bytes)
-        {
-            // PDFDocEncoding maps 0-127 to ASCII, 128-255 to specific characters
-            // For simplicity, we use ISO-8859-1 which is close enough for most cases
-            // A full implementation would have a mapping table for 128-159
-            sb.Append((char)b);
-        }
+            sb.Append(PdfDocEncodingTable[b]);
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// PDFDocEncoding → Unicode for all 256 byte values (ISO 32000-1 Table
+    /// D.2). Identity for everything except the typographic code points; the
+    /// two positions the spec leaves undefined (0x9F, 0xAD) fall through to
+    /// their Latin-1 value so no data is lost on round-trip.
+    /// </summary>
+    private static readonly char[] PdfDocEncodingTable = BuildPdfDocEncodingTable();
+
+    private static char[] BuildPdfDocEncodingTable()
+    {
+        var table = new char[256];
+        for (int i = 0; i < 256; i++)
+            table[i] = (char)i; // Latin-1 default
+
+        // 0x18–0x1F: spacing diacritics.
+        table[0x18] = '˘'; // breve
+        table[0x19] = 'ˇ'; // caron
+        table[0x1A] = 'ˆ'; // modifier circumflex
+        table[0x1B] = '˙'; // dot above
+        table[0x1C] = '˝'; // double acute
+        table[0x1D] = '˛'; // ogonek
+        table[0x1E] = '˚'; // ring above
+        table[0x1F] = '˜'; // small tilde
+
+        // 0x80–0x9E: punctuation, symbols, ligatures, Latin letters.
+        table[0x80] = '•'; // bullet
+        table[0x81] = '†'; // dagger
+        table[0x82] = '‡'; // double dagger
+        table[0x83] = '…'; // horizontal ellipsis
+        table[0x84] = '—'; // em dash
+        table[0x85] = '–'; // en dash
+        table[0x86] = 'ƒ'; // florin
+        table[0x87] = '⁄'; // fraction slash
+        table[0x88] = '‹'; // single left-pointing angle quote
+        table[0x89] = '›'; // single right-pointing angle quote
+        table[0x8A] = '−'; // minus sign
+        table[0x8B] = '‰'; // per mille
+        table[0x8C] = '„'; // double low-9 quote
+        table[0x8D] = '“'; // left double quote
+        table[0x8E] = '”'; // right double quote
+        table[0x8F] = '‘'; // left single quote
+        table[0x90] = '’'; // right single quote
+        table[0x91] = '‚'; // single low-9 quote
+        table[0x92] = '™'; // trademark
+        table[0x93] = 'ﬁ'; // fi ligature
+        table[0x94] = 'ﬂ'; // fl ligature
+        table[0x95] = 'Ł'; // L with stroke
+        table[0x96] = 'Œ'; // OE
+        table[0x97] = 'Š'; // S with caron
+        table[0x98] = 'Ÿ'; // Y with diaeresis
+        table[0x99] = 'Ž'; // Z with caron
+        table[0x9A] = 'ı'; // dotless i
+        table[0x9B] = 'ł'; // l with stroke
+        table[0x9C] = 'œ'; // oe
+        table[0x9D] = 'š'; // s with caron
+        table[0x9E] = 'ž'; // z with caron
+        // 0x9F is undefined in PDFDocEncoding → leave as Latin-1.
+
+        table[0xA0] = '€'; // euro
+        // 0xAD is undefined in PDFDocEncoding → leave as Latin-1.
+
+        return table;
     }
 
     /// <summary>
