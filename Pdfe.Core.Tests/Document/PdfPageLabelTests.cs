@@ -246,6 +246,41 @@ public class PdfPageLabelTests
         doc.GetPageLabel(3).Should().Be("c");
     }
 
+    /// <summary>
+    /// Page label with /St as PdfReal (e.g., /St 5.0) instead of PdfInteger.
+    /// Covers TryGetInteger branch: PdfReal conversion (lines ~109-112).
+    /// </summary>
+    [Fact]
+    public void GetPageLabel_StartNumberAsReal_ConvertedToInteger()
+    {
+        var pdf = MakePdfWithPageLabels("/PageLabels << /Nums [0 << /S /D /St 7.5 >>] >>");
+        using var doc = PdfDocument.Open(pdf);
+
+        // 7.5 should be cast to 7 (truncated)
+        doc.GetPageLabel(1).Should().Be("7");
+        doc.GetPageLabel(2).Should().Be("8");
+        doc.GetPageLabel(3).Should().Be("9");
+    }
+
+    /// <summary>
+    /// Number tree with /Kids array spanning multiple subtrees.
+    /// Covers WalkNumberTree recursion: /Kids branch (lines ~62-70).
+    /// </summary>
+    [Fact]
+    public void GetPageLabel_NumberTreeWithKidsSubtrees_WalksAllSubtrees()
+    {
+        var pdf = MakePdfWithNumberTreeSubtrees();
+        using var doc = PdfDocument.Open(pdf);
+
+        // First subtree: pages 0-1 use roman
+        doc.GetPageLabel(1).Should().Be("i");
+        doc.GetPageLabel(2).Should().Be("ii");
+
+        // Second subtree: pages 2-3 use decimal
+        doc.GetPageLabel(3).Should().Be("1");
+        doc.GetPageLabel(4).Should().Be("2");
+    }
+
     // ─── Helper: PDF builder ───────────────────────────────────────────────
 
     /// <summary>
@@ -296,6 +331,84 @@ public class PdfPageLabelTests
         sb.AppendLine($"{page3Pos:D10} 00000 n ");
         sb.AppendLine("trailer");
         sb.AppendLine($@"<< /Size 6 /Root 1 0 R >>");
+        sb.AppendLine("startxref");
+        sb.AppendLine(xrefPos.ToString());
+        sb.AppendLine("%%EOF");
+
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
+    /// <summary>
+    /// Build a 4-page PDF with /PageLabels number tree using /Kids subtrees.
+    /// Tests the WalkNumberTree recursion branch (lines ~62-70).
+    /// Subtree 1 (obj 6): pages 0-1 with lowercase roman.
+    /// Subtree 2 (obj 7): pages 2-3 with decimal.
+    /// </summary>
+    private static byte[] MakePdfWithNumberTreeSubtrees()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("%PDF-1.7");
+
+        long catalogPos = sb.Length;
+        sb.AppendLine("1 0 obj");
+        sb.AppendLine(@"<<
+            /Type /Catalog
+            /Pages 2 0 R
+            /PageLabels << /Kids [6 0 R 7 0 R] >>
+        >>");
+        sb.AppendLine("endobj");
+
+        long pagesPos = sb.Length;
+        sb.AppendLine("2 0 obj");
+        sb.AppendLine("<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 8 0 R] /Count 4 >>");
+        sb.AppendLine("endobj");
+
+        long page1Pos = sb.Length;
+        sb.AppendLine("3 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long page2Pos = sb.Length;
+        sb.AppendLine("4 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long page3Pos = sb.Length;
+        sb.AppendLine("5 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        long page4Pos = sb.Length;
+        sb.AppendLine("8 0 obj");
+        sb.AppendLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        sb.AppendLine("endobj");
+
+        // Subtree 1: Pages 0-1 with lowercase roman
+        long subtree1Pos = sb.Length;
+        sb.AppendLine("6 0 obj");
+        sb.AppendLine("<< /Nums [0 << /S /r >>] >>");
+        sb.AppendLine("endobj");
+
+        // Subtree 2: Pages 2-3 with decimal
+        long subtree2Pos = sb.Length;
+        sb.AppendLine("7 0 obj");
+        sb.AppendLine("<< /Nums [2 << /S /D >>] >>");
+        sb.AppendLine("endobj");
+
+        long xrefPos = sb.Length;
+        sb.AppendLine("xref");
+        sb.AppendLine("0 9");
+        sb.AppendLine("0000000000 65535 f ");
+        sb.AppendLine($"{catalogPos:D10} 00000 n ");
+        sb.AppendLine($"{pagesPos:D10} 00000 n ");
+        sb.AppendLine($"{page1Pos:D10} 00000 n ");
+        sb.AppendLine($"{page2Pos:D10} 00000 n ");
+        sb.AppendLine($"{page3Pos:D10} 00000 n ");
+        sb.AppendLine($"{subtree1Pos:D10} 00000 n ");
+        sb.AppendLine($"{subtree2Pos:D10} 00000 n ");
+        sb.AppendLine($"{page4Pos:D10} 00000 n ");
+        sb.AppendLine("trailer");
+        sb.AppendLine($@"<< /Size 9 /Root 1 0 R >>");
         sb.AppendLine("startxref");
         sb.AppendLine(xrefPos.ToString());
         sb.AppendLine("%%EOF");

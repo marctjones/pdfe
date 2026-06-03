@@ -45,6 +45,42 @@ Text should be redacted when it is **visibly blocked** by:
 
 The key principle: **If a human can't see the text due to visual blocking, remove it from the PDF structure.**
 
+### 4. CONTENT TYPES THAT MUST BE REACHED
+
+Removal applies to **every** way content can land in the redaction area, not just top-level page text:
+
+| Content type | How it is handled | Source |
+|--------------|-------------------|--------|
+| Page text (`Tj`/`TJ`/`'`/`"`) | Glyph-level removal | `GlyphRemover` |
+| Named image XObjects (`Do` → `/Image`) | Drop the `Do` | `ImageRedactor` |
+| **Inline images (`BI…ID…EI`)** | Drop the whole operator incl. embedded bytes (#354) | `ImageRedactor` |
+| **Form XObjects (`Do` → `/Form`)** | Flatten-then-redact (#355) | `FormXObjectFlattener` |
+
+**Inline images (#354):** the parser now retains the binary data on
+`ContentOperator.InlineImageData` and `ContentStreamWriter` re-emits valid
+`BI <params> ID <data> EI`. Never re-break this round-trip — if the writer
+drops the bytes, every redaction silently corrupts inline images.
+
+**Form XObjects (#355) — flatten-then-redact contract:** `RedactArea` inlines
+each overlapping Form XObject into the page content stream (wrapped
+`q · Matrix cm · BBox re W n · …form ops… · Q`, with the form's resources
+merged into the page and collision-renamed), then runs the text/image passes
+on the now-flat stream. **Crucial:** after inlining it also *prunes* the
+orphaned form objects (`FormXObjectFlattener.PruneInlinedForms`). The writer
+serializes every in-use object with **no garbage collection**, so skipping the
+prune would re-emit the form and leak the very text you just removed — the
+prune is a security requirement, not an optimization. A form still referenced
+by another page is left intact (its content legitimately remains there).
+
+> ⚠️ If you add a new way for content to reach a page (a new XObject kind, a
+> pattern, a soft mask), make sure the redaction passes reach into it too, or
+> it becomes a cover-don't-remove leak.
+
+Known limitation: a Form XObject stored inside a compressed object stream
+(`/ObjStm`) is not pruned from the object stream's bytes (tracked separately);
+forms as ordinary indirect objects — the overwhelmingly common case — are
+fully handled.
+
 ---
 
 ## Critical Files - DO NOT SIMPLIFY

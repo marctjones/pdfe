@@ -32,6 +32,16 @@ public class ContentStreamWriter
     /// </summary>
     private void WriteOperator(ContentOperator op)
     {
+        // Inline images have bespoke syntax (BI <params> ID <bytes> EI) that
+        // does not follow the generic "operands then name" form — the
+        // parameters are bare key/value pairs (no << >> wrapper) and the
+        // binary data must be emitted verbatim. (#354)
+        if (op.Name == "BI")
+        {
+            WriteInlineImage(op);
+            return;
+        }
+
         // Write operands
         foreach (var operand in op.Operands)
         {
@@ -42,6 +52,42 @@ public class ContentStreamWriter
         // Write operator name
         _sb.Append(op.Name);
         _sb.Append('\n');
+    }
+
+    /// <summary>
+    /// Write an inline image operator: <c>BI</c>, the parameter key/value
+    /// pairs, <c>ID</c>, the raw image bytes, then <c>EI</c> (ISO 32000-2
+    /// §8.9.7). The parser stores the parameter dictionary as the single
+    /// operand and the pixel bytes on <see cref="ContentOperator.InlineImageData"/>.
+    /// </summary>
+    private void WriteInlineImage(ContentOperator op)
+    {
+        _sb.Append("BI\n");
+
+        if (op.Operands.Count > 0 && op.Operands[0] is PdfDictionary dict)
+        {
+            foreach (var kvp in dict)
+            {
+                _sb.Append('/');
+                WriteName(kvp.Key.Value);
+                _sb.Append(' ');
+                WriteOperand(kvp.Value);
+                _sb.Append('\n');
+            }
+        }
+
+        // Exactly one whitespace separates ID from the data (per spec).
+        _sb.Append("ID ");
+        if (op.InlineImageData is { Length: > 0 } data)
+        {
+            // Latin1 is a 1:1 byte↔char[0..255] mapping, so appending the
+            // bytes as a Latin1 string and encoding the whole buffer back to
+            // Latin1 in Write() round-trips every byte losslessly.
+            _sb.Append(Encoding.Latin1.GetString(data));
+        }
+        // Newline delimiter before EI keeps any declared /L length valid:
+        // readers skip /L bytes, then whitespace, then read EI.
+        _sb.Append("\nEI\n");
     }
 
     /// <summary>

@@ -182,6 +182,13 @@ public static class HiddenTextDetector
                         }
                     }
                     break;
+
+                case "BI":
+                    // Inline image (#354): fills the CTM-mapped unit square,
+                    // same as a named image XObject — count it as an obstruction
+                    // so text drawn underneath it is flagged as hidden.
+                    obstructions.Add(new Obstruction(i, "inline image", TransformedUnitSquare(ctm)));
+                    break;
             }
         }
 
