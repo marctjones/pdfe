@@ -227,8 +227,10 @@ public class PdfDocument : IDisposable
         Trailer = trailer;
         Version = version;
 
-        // Load catalog
-        var catalogRef = trailer.Get<PdfReference>("Root");
+        // Load catalog. A hostile/truncated trailer may lack a valid /Root —
+        // fail with a typed PdfParseException, not a raw KeyNotFound/cast. (#352)
+        var catalogRef = trailer.GetReferenceOrNull("Root")
+            ?? throw new PdfParseException("Trailer has no valid /Root reference");
         Catalog = GetObject(catalogRef) as PdfDictionary
             ?? throw new PdfParseException("Could not load document catalog");
 
