@@ -225,4 +225,73 @@ public class InlineImageTests
         // Still exactly one BI; the difference is the image ends early.
         result.Operators.Should().ContainSingle(op => op.Name == "BI");
     }
+
+    // ---- #354: round-trip — the parser must retain the binary image data,
+    // and ContentStreamWriter must re-emit valid BI…ID<data>EI syntax. Before
+    // this fix the pixel bytes were silently dropped and the params dict was
+    // serialized as a `<<…>> BI` blob, corrupting the stream on every rewrite
+    // (which redaction always performs). ----
+
+    [Fact]
+    public void Parse_InlineImage_RetainsRawDataBytes()
+    {
+        // /L declares the exact data length so parsing is unambiguous.
+        byte[] raw = { 0xDE, 0xAD, 0xBE, 0xEF }; // unique marker, non-ASCII
+        var header = Encoding.Latin1.GetBytes("BI\n/W 4\n/H 1\n/BPC 8\n/CS /G\n/L 4\nID ");
+        var footer = Encoding.Latin1.GetBytes("\nEI\n");
+        var content = header.Concat(raw).Concat(footer).ToArray();
+
+        var bi = new ContentStreamParser(content).Parse().Operators.Single(op => op.Name == "BI");
+
+        bi.InlineImageData.Should().Equal(raw,
+            "the bytes between ID and EI must be captured verbatim for lossless round-trip");
+    }
+
+    [Fact]
+    public void Write_InlineImage_RoundTripsBinaryDataLosslessly()
+    {
+        byte[] raw = { 0xDE, 0xAD, 0xBE, 0xEF };
+        var header = Encoding.Latin1.GetBytes("BI\n/W 4\n/H 1\n/BPC 8\n/CS /G\n/L 4\nID ");
+        var footer = Encoding.Latin1.GetBytes("\nEI\n");
+        var content = header.Concat(raw).Concat(footer).ToArray();
+
+        var parsed = new ContentStreamParser(content).Parse();
+        var written = new ContentStreamWriter().Write(parsed);
+
+        // The exact pixel bytes survive serialization...
+        var writtenStr = Encoding.Latin1.GetString(written);
+        writtenStr.Should().Contain("\xDE\xAD\xBE\xEF");
+        // ...and the output is valid inline-image syntax, NOT a `<<…>> BI` blob.
+        writtenStr.Should().Contain("BI").And.Contain("ID ").And.Contain("EI");
+        writtenStr.Should().NotContain("<<",
+            "inline-image params are bare key/value pairs, never a dictionary literal");
+
+        // Re-parsing the written bytes yields the identical image data.
+        var reparsed = new ContentStreamParser(written).Parse().Operators.Single(op => op.Name == "BI");
+        reparsed.InlineImageData.Should().Equal(raw);
+    }
+
+    [Fact]
+    public void Write_InlineImage_PreservesSurroundingOperators()
+    {
+        // Binary data deliberately contains bytes that spell PDF operators
+        // ("q", "BT") to prove the writer does not let them leak as tokens.
+        byte[] raw = { (byte)'q', 0x0A, (byte)'B', (byte)'T', 0xFF };
+        var content = Encoding.Latin1.GetBytes("BT (before) Tj ET\n")
+            .Concat(Encoding.Latin1.GetBytes("BI\n/W 5\n/H 1\n/BPC 8\n/CS /G\n/L 5\nID "))
+            .Concat(raw)
+            .Concat(Encoding.Latin1.GetBytes("\nEI\n"))
+            .Concat(Encoding.Latin1.GetBytes("BT (after) Tj ET\n"))
+            .ToArray();
+
+        var parsed = new ContentStreamParser(content).Parse();
+        var written = new ContentStreamWriter().Write(parsed);
+        var reparsed = new ContentStreamParser(written).Parse();
+
+        reparsed.Operators.Count(op => op.Name == "BI").Should().Be(1);
+        var tj = reparsed.Operators.Where(op => op.Name == "Tj").ToList();
+        tj.Should().HaveCount(2);
+        tj[0].TextContent.Should().Be("before");
+        tj[1].TextContent.Should().Be("after");
+    }
 }

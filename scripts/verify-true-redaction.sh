@@ -1,153 +1,117 @@
 #!/bin/bash
-# Build-time verification script for TRUE content-level redaction
-# This script ensures that the redaction implementation hasn't been
-# accidentally simplified or removed, which would create a security vulnerability.
+# Build-time guard for TRUE content-level redaction.
+#
+# Ensures the glyph-level redaction pipeline hasn't been accidentally
+# simplified or removed (which would silently downgrade redaction to
+# visual-only black boxes — a security vulnerability).
+#
+# As of v2.0 the redaction engine is pure-.NET and owned by Pdfe.Core
+# (Pdfe.Core/Text/Segmentation/*, Pdfe.Core/Content/*). The GUI's
+# RedactionService is a thin orchestrator that calls page.RedactArea(...).
+# This script verifies that architecture is intact.
 #
 # Usage: ./scripts/verify-true-redaction.sh
-# Returns: 0 if verification passes, 1 if security issue detected
+# Returns: 0 if verification passes, 1 if a security regression is detected.
 
-set -e
+set -uo pipefail
 
 echo "🔍 Verifying TRUE content-level redaction implementation..."
 
-REDACTION_SERVICE="PdfEditor/Services/RedactionService.cs"
-REDACTION_RESULT="PdfEditor/Models/RedactionResult.cs"
+# --- Files that make up the TRUE-redaction pipeline ---
+REDACTION_SERVICE="PdfEditor/Services/RedactionService.cs"     # GUI orchestrator
+REDACTION_RESULT="PdfEditor/Models/RedactionResult.cs"         # result model
+CORE_EXT="Pdfe.Core/Text/Segmentation/PdfPageRedactionExtensions.cs"  # page.RedactArea entry
+CORE_GLYPH="Pdfe.Core/Text/Segmentation/GlyphRemover.cs"       # glyph-level removal
+CORE_RECON="Pdfe.Core/Text/Segmentation/OperationReconstructor.cs"  # rebuild BT/Tf/Tj
+CORE_PARSER="Pdfe.Core/Content/ContentStreamParser.cs"         # parse operators
+CORE_WRITER="Pdfe.Core/Content/ContentStreamWriter.cs"         # serialize operators
+SECURITY_TEST="Pdfe.Core.Tests/Text/Segmentation/PdfPageRedactionEndToEndTests.cs"
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ERRORS=0
 
-# Check 1: Verify RedactionResult model exists
-echo -n "  ✓ Checking RedactionResult model exists... "
-if [ ! -f "$REDACTION_RESULT" ]; then
+# fail <message...>
+fail() {
     echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: RedactionResult.cs is missing!"
-    echo "       This model is required for tracking redaction modes."
+    for line in "$@"; do echo "    ❌ $line"; done
     ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
+}
+pass() { echo -e "${GREEN}PASS${NC}"; }
 
-# Check 2: Verify RedactionMode enum exists with correct values
-echo -n "  ✓ Checking RedactionMode enum... "
-if ! grep -q "enum RedactionMode" "$REDACTION_RESULT" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: RedactionMode enum is missing!"
-    ERRORS=$((ERRORS + 1))
-elif ! grep -q "TrueRedaction" "$REDACTION_RESULT" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: TrueRedaction mode is missing from enum!"
-    ERRORS=$((ERRORS + 1))
-elif ! grep -q "VisualOnly" "$REDACTION_RESULT" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: VisualOnly mode is missing from enum!"
-    ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
+# require_file <label> <path>
+require_file() {
+    echo -n "  ✓ $1... "
+    if [ -f "$2" ]; then pass; else
+        fail "SECURITY: $2 is missing — the glyph-level pipeline is incomplete."
+    fi
+}
 
-# Check 3: Verify MANDATORY Console.WriteLine logging exists
-echo -n "  ✓ Checking MANDATORY logging (Console.WriteLine)... "
-if ! grep -q '\[REDACTION-SECURITY\] TRUE REDACTION' "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: MANDATORY [REDACTION-SECURITY] logging is missing!"
-    echo "       This logging cannot be silenced and is critical for verification."
-    ERRORS=$((ERRORS + 1))
-elif ! grep -q '\[REDACTION-INFO\] Empty area redacted' "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: MANDATORY [REDACTION-INFO] logging is missing!"
-    echo "       This logging is required when redaction area is empty (no content)."
-    ERRORS=$((ERRORS + 1))
-elif ! grep -q '\[REDACTION-CRITICAL-ERROR\]' "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: MANDATORY [REDACTION-CRITICAL-ERROR] logging is missing!"
-    ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
+# require_grep <label> <pattern> <file> <error...>
+require_grep() {
+    local label="$1" pat="$2" file="$3"; shift 3
+    echo -n "  ✓ $label... "
+    if [ -f "$file" ] && grep -qE "$pat" "$file" 2>/dev/null; then pass; else
+        fail "$@"
+    fi
+}
 
-# Check 4: Verify RemoveContentInArea returns RedactionResult
-echo -n "  ✓ Checking RemoveContentInArea signature... "
-if ! grep -q "private RedactionResult RemoveContentInArea" "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: RemoveContentInArea should return RedactionResult!"
-    echo "       Current signature indicates it may have been changed to void."
-    ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
+# Check 1+2: result model / mode enum still present (used by the GUI).
+require_file "RedactionResult model exists" "$REDACTION_RESULT"
+require_grep "RedactionMode enum present" "enum RedactionMode" "$REDACTION_RESULT" \
+    "SECURITY: RedactionMode enum is missing from $REDACTION_RESULT."
 
-# Check 5: Verify ContentStreamParser usage (critical for TRUE redaction)
-echo -n "  ✓ Checking ContentStreamParser usage... "
-if ! grep -q "ContentStreamParser" "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: ContentStreamParser usage is missing!"
-    echo "       This is REQUIRED for parsing PDF content streams."
-    echo "       Without it, only visual-only redaction is possible."
-    ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
+# Check 3: the GUI must delegate to the glyph-level engine (page.RedactArea),
+# NOT draw a black box only.
+require_grep "GUI delegates to glyph-level page.RedactArea" \
+    "page\.RedactArea|\.RedactAreas?\(" "$REDACTION_SERVICE" \
+    "SECURITY: RedactionService no longer calls page.RedactArea — redaction" \
+    "may have been downgraded to visual-only (black box without glyph removal)."
 
-# Check 6: Verify ContentStreamBuilder usage (rebuilding streams after filtering)
-echo -n "  ✓ Checking ContentStreamBuilder usage... "
-if ! grep -q "ContentStreamBuilder" "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: ContentStreamBuilder usage is missing!"
-    echo "       This is REQUIRED for rebuilding content streams after filtering."
-    echo "       Without it, content cannot be removed from PDF structure."
-    ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
+# Check 4: the core glyph-removal + reconstruction stages must exist.
+require_file "GlyphRemover (glyph-level removal) exists" "$CORE_GLYPH"
+require_file "OperationReconstructor (rebuild text blocks) exists" "$CORE_RECON"
 
-# Check 7: Verify no suspicious comments suggesting simplification
+# Check 5: the parse → rebuild content-stream pipeline must exist.
+require_file "ContentStreamParser (parse operators) exists" "$CORE_PARSER"
+require_file "ContentStreamWriter (rebuild operators) exists" "$CORE_WRITER"
+
+# Check 6: the RedactArea entry point must wire the glyph + image passes.
+require_grep "RedactArea wires GlyphRemover" "GlyphRemover" "$CORE_EXT" \
+    "SECURITY: $CORE_EXT no longer invokes GlyphRemover — text glyphs would" \
+    "not be removed from the content stream."
+require_grep "RedactArea wires ImageRedactor" "ImageRedactor" "$CORE_EXT" \
+    "SECURITY: $CORE_EXT no longer invokes ImageRedactor — images overlapping" \
+    "the redaction area would not be removed."
+
+# Check 7: a regression test must assert redacted text is ABSENT from the
+# saved content-stream bytes (the actual security guarantee).
+require_grep "End-to-end security test asserts removal" \
+    "NotContain" "$SECURITY_TEST" \
+    "SECURITY: $SECURITY_TEST does not assert redacted text is removed from" \
+    "the content stream. The core security guarantee is untested."
+
+# Check 8: scan the pipeline files for comments hinting at a visual-only downgrade.
 echo -n "  ✓ Checking for suspicious simplification comments... "
-if grep -qi "TODO.*visual.*only\|HACK.*just.*draw.*black\|simplif.*redaction\|skip.*content.*removal" "$REDACTION_SERVICE" 2>/dev/null; then
+SUSPICIOUS='TODO.*visual.*only|HACK.*just.*draw.*black|simplif.*redaction|skip.*content.*removal|visual.?only redaction'
+if grep -RniE "$SUSPICIOUS" "$REDACTION_SERVICE" "$CORE_GLYPH" "$CORE_EXT" 2>/dev/null; then
     echo -e "${YELLOW}WARNING${NC}"
-    echo "    ⚠️  Found suspicious comments in RedactionService.cs:"
-    grep -ni "TODO.*visual.*only\|HACK.*just.*draw.*black\|simplif.*redaction\|skip.*content.*removal" "$REDACTION_SERVICE" 2>/dev/null || true
-    echo "    These may indicate planned simplification that would break TRUE redaction."
+    echo "    ⚠️  Found comments that may indicate a planned redaction downgrade."
     ERRORS=$((ERRORS + 1))
 else
-    echo -e "${GREEN}PASS${NC}"
+    pass
 fi
 
-# Check 8: Verify ReplacePageContent is called (critical for applying changes)
-echo -n "  ✓ Checking ReplacePageContent usage... "
-if ! grep -q "ReplacePageContent" "$REDACTION_SERVICE" 2>/dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "    ❌ SECURITY ERROR: ReplacePageContent is not being called!"
-    echo "       This method is REQUIRED to apply content stream changes."
-    echo "       Without it, filtered content is not written back to PDF."
-    ERRORS=$((ERRORS + 1))
-else
-    echo -e "${GREEN}PASS${NC}"
-fi
-
-# Summary
 echo ""
-if [ $ERRORS -eq 0 ]; then
+if [ "$ERRORS" -eq 0 ]; then
     echo -e "${GREEN}✅ TRUE redaction verification PASSED${NC}"
-    echo "   All critical components are present and accounted for."
+    echo "   The glyph-level redaction pipeline is intact."
     exit 0
 else
     echo -e "${RED}❌ TRUE redaction verification FAILED with $ERRORS error(s)${NC}"
     echo ""
-    echo "CRITICAL SECURITY ISSUE DETECTED!"
-    echo ""
-    echo "The redaction implementation may have been modified in a way that"
-    echo "compromises TRUE content-level removal. This would result in:"
-    echo "  - Text still extractable from 'redacted' PDFs"
-    echo "  - Visual-only redaction (security theater)"
-    echo "  - UNSAFE for sensitive data"
-    echo ""
-    echo "DO NOT DEPLOY this build. Review changes to RedactionService.cs"
-    echo "and ensure TRUE glyph-level removal is maintained."
-    echo ""
+    echo "CRITICAL: the redaction implementation may have been changed in a way"
+    echo "that compromises TRUE content-level removal (text still extractable)."
+    echo "Review the pipeline (Pdfe.Core/Text/Segmentation + Pdfe.Core/Content)"
+    echo "and ensure glyph-level removal is maintained. DO NOT DEPLOY this build."
     exit 1
 fi

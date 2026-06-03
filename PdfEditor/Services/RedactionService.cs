@@ -72,13 +72,16 @@ public class RedactionService
                 page.Width, page.Height, scaledArea.X, scaledArea.Y, scaledArea.Width, scaledArea.Height);
         }
 
-        // PDF points (top-left origin) → PDF points (bottom-left origin).
-        var pageHeight = page.Height;
-        var coreRect = new PdfRectangle(
+        // Visual PDF points (top-left origin, rotated dimensions) → content-stream
+        // space (bottom-left origin), accounting for the page /Rotate. PdfPage owns
+        // this mapping (#356); a manual Y-flip here is only correct at 0° rotation
+        // and silently redacts the wrong region on rotated pages.
+        var visualRect = new PdfRectangle(
             scaledArea.X,
-            pageHeight - scaledArea.Y - scaledArea.Height,
+            scaledArea.Y,
             scaledArea.X + scaledArea.Width,
-            pageHeight - scaledArea.Y);
+            scaledArea.Y + scaledArea.Height);
+        var coreRect = page.ToContentStreamCoordinates(visualRect);
 
         // Snapshot the words about to be removed — after RedactArea
         // rewrites the content stream, extraction reports zero.

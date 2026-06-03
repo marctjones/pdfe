@@ -1160,6 +1160,217 @@ public class PdfAnnotationParserTests
         result[0].LineEndpoints.Should().BeNull();
     }
 
+    // ─── FileAttachment edge cases (covers lines 180-184) ─────────────────────
+
+    [Fact]
+    public void Parse_FileAttachment_NoEFDict_ReturnsFileNameOnly()
+    {
+        // /FS present but /EF missing — should get filename but no bytes
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS << /Type /Filespec /UF (missing.txt) >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().Be("missing.txt");
+        result[0].AttachmentBytes.Should().BeNull();
+        result[0].AttachmentMimeType.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_EFDictNotDictionary_ReturnsFileNameOnly()
+    {
+        // /EF is present but not a dictionary
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS << /Type /Filespec /UF (test.txt) /EF (invalid) >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().Be("test.txt");
+        result[0].AttachmentBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_NoFileStreamInEF_ReturnsFileNameOnly()
+    {
+        // /EF dict is present but /F and /UF both missing
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS << /Type /Filespec /UF (test.txt) /EF << >> >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().Be("test.txt");
+        result[0].AttachmentBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_FileStreamNotStream_ReturnsFileNameOnly()
+    {
+        // /F in /EF is present but not a stream object
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS << /Type /Filespec /UF (test.txt) /EF << /F (notstream) >> >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().Be("test.txt");
+        result[0].AttachmentBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FileAttachment_FSNotDictionary_AllFieldsNull()
+    {
+        // /FS present but not a dictionary
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /FileAttachment /Rect [0 0 20 20]
+            /FS (notdict)
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].AttachmentFileName.Should().BeNull();
+        result[0].AttachmentBytes.Should().BeNull();
+        result[0].AttachmentMimeType.Should().BeNull();
+    }
+
+    // ─── BorderStyle dictionary tests ─────────────────────────────────────────
+
+    [Fact]
+    public void Parse_BSDictionary_AllFields_Parsed()
+    {
+        // /BS with all optional fields: /W, /S, /D
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Square /Rect [0 0 100 100]
+            /BS << /W 3 /S /S /D [2 3] >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().Be(3.0);
+        result[0].BorderStyle.Should().Be("S");
+        result[0].BorderDashPattern.Should().NotBeNull();
+        result[0].BorderDashPattern.Should().Equal(2.0, 3.0);
+    }
+
+    [Fact]
+    public void Parse_BSDictionary_PartialFields_OnlySetPresent()
+    {
+        // /BS with only /S (no /W or /D)
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Square /Rect [0 0 100 100]
+            /Border [0 0 1]
+            /BS << /S /D >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().Be(1.0);
+        result[0].BorderStyle.Should().Be("D");
+        result[0].BorderDashPattern.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_BSDictionary_RealNumber_W_Parsed()
+    {
+        // /BS with /W as floating-point number (not integer)
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Square /Rect [0 0 100 100]
+            /BS << /W 2.75 >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().BeApproximately(2.75, 0.01);
+    }
+
+    [Fact]
+    public void Parse_BSNotDictionary_IgnoredGracefully()
+    {
+        // /BS is present but not a dictionary (e.g., array)
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Square /Rect [0 0 100 100]
+            /Border [0 0 2]
+            /BS [1 2 3]
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].BorderWidth.Should().Be(2.0);
+        result[0].BorderStyle.Should().BeNull();
+    }
+
+    // ─── Link action parsing edge cases ────────────────────────────────────────
+
+    [Fact]
+    public void Parse_LinkWithGoToRAction_IgnoredAsUnsupported()
+    {
+        // /A with /S /GoToR (external link) — should return (null, null)
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Link /Rect [0 0 100 20]
+            /A << /S /GoToR /F (external.pdf) >>
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        var link = result[0];
+        link.DestinationPage.Should().BeNull();
+        link.Uri.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_LinkActionNotDictionary_IgnoredGracefully()
+    {
+        // /A exists but is not a dictionary
+        var annotsDef = @"[<<
+            /Type /Annot /Subtype /Link /Rect [0 0 100 20]
+            /A (notdict)
+        >>]";
+        var pdf = MakePdfWithAnnots(annotsDef);
+        using var doc = PdfDocument.Open(new MemoryStream(pdf), false);
+        var pageDict = doc.GetPage(1).Dictionary;
+
+        var result = PdfAnnotationParser.Parse(doc, pageDict, new(), null);
+
+        result[0].DestinationPage.Should().BeNull();
+        result[0].Uri.Should().BeNull();
+    }
+
     // ─── Helper methods ─────────────────────────────────────────────────────
 
     private static byte[] MakePdfWithMultiPageAnnot()
