@@ -4,6 +4,41 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [2.2.0] — 2026-06-03
+
+Redaction-security release: closes the remaining content-type and
+coordinate gaps so redaction reliably removes — not merely covers — every
+way content can land under the redaction area. Also restores a working CI
+gate (it had been silently broken) and raises Pdfe.Core coverage.
+
+### Added / Security
+- **Inline-image redaction** (`BI…ID…EI`) — the parser now retains the
+  embedded pixel bytes and the writer re-emits valid inline-image syntax, so
+  an inline image overlapping the redaction area is removed, not just covered.
+  (#354)
+- **Form XObject redaction** — overlapping forms are flattened into the page
+  (Matrix/BBox-correct, resources merged with collision renaming, nested
+  forms recursed) and redacted; the now-orphaned form objects are pruned so
+  the writer can't re-emit the removed content. (#355)
+
+### Fixed
+- **Rotation-aware redaction** — `PdfPage.ToContentStreamCoordinates` maps a
+  visual-space rectangle into content space for `/Rotate` 0/90/180/270; the
+  GUI no longer mis-targets redactions on rotated pages. (#356)
+- **Outline / text-string decoding** — `PdfString` now decodes the
+  PDFDocEncoding 0x80–0x9F / 0x18–0x1F / 0xA0 ranges (em/en dash, curly
+  quotes, ligatures, €, …) instead of rendering C1 control characters as tofu
+  boxes (e.g. bookmark "Part I—Fundamentals"). (#361)
+
+### CI / tests
+- Restored the Build/Test/Coverage gate, which had been masked by a failing
+  veraPDF-install step: best-effort veraPDF, NuGet signature-verification
+  workaround (revoked ReactiveUI cert), refreshed the redaction-architecture
+  check, and fixed the coverage-report path. The PR gate now runs the
+  deterministic test set (environment-dependent visual/corpus/differential/
+  benchmark tests are owned by the nightly job). (#351)
+- Raised Pdfe.Core coverage and set the enforced gate to the level CI meets.
+
 ## [2.1.0] — 2026-06-01
 
 Graduates the `v2.1.0-rc1..rc8` line to a final release. v2.1 builds out the
