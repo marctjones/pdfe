@@ -359,4 +359,35 @@ public class PdfDocumentWriterTests
     }
 
     #endregion
+
+    #region Cross-reference plumbing not re-emitted (#359)
+
+    [Fact]
+    public void Save_DropsObjStmAndXRefStreams_SoFreedCompressedObjectsCannotLeak()
+    {
+        // The writer emits a classic xref table and writes object-stream members
+        // as standalone objects. Re-emitting the /ObjStm (or /XRef) container is
+        // redundant AND a leak path: a redacted Form XObject that was inlined and
+        // freed (RemoveObject) would still ship inside the container's bytes. (#359)
+        using var doc = PdfDocument.Open(CreateSimplePdf("Hi"));
+
+        var keep = new PdfStream(System.Text.Encoding.ASCII.GetBytes("KEEPME_DATA"));
+        doc.AddIndirectObject(keep);
+
+        var objStm = new PdfStream(System.Text.Encoding.ASCII.GetBytes("SECRET_IN_OBJSTM"));
+        objStm["Type"] = new PdfName("ObjStm");
+        doc.AddIndirectObject(objStm);
+
+        var xref = new PdfStream(System.Text.Encoding.ASCII.GetBytes("SECRET_IN_XREF"));
+        xref["Type"] = new PdfName("XRef");
+        doc.AddIndirectObject(xref);
+
+        var saved = System.Text.Encoding.Latin1.GetString(doc.SaveToBytes());
+
+        saved.Should().Contain("KEEPME_DATA", "normal objects are still written");
+        saved.Should().NotContain("SECRET_IN_OBJSTM", "/ObjStm containers must not be re-emitted");
+        saved.Should().NotContain("SECRET_IN_XREF", "/XRef streams must not be re-emitted");
+    }
+
+    #endregion
 }

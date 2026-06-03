@@ -55,9 +55,27 @@ public class PdfDocumentWriter
 
         foreach (var (objNum, gen, obj) in objects)
         {
+            // Skip cross-reference plumbing: object streams (/ObjStm) and
+            // cross-reference streams (/XRef). GetAllObjects already yields the
+            // ObjStm's members decompressed as standalone objects, and we emit
+            // a classic xref table + trailer, so these containers are redundant.
+            // Re-emitting an /ObjStm would also be a security leak: an object
+            // freed via RemoveObject (e.g. a redacted Form XObject inlined and
+            // pruned, #359) would still ship inside the container's bytes. Their
+            // object numbers simply become free entries in the xref.
+            if (IsCrossReferencePlumbing(obj))
+                continue;
+
             _objectOffsets[objNum] = writer.BaseStream.Position;
             WriteIndirectObject(writer, objNum, gen, obj);
         }
+    }
+
+    private static bool IsCrossReferencePlumbing(PdfObject obj)
+    {
+        if (obj is not PdfStream s) return false;
+        var type = s.GetNameOrNull("Type");
+        return type == "ObjStm" || type == "XRef";
     }
 
     private void WriteIndirectObject(BinaryWriter writer, int objNum, int gen, PdfObject obj)
