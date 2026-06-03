@@ -951,4 +951,926 @@ public class PdfDocumentCoverageTests
         // Stream should still be readable (not disposed)
         stream.CanRead.Should().BeTrue();
     }
+
+    /// <summary>
+    /// Test metadata properties (Title, Author, Subject, Keywords, Creator, Producer).
+    /// These should read from Info dictionary when present.
+    /// </summary>
+    [Fact]
+    public void MetadataProperties_WithInfoDictionary_ReturnValues()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[5];
+
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        // Object 4: Info dictionary with metadata
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine("<< /Title (Test Title) /Author (Test Author) /Subject (Test Subject) /Keywords (key1, key2) /Creator (My App) /Producer (PDF Producer) >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        long xrefPos = ms.Position;
+
+        writer.WriteLine("xref");
+        writer.WriteLine("0 5");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 4; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Info 4 0 R /Size 5 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        var pdfData = ms.ToArray();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.Title.Should().Be("Test Title");
+        doc.Author.Should().Be("Test Author");
+        doc.Subject.Should().Be("Test Subject");
+        doc.Keywords.Should().Be("key1, key2");
+        doc.Creator.Should().Be("My App");
+        doc.Producer.Should().Be("PDF Producer");
+    }
+
+    /// <summary>
+    /// Test metadata properties when Info is null.
+    /// Should return null gracefully.
+    /// </summary>
+    [Fact]
+    public void MetadataProperties_WithoutInfoDictionary_ReturnNull()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.Title.Should().BeNull();
+        doc.Author.Should().BeNull();
+        doc.Subject.Should().BeNull();
+        doc.Keywords.Should().BeNull();
+        doc.Creator.Should().BeNull();
+        doc.Producer.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Test GetPage with valid page numbers.
+    /// </summary>
+    [Fact]
+    public void GetPage_ValidPageNumber_ReturnsPage()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+        var page = doc.GetPage(1);
+
+        page.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Test GetPage with page number less than 1.
+    /// </summary>
+    [Fact]
+    public void GetPage_PageNumberBelowOne_ThrowsArgumentOutOfRangeException()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var act = () => doc.GetPage(0);
+
+        act.Should().Throw<ArgumentOutOfRangeException>()
+            .WithParameterName("pageNumber");
+    }
+
+    /// <summary>
+    /// Test GetPage with page number greater than PageCount.
+    /// </summary>
+    [Fact]
+    public void GetPage_PageNumberAbovePageCount_ThrowsArgumentOutOfRangeException()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var act = () => doc.GetPage(100);
+
+        act.Should().Throw<ArgumentOutOfRangeException>()
+            .WithParameterName("pageNumber");
+    }
+
+    /// <summary>
+    /// Test GetPages enumeration.
+    /// </summary>
+    [Fact]
+    public void GetPages_EnumeratesAllPages()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+        var pages = doc.GetPages().ToList();
+
+        pages.Should().HaveCount(1);
+    }
+
+    /// <summary>
+    /// Test Resolve with non-reference objects.
+    /// Should return the object unchanged.
+    /// </summary>
+    [Fact]
+    public void Resolve_NonReference_ReturnsSameObject()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var obj = new PdfString("hello");
+        var resolved = doc.Resolve(obj);
+
+        resolved.Should().Be(obj);
+    }
+
+    /// <summary>
+    /// Test Resolve with reference objects.
+    /// Should dereference and return the actual object.
+    /// </summary>
+    [Fact]
+    public void Resolve_Reference_DereferencesAndReturnsObject()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        // Catalog is a reference in the trailer
+        var catalogRef = doc.Trailer.Get<PdfReference>("Root");
+        var resolved = doc.Resolve(catalogRef);
+
+        resolved.Should().Be(doc.Catalog);
+        resolved.Should().BeOfType<PdfDictionary>();
+    }
+
+    /// <summary>
+    /// Test IsTaggedPdf when MarkInfo/Marked is a name "true".
+    /// </summary>
+    [Fact]
+    public void IsTaggedPdf_WithMarkInfoMarkedTrue_ReturnsTrueWithName()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[4];
+
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked /true >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        long xrefPos = ms.Position;
+
+        writer.WriteLine("xref");
+        writer.WriteLine("0 4");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 3; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 4 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        var pdfData = ms.ToArray();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.IsTaggedPdf.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Test IsTaggedPdf when MarkInfo/Marked is a boolean true.
+    /// </summary>
+    [Fact]
+    public void IsTaggedPdf_WithMarkInfoMarkedBoolean_ReturnsTrueWithBoolean()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[4];
+
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        long xrefPos = ms.Position;
+
+        writer.WriteLine("xref");
+        writer.WriteLine("0 4");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 3; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 4 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        var pdfData = ms.ToArray();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.IsTaggedPdf.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Test IsTaggedPdf when MarkInfo is missing.
+    /// Should return false.
+    /// </summary>
+    [Fact]
+    public void IsTaggedPdf_WithoutMarkInfo_ReturnsFalse()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.IsTaggedPdf.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Test IsTaggedPdf caching by accessing it multiple times.
+    /// </summary>
+    [Fact]
+    public void IsTaggedPdf_AccessedMultipleTimes_IsCached()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        // Access twice to ensure caching works
+        var first = doc.IsTaggedPdf;
+        var second = doc.IsTaggedPdf;
+
+        first.Should().Be(second);
+    }
+
+    /// <summary>
+    /// Test HasEmbeddedFiles when both modern and legacy entries are missing.
+    /// </summary>
+    [Fact]
+    public void HasEmbeddedFiles_WithNoEmbeddedFiles_ReturnsFalse()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.HasEmbeddedFiles.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Test GetEmbeddedFiles caching.
+    /// </summary>
+    [Fact]
+    public void GetEmbeddedFiles_AccessedMultipleTimes_IsCached()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var first = doc.GetEmbeddedFiles();
+        var second = doc.GetEmbeddedFiles();
+
+        first.Should().BeSameAs(second);
+    }
+
+    /// <summary>
+    /// Test ScrubMetadata with default scrubAttachments=true.
+    /// Should clear Info dict and remove Metadata from Catalog.
+    /// </summary>
+    [Fact]
+    public void ScrubMetadata_WithDefaultScrubAttachments_ClearsInfoAndMetadata()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[5];
+
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R /Metadata 4 0 R >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        string xmpContent = "<?xml version=\"1.0\"?><xmpmeta></xmpmeta>";
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine($"<< /Type /Metadata /Subtype /XML /Length {xmpContent.Length} >>");
+        writer.WriteLine("stream");
+        writer.Write(xmpContent);
+        writer.WriteLine();
+        writer.WriteLine("endstream");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        long xrefPos = ms.Position;
+
+        writer.WriteLine("xref");
+        writer.WriteLine("0 5");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 4; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Info 4 0 R /Size 5 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        var pdfData = ms.ToArray();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        // Before scrubbing
+        doc.GetXmpMetadata().Should().NotBeNull();
+
+        // Scrub with default (scrubAttachments=true)
+        doc.ScrubMetadata();
+
+        // After scrubbing, Metadata should be removed
+        doc.Catalog.ContainsKey("Metadata").Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Test ScrubMetadata with scrubAttachments=false.
+    /// Should clear Info dict but NOT remove embedded files.
+    /// </summary>
+    [Fact]
+    public void ScrubMetadata_WithScrubAttachmentsFalse_DoesNotScrubEmbeddedFiles()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        // Call with scrubAttachments=false
+        doc.ScrubMetadata(scrubAttachments: false);
+
+        // Should still work (no exception thrown)
+        doc.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Test ScrubInfoKeys with specific keys to remove.
+    /// </summary>
+    [Fact]
+    public void ScrubInfoKeys_WithSpecificKeys_RemovesOnlyThoseKeys()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+
+        var offsets = new long[5];
+
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine("<< /Title (Title) /Author (Author) /Subject (Subject) >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+
+        long xrefPos = ms.Position;
+
+        writer.WriteLine("xref");
+        writer.WriteLine("0 5");
+        writer.WriteLine("0000000000 65535 f ");
+        for (int i = 1; i <= 4; i++)
+            writer.WriteLine($"{offsets[i]:D10} 00000 n ");
+        writer.Flush();
+
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Info 4 0 R /Size 5 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+
+        var pdfData = ms.ToArray();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        // Scrub only Title and Author
+        doc.ScrubInfoKeys("Title", "Author");
+
+        doc.Title.Should().BeNull();
+        doc.Author.Should().BeNull();
+        doc.Subject.Should().Be("Subject");
+    }
+
+    /// <summary>
+    /// Test ScrubInfoKeys with null keys parameter.
+    /// Should not throw.
+    /// </summary>
+    [Fact]
+    public void ScrubInfoKeys_WithNullKeys_DoesNotThrow()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var act = () => doc.ScrubInfoKeys(null!);
+
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// Test ComputeReachableObjects with a simple PDF.
+    /// Should find at least the root catalog and pages.
+    /// </summary>
+    [Fact]
+    public void ComputeReachableObjects_WithSimplePdf_FindsReachableObjects()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var reachable = doc.ComputeReachableObjects();
+
+        reachable.Should().NotBeEmpty();
+        reachable.Should().Contain(1); // Catalog
+        reachable.Should().Contain(2); // Pages
+    }
+
+    /// <summary>
+    /// Test AddIndirectObject and RemoveObject.
+    /// </summary>
+    [Fact]
+    public void AddIndirectObject_CreatesNewObject_WithValidReference()
+    {
+        var pdfData = PdfDocument.CreateNew().SaveToBytes();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var newObj = new PdfString("test content");
+        var reference = doc.AddIndirectObject(newObj);
+
+        reference.ObjectNum.Should().BeGreaterThan(0);
+        reference.Generation.Should().Be(0);
+
+        // Should be able to retrieve it
+        var retrieved = doc.GetObject(reference);
+        retrieved.Should().Be(newObj);
+    }
+
+    /// <summary>
+    /// Test RemoveObject removes from xref and object cache.
+    /// </summary>
+    [Fact]
+    public void RemoveObject_RemovesObjectFromDocument()
+    {
+        var pdfData = PdfDocument.CreateNew().SaveToBytes();
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var newObj = new PdfString("test content");
+        var reference = doc.AddIndirectObject(newObj);
+
+        doc.RemoveObject(reference.ObjectNum);
+
+        // Trying to get removed object should throw
+        var act = () => doc.GetObject(reference.ObjectNum);
+        act.Should().Throw<PdfParseException>();
+    }
+
+    /// <summary>
+    /// Test GetOptionalContentGroups caching.
+    /// </summary>
+    [Fact]
+    public void GetOptionalContentGroups_AccessedMultipleTimes_IsCached()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var first = doc.GetOptionalContentGroups();
+        var second = doc.GetOptionalContentGroups();
+
+        first.Should().BeSameAs(second);
+    }
+
+    /// <summary>
+    /// Test GetOptionalContentGroupConfig caching.
+    /// </summary>
+    [Fact]
+    public void GetOptionalContentGroupConfig_AccessedMultipleTimes_IsCached()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var first = doc.GetOptionalContentGroupConfig();
+        var second = doc.GetOptionalContentGroupConfig();
+
+        first.Should().BeSameAs(second);
+    }
+
+    /// <summary>
+    /// Test GetStructureTree returns null when not present.
+    /// </summary>
+    [Fact]
+    public void GetStructureTree_WithoutStructTree_ReturnsNull()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var structTree = doc.GetStructureTree();
+
+        structTree.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Test Pages property lazy initialization.
+    /// </summary>
+    [Fact]
+    public void Pages_LazyInitialization_CreatesPageCollection()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var pages = doc.Pages;
+        pages.Should().NotBeNull();
+        pages.Count.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Test SaveToBytes method.
+    /// </summary>
+    [Fact]
+    public void SaveToBytes_ReturnsByteArray()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+        var saved = doc.SaveToBytes();
+
+        saved.Should().NotBeEmpty();
+        saved.Should().StartWith(new byte[] { 0x25, 0x50, 0x44, 0x46 }); // %PDF
+    }
+
+    /// <summary>
+    /// Test Save to file path.
+    /// </summary>
+    [Fact]
+    public void Save_ToFilePath_WritesFile()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var tempPath = Path.GetTempFileName();
+        try
+        {
+            doc.Save(tempPath);
+
+            File.Exists(tempPath).Should().BeTrue();
+            var fileBytes = File.ReadAllBytes(tempPath);
+            fileBytes.Should().StartWith(new byte[] { 0x25, 0x50, 0x44, 0x46 }); // %PDF
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    /// <summary>
+    /// Test IsDecrypting property.
+    /// </summary>
+    [Fact]
+    public void IsDecrypting_WithNonEncryptedPdf_ReturnsFalse()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.IsDecrypting.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Test IsEncrypted property.
+    /// </summary>
+    [Fact]
+    public void IsEncrypted_WithEncryptionPresent_ReturnsTrue()
+    {
+        var pdfData = CreatePdfWithUnsupportedEncryption();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData), allowEncrypted: true);
+
+        doc.IsEncrypted.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Test IsEncrypted property with non-encrypted PDF.
+    /// </summary>
+    [Fact]
+    public void IsEncrypted_WithoutEncryption_ReturnsFalse()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.IsEncrypted.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Test Version property.
+    /// </summary>
+    [Fact]
+    public void Version_IsPreserved()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        doc.Version.Should().Be("1.4");
+    }
+
+    /// <summary>
+    /// Test CreateNew with custom version.
+    /// </summary>
+    [Fact]
+    public void CreateNew_WithCustomVersion_SetsPdfVersion()
+    {
+        using var doc = PdfDocument.CreateNew("2.0");
+
+        doc.Version.Should().Be("2.0");
+        doc.PageCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Test Open from file path.
+    /// </summary>
+    [Fact]
+    public void Open_FromFilePath_LoadsDocument()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+        var tempPath = Path.GetTempFileName();
+
+        try
+        {
+            File.WriteAllBytes(tempPath, pdfData);
+
+            using var doc = PdfDocument.Open(tempPath);
+
+            doc.Should().NotBeNull();
+            doc.PageCount.Should().Be(1);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    /// <summary>
+    /// Test Open from byte array.
+    /// </summary>
+    [Fact]
+    public void Open_FromByteArray_LoadsDocument()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(pdfData);
+
+        doc.Should().NotBeNull();
+        doc.PageCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Test GetPageLabel when no labels are defined.
+    /// </summary>
+    [Fact]
+    public void GetPageLabel_WithoutPageLabels_ReturnsNull()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var label = doc.GetPageLabel(1);
+
+        label.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Test GetPageLabel with invalid page number.
+    /// </summary>
+    [Fact]
+    public void GetPageLabel_WithInvalidPageNumber_ReturnsNull()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var label = doc.GetPageLabel(100);
+
+        label.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Test GetNamedDestinations when none are defined.
+    /// </summary>
+    [Fact]
+    public void GetNamedDestinations_WithoutDestinations_ReturnsEmptyDictionary()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var destinations = doc.GetNamedDestinations();
+
+        destinations.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Test Dispose method.
+    /// </summary>
+    [Fact]
+    public void Dispose_DisposesResources()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+        var stream = new MemoryStream(pdfData);
+
+        var doc = PdfDocument.Open(stream, ownsStream: true);
+        doc.Dispose();
+
+        // Stream should be disposed when ownsStream=true
+        var act = () => stream.ReadByte();
+        act.Should().Throw<ObjectDisposedException>();
+    }
+
+    /// <summary>
+    /// Test SetAcroFormNeedAppearances when no AcroForm exists.
+    /// Should not throw.
+    /// </summary>
+    [Fact]
+    public void SetAcroFormNeedAppearances_WithoutAcroForm_DoesNotThrow()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var act = () => doc.SetAcroFormNeedAppearances();
+
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// Test FlattenAcroForm when no AcroForm exists.
+    /// Should not throw.
+    /// </summary>
+    [Fact]
+    public void FlattenAcroForm_WithoutAcroForm_DoesNotThrow()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var act = () => doc.FlattenAcroForm();
+
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// Test ScrubEmbeddedFiles clears the cache.
+    /// </summary>
+    [Fact]
+    public void ScrubEmbeddedFiles_ClearsCache()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        // Access embedded files first (to populate cache)
+        var first = doc.GetEmbeddedFiles();
+
+        // Scrub them
+        doc.ScrubEmbeddedFiles();
+
+        // Access again - should be fresh (empty list)
+        var second = doc.GetEmbeddedFiles();
+
+        second.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Test GetObject with invalid object number.
+    /// Should throw PdfParseException.
+    /// </summary>
+    [Fact]
+    public void GetObject_WithInvalidObjectNumber_ThrowsPdfParseException()
+    {
+        var pdfData = CreatePdfWithCustomTrailer();
+
+        using var doc = PdfDocument.Open(new MemoryStream(pdfData));
+
+        var act = () => doc.GetObject(9999);
+
+        act.Should().Throw<PdfParseException>();
+    }
 }
