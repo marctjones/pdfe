@@ -285,6 +285,130 @@ public class PdfEmbeddedFileTests
         files[0].RawDictionary.GetStringOrNull("F").Should().Be("file.txt");
     }
 
+    [Fact]
+    public void GetEmbeddedFiles_LegacyCatalogAFArray_ExtractsFiles()
+    {
+        // Legacy PDF 1.7: /Catalog/AF array (not /Names/EmbeddedFiles)
+        var pdf = BuildPdfWithLegacyAFArray("legacy.txt", "legacy content");
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files.Should().HaveCount(1);
+        files[0].Name.Should().Be("_AF_0");  // Generated name for legacy array
+        files[0].FileName.Should().Be("legacy.txt");
+        Encoding.UTF8.GetString(files[0].Bytes!).Should().Be("legacy content");
+    }
+
+    [Fact]
+    public void GetEmbeddedFiles_LegacyNamesAFArray_ExtractsFiles()
+    {
+        // Legacy PDF 1.7: /Catalog/Names/AF array (falls back after /EmbeddedFiles check)
+        var pdf = BuildPdfWithLegacyNamesAFArray("alt.xml", "<data/>");
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files.Should().HaveCount(1);
+        files[0].FileName.Should().Be("alt.xml");
+    }
+
+    [Fact]
+    public void GetEmbeddedFiles_DateWithPositiveTimezoneOffset_ParsesCorrectly()
+    {
+        // Test date with +HH'mm' timezone offset format
+        // D:20240115120000+05'30' = 2024-01-15 12:00:00 +05:30
+        var pdf = BuildPdfWithEmbeddedFileAndDates(
+            "document.txt",
+            "content",
+            "D:20240115120000+05'30'",  // +05:30 offset
+            "D:20240120140000");
+
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files.Should().HaveCount(1);
+
+        files[0].CreationDate.Should().NotBeNull();
+        var creationDate = files[0].CreationDate!.Value;
+        creationDate.Year.Should().Be(2024);
+        creationDate.Month.Should().Be(1);
+        creationDate.Day.Should().Be(15);
+        creationDate.Hour.Should().Be(12);
+        creationDate.Offset.Should().Be(new TimeSpan(5, 30, 0));
+    }
+
+    [Fact]
+    public void GetEmbeddedFiles_DateWithNegativeTimezoneOffset_ParsesCorrectly()
+    {
+        // Test date with -HH'mm' timezone offset format
+        // D:20240120140000-08'00' = 2024-01-20 14:00:00 -08:00
+        var pdf = BuildPdfWithEmbeddedFileAndDates(
+            "document.txt",
+            "content",
+            "D:20240115120000",
+            "D:20240120140000-08'00'");  // -08:00 offset
+
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files.Should().HaveCount(1);
+
+        files[0].ModDate.Should().NotBeNull();
+        var modDate = files[0].ModDate!.Value;
+        modDate.Year.Should().Be(2024);
+        modDate.Month.Should().Be(1);
+        modDate.Day.Should().Be(20);
+        modDate.Offset.Should().Be(new TimeSpan(-8, 0, 0));
+    }
+
+    [Fact]
+    public void GetEmbeddedFiles_DateWithoutTimezone_DefaultsToZero()
+    {
+        // Date without timezone should be treated as UTC (zero offset)
+        var pdf = BuildPdfWithEmbeddedFileAndDates(
+            "document.txt",
+            "content",
+            "D:20240115120000",  // No timezone
+            "D:20240120140000");
+
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files[0].CreationDate!.Value.Offset.Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void GetEmbeddedFiles_DateTooShort_ReturnsNull()
+    {
+        // Date string shorter than YYYYMMDDHHMMSS should return null
+        var pdf = BuildPdfWithEmbeddedFileAndDates(
+            "document.txt",
+            "content",
+            "D:202401",  // Too short
+            "D:20240120140000");
+
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files[0].CreationDate.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetEmbeddedFiles_DateMissingDPrefix_StillParses()
+    {
+        // Date string without "D:" prefix should still parse (parser strips it)
+        var pdf = BuildPdfWithEmbeddedFileAndDates(
+            "document.txt",
+            "content",
+            "20240115120000",  // No "D:" prefix
+            "D:20240120140000");
+
+        using var doc = PdfDocument.Open(pdf);
+
+        var files = doc.GetEmbeddedFiles();
+        files[0].CreationDate.Should().NotBeNull();
+        files[0].CreationDate!.Value.Year.Should().Be(2024);
+    }
+
     // ────────────────────────────────────────────────────────────────────────
 
     private static byte[] BuildPdfWithoutEmbeddedFiles()
@@ -670,6 +794,86 @@ public class PdfEmbeddedFileTests
             sb.Append(offsets[i].ToString("D10")).Append(" 00000 n \n");
 
         sb.Append("trailer <</Size 9/Root 1 0 R/Info 8 0 R>>\nstartxref\n").Append(xrefPos).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
+    private static byte[] BuildPdfWithLegacyAFArray(string fileName, string content)
+    {
+        var sb = new StringBuilder();
+        var offsets = new long[10];
+        void Mark(int n) => offsets[n] = sb.Length;
+
+        sb.Append("%PDF-1.7\n");
+
+        // Catalog with legacy /AF array (not /Names/EmbeddedFiles)
+        Mark(1);
+        sb.Append("1 0 obj <</Type/Catalog/Pages 2 0 R/AF[4 0 R]>> endobj\n");
+
+        Mark(2);
+        sb.Append("2 0 obj <</Type/Pages/Count 1/Kids[3 0 R]>> endobj\n");
+
+        Mark(3);
+        sb.Append("3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<<>>>> endobj\n");
+
+        // File specification dict
+        Mark(4);
+        sb.Append($"4 0 obj <</Type/Filespec/F({fileName})/EF<</F 5 0 R>>>> endobj\n");
+
+        // Embedded file stream
+        Mark(5);
+        var fileBytes = Encoding.UTF8.GetBytes(content);
+        sb.Append("5 0 obj <</Type/EmbeddedFile/Length ").Append(fileBytes.Length).Append(">>\nstream\n");
+        sb.Append(content);
+        sb.Append("\nendstream endobj\n");
+
+        var xrefPos = sb.Length;
+        sb.Append("xref\n0 6\n0000000000 65535 f \n");
+        for (int i = 1; i <= 5; i++)
+            sb.Append(offsets[i].ToString("D10")).Append(" 00000 n \n");
+
+        sb.Append("trailer <</Size 6/Root 1 0 R>>\nstartxref\n").Append(xrefPos).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
+    private static byte[] BuildPdfWithLegacyNamesAFArray(string fileName, string content)
+    {
+        var sb = new StringBuilder();
+        var offsets = new long[10];
+        void Mark(int n) => offsets[n] = sb.Length;
+
+        sb.Append("%PDF-1.7\n");
+
+        // Catalog with /Names dict containing /AF array
+        Mark(1);
+        sb.Append("1 0 obj <</Type/Catalog/Pages 2 0 R/Names 4 0 R>> endobj\n");
+
+        Mark(2);
+        sb.Append("2 0 obj <</Type/Pages/Count 1/Kids[3 0 R]>> endobj\n");
+
+        Mark(3);
+        sb.Append("3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<<>>>> endobj\n");
+
+        // Names dict with /AF array (no /EmbeddedFiles, so parser falls back to /AF)
+        Mark(4);
+        sb.Append("4 0 obj <</AF[5 0 R]>> endobj\n");
+
+        // File specification dict
+        Mark(5);
+        sb.Append($"5 0 obj <</Type/Filespec/F({fileName})/EF<</F 6 0 R>>>> endobj\n");
+
+        // Embedded file stream
+        Mark(6);
+        var fileBytes = Encoding.UTF8.GetBytes(content);
+        sb.Append("6 0 obj <</Type/EmbeddedFile/Length ").Append(fileBytes.Length).Append(">>\nstream\n");
+        sb.Append(content);
+        sb.Append("\nendstream endobj\n");
+
+        var xrefPos = sb.Length;
+        sb.Append("xref\n0 7\n0000000000 65535 f \n");
+        for (int i = 1; i <= 6; i++)
+            sb.Append(offsets[i].ToString("D10")).Append(" 00000 n \n");
+
+        sb.Append("trailer <</Size 7/Root 1 0 R>>\nstartxref\n").Append(xrefPos).Append("\n%%EOF\n");
         return Encoding.ASCII.GetBytes(sb.ToString());
     }
 }

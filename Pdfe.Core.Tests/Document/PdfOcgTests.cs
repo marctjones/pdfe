@@ -83,6 +83,27 @@ public class PdfOcgTests
         config.BaseState.Should().Be("ON");    // Default
     }
 
+    [Fact]
+    public void ParseOptionalContentGroups_OcgNameAsString_ParsesSuccessfully()
+    {
+        var pdf = CreateMinimalPdfWithOcgNameAsString();
+        using var doc = PdfDocument.Open(new System.IO.MemoryStream(pdf));
+        var ocgs = doc.GetOptionalContentGroups();
+
+        ocgs.Should().HaveCount(1);
+        ocgs[0].Name.Should().Be("StringNamedLayer");
+    }
+
+    [Fact]
+    public void ParseOptionalContentGroups_OffArrayDirectName_ParsesSuccessfully()
+    {
+        var pdf = CreateMinimalPdfWithOffArrayDirectName();
+        using var doc = PdfDocument.Open(new System.IO.MemoryStream(pdf));
+        var config = doc.GetOptionalContentGroupConfig();
+
+        config.OffByDefault.Should().Contain("DirectOcgName");
+    }
+
     // Helper: Create a minimal PDF with OCProperties
     private static byte[] CreateMinimalPdfWithOcg(string? ocgConfig)
     {
@@ -220,6 +241,98 @@ public class PdfOcgTests
         writer.WriteLine("%%EOF");
         writer.Flush();
 
+        return ms.ToArray();
+    }
+
+    private static byte[] CreateMinimalPdfWithOcgNameAsString()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+        var offsets = new long[6];
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [4 0 R] /D << /OFF [] >> >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine("<< /Type /OCG /Name (StringNamedLayer) >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        long xrefPos = ms.Position;
+        writer.WriteLine("xref");
+        writer.WriteLine("0 5");
+        writer.WriteLine("0000000000 65535 f ");
+        writer.WriteLine($"{offsets[1]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[2]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[3]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[4]:D10} 00000 n ");
+        writer.Flush();
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 5 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
+        return ms.ToArray();
+    }
+
+    private static byte[] CreateMinimalPdfWithOffArrayDirectName()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new UTF8Encoding(false), leaveOpen: true);
+        writer.NewLine = "\n";
+        writer.WriteLine("%PDF-1.4");
+        writer.Flush();
+        var offsets = new long[6];
+        offsets[1] = ms.Position;
+        writer.WriteLine("1 0 obj");
+        writer.WriteLine("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [4 0 R] /D << /OFF [/DirectOcgName] >> >> >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        offsets[2] = ms.Position;
+        writer.WriteLine("2 0 obj");
+        writer.WriteLine("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        offsets[3] = ms.Position;
+        writer.WriteLine("3 0 obj");
+        writer.WriteLine("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        offsets[4] = ms.Position;
+        writer.WriteLine("4 0 obj");
+        writer.WriteLine("<< /Type /OCG /Name (Layer1) >>");
+        writer.WriteLine("endobj");
+        writer.Flush();
+        long xrefPos = ms.Position;
+        writer.WriteLine("xref");
+        writer.WriteLine("0 5");
+        writer.WriteLine("0000000000 65535 f ");
+        writer.WriteLine($"{offsets[1]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[2]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[3]:D10} 00000 n ");
+        writer.WriteLine($"{offsets[4]:D10} 00000 n ");
+        writer.Flush();
+        writer.WriteLine("trailer");
+        writer.WriteLine("<< /Root 1 0 R /Size 5 >>");
+        writer.WriteLine("startxref");
+        writer.WriteLine(xrefPos.ToString());
+        writer.WriteLine("%%EOF");
+        writer.Flush();
         return ms.ToArray();
     }
 }
