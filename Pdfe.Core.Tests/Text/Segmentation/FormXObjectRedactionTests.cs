@@ -165,6 +165,131 @@ public class FormXObjectRedactionTests
         text.Should().Contain("PAGEOWNTEXT", "the page's own text is untouched");
     }
 
+    [Fact]
+    public void RedactArea_FormWhoseBBoxMissesArea_IsLeftAsDoAndNotFlattened()
+    {
+        var pdf = Build(
+            Obj("<< /Type /Catalog /Pages 2 0 R >>"),
+            Obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            Obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+                "/Resources << /XObject << /Fm0 6 0 R >> >> >>"),
+            Stream("", "q /Fm0 Do Q"),
+            Obj(HelveticaFont),
+            Stream("/Type /XObject /Subtype /Form /BBox [0 0 60 60] " +
+                   "/Resources << /Font << /F1 5 0 R >> >>",
+                   "BT /F1 8 Tf 5 25 Td (CORNERONLY) Tj ET"));
+
+        using var doc = PdfDocument.Open(pdf);
+        doc.GetPage(1).RedactArea(new PdfRectangle(400, 700, 560, 740)); // far from the form
+        var saved = Encoding.Latin1.GetString(doc.SaveToBytes());
+
+        saved.Should().Contain("CORNERONLY",
+            "a form whose bbox doesn't intersect the area must be left untouched");
+        saved.Should().Contain("/Fm0", "the Do invocation must survive (not flattened)");
+    }
+
+    [Fact]
+    public void RedactArea_FormWithMatrixUnderPageCm_FlattensAndRedacts()
+    {
+        var pdf = Build(
+            Obj("<< /Type /Catalog /Pages 2 0 R >>"),
+            Obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            Obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+                "/Resources << /XObject << /Fm0 6 0 R >> >> >>"),
+            Stream("", "q 1 0 0 1 0 0 cm /Fm0 Do Q"),
+            Obj(HelveticaFont),
+            Stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Matrix [1 0 0 1 30 0] " +
+                   "/Resources << /Font << /F1 5 0 R >> >>",
+                   "BT /F1 12 Tf 70 700 Td (MATRIXTEXT) Tj ET")); // +30 x => ~page (100,700)
+
+        using var doc = PdfDocument.Open(pdf);
+        doc.GetPage(1).RedactArea(new PdfRectangle(90, 695, 300, 716));
+        var saved = Encoding.Latin1.GetString(doc.SaveToBytes());
+
+        saved.Should().NotContain("MATRIXTEXT",
+            "the matrix-positioned form text inside the area must be removed");
+    }
+
+    [Fact]
+    public void RedactArea_PageWithImageAndForm_RedactsFormLeavesImageDo()
+    {
+        var pdf = Build(
+            Obj("<< /Type /Catalog /Pages 2 0 R >>"),
+            Obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            Obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+                "/Resources << /XObject << /Im0 7 0 R /Fm0 6 0 R >> >> >>"),
+            Stream("", "q 1 0 0 1 0 500 cm 1 0 0 1 0 0 cm /Im0 Do Q q /Fm0 Do Q"),
+            Obj(HelveticaFont),
+            Stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] " +
+                   "/Resources << /Font << /F1 5 0 R >> >>",
+                   "BT /F1 12 Tf 100 700 Td (FORMOVERIMAGE) Tj ET"),
+            Stream("/Type /XObject /Subtype /Image /Width 1 /Height 1 " +
+                   "/BitsPerComponent 8 /ColorSpace /DeviceGray", "\xFF"));
+
+        using var doc = PdfDocument.Open(pdf);
+        doc.GetPage(1).RedactArea(new PdfRectangle(90, 695, 280, 716));
+        var saved = Encoding.Latin1.GetString(doc.SaveToBytes());
+
+        saved.Should().NotContain("FORMOVERIMAGE", "the form text is flattened and redacted");
+        doc.GetPage(1).GetXObject("Im0").Should().NotBeNull("the image XObject is untouched");
+    }
+
+    [Fact]
+    public void RedactArea_FormViaInheritedPageResources_IsFlattened()
+    {
+        var pdf = Build(
+            Obj("<< /Type /Catalog /Pages 2 0 R >>"),
+            Obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /Resources << /XObject << /Fm0 6 0 R >> >> >>"),
+            Obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>"),
+            Stream("", "q /Fm0 Do Q"),
+            Obj(HelveticaFont),
+            Stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] " +
+                   "/Resources << /Font << /F1 5 0 R >> >>",
+                   "BT /F1 12 Tf 100 700 Td (INHERITEDRES) Tj ET"));
+
+        using var doc = PdfDocument.Open(pdf);
+        doc.GetPage(1).RedactArea(new PdfRectangle(90, 695, 260, 716));
+
+        // The form is reached via the Pages node's /Resources, so it stays
+        // reachable (every page under that node inherits it) and is NOT pruned
+        // — like a shared form. The page's inlined copy is still redacted.
+        using var re = PdfDocument.Open(doc.SaveToBytes());
+        var pageContent = Encoding.Latin1.GetString(re.GetPage(1).GetContentStreamBytes());
+        pageContent.Should().NotContain("INHERITEDRES",
+            "the flattened page content must have the form text removed");
+    }
+
+    [Fact]
+    public void RedactArea_FormWithCollidingExtGStateAndRealMatrix_RenamesAndFlattens()
+    {
+        // Page and form both define /GS0 (different objects) → the flattener
+        // must rename the form's into the page resources and rewrite its `gs`
+        // operand. The form's /Matrix uses reals and a non-identity translation.
+        var pdf = Build(
+            Obj("<< /Type /Catalog /Pages 2 0 R >>"),
+            Obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            Obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+                "/Resources << /XObject << /Fm0 6 0 R >> /ExtGState << /GS0 7 0 R >> >> >>"),
+            Stream("", "q /Fm0 Do Q"),
+            Obj(HelveticaFont),
+            Stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Matrix [1.0 0 0 1.0 5.5 0] " +
+                   "/Resources << /ExtGState << /GS0 8 0 R >> /Font << /F1 5 0 R >> >>",
+                   "/GS0 gs BT /F1 12 Tf 94.5 700 Td (GSCOLLIDE) Tj ET"),
+            Obj("<< /Type /ExtGState /ca 1 >>"),    // page's GS0
+            Obj("<< /Type /ExtGState /ca 0.5 >>")); // form's GS0 (different object)
+
+        using var doc = PdfDocument.Open(pdf);
+        doc.GetPage(1).RedactArea(new PdfRectangle(90, 695, 300, 716));
+
+        using var re = PdfDocument.Open(doc.SaveToBytes());
+        var page = re.GetPage(1);
+        Encoding.Latin1.GetString(page.GetContentStreamBytes())
+            .Should().NotContain("GSCOLLIDE", "the matrix-positioned form text is redacted");
+        page.Resources!.GetDictionaryOrNull("ExtGState")!.Count
+            .Should().BeGreaterThanOrEqualTo(2,
+                "the form's colliding /GS0 must be merged under a fresh name, keeping both");
+    }
+
     // ---- builders ----
 
     private const string HelveticaFont =

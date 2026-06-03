@@ -1,6 +1,8 @@
 using AwesomeAssertions;
 using Pdfe.Core.Fonts;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using Xunit;
 
 namespace Pdfe.Core.Tests.Fonts;
@@ -162,5 +164,145 @@ public class CffSubsetterTests
         // Expect null on invalid/short input (parser is tolerant)
         // The important thing is that it's callable from Pdfe.Core
         // (If this test runs without namespace error, refactoring succeeded)
+    }
+
+    // ---- Round-trip subsetting against a real CFF font (Inconsolata, OFL).
+    // The malformed-input tests above only exercise the defensive fallback;
+    // these drive the full PerformSubset pipeline (header/INDEX parsing,
+    // charstring + subr collection, charset/encoding rewriting, reassembly). ----
+
+    /// <summary>The raw CFF table of Inconsolata, embedded as a test resource.</summary>
+    private static byte[] RealCff()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var name = asm.GetManifestResourceNames()
+            .Single(n => n.EndsWith("Inconsolata.cff", System.StringComparison.Ordinal));
+        using var s = asm.GetManifestResourceStream(name)!;
+        using var ms = new System.IO.MemoryStream();
+        s.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void RealCff_FixtureLoads_AndIsAValidCffHeader()
+    {
+        var cff = RealCff();
+        cff.Length.Should().BeGreaterThan(1000, "the embedded Inconsolata CFF should be substantial");
+        cff[0].Should().Be(1, "CFF major version is 1");
+    }
+
+    [Fact]
+    public void Subset_RealCff_ProducesSmallerValidBlob()
+    {
+        var cff = RealCff();
+        var used = new HashSet<int> { 0, 1, 2, 3, 4, 36, 37, 68, 69, 70 };
+
+        var subset = CffSubsetter.Subset(cff, used);
+
+        subset.Should().NotBeNull();
+        subset.Should().NotBeEmpty();
+        subset.Should().NotEqual(cff, "subsetting a real font must change the bytes");
+        subset.Length.Should().BeLessThan(cff.Length,
+            "a subset with a handful of glyphs must be smaller than the full font");
+        subset[0].Should().Be(1, "the output is still a CFF v1 blob");
+    }
+
+    [Fact]
+    public void Subset_RealCff_IsDeterministic()
+    {
+        var cff = RealCff();
+        var used = new HashSet<int> { 0, 5, 10, 42 };
+
+        var a = CffSubsetter.Subset(cff, used);
+        var b = CffSubsetter.Subset(cff, used);
+
+        a.Should().Equal(b, "subsetting is a pure function of (font, glyph set)");
+    }
+
+    [Fact]
+    public void Subset_RealCff_MoreGlyphs_YieldsLargerOrEqualOutput()
+    {
+        var cff = RealCff();
+        var few = CffSubsetter.Subset(cff, new HashSet<int> { 0, 1 });
+        var many = CffSubsetter.Subset(cff, Enumerable.Range(0, 60).ToHashSet());
+
+        many.Length.Should().BeGreaterThanOrEqualTo(few.Length,
+            "keeping more glyphs should not produce a smaller subset");
+        many.Length.Should().BeLessThan(cff.Length);
+    }
+
+    [Fact]
+    public void Subset_RealCff_EmptySet_StillProducesNotdefOnlyFont()
+    {
+        var cff = RealCff();
+
+        var subset = CffSubsetter.Subset(cff, new HashSet<int>());
+
+        subset.Should().NotBeNullOrEmpty();
+        subset[0].Should().Be(1);
+    }
+
+    [Fact]
+    public void Subset_RealCff_OutOfRangeGlyphs_AreClampedNotCrash()
+    {
+        var cff = RealCff();
+        var subset = CffSubsetter.Subset(cff, new HashSet<int> { 0, 3, 999999 });
+
+        subset.Should().NotBeNullOrEmpty();
+        subset.Length.Should().BeLessThan(cff.Length);
+    }
+
+    [Fact]
+    public void Subset_RealCff_ResubsettingOutput_IsStable()
+    {
+        var cff = RealCff();
+        var once = CffSubsetter.Subset(cff, new HashSet<int> { 0, 1, 2, 3, 4, 5 });
+
+        var twice = CffSubsetter.Subset(once, new HashSet<int> { 0, 1, 2 });
+
+        twice.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Subset_RealCff_AllGlyphs_RoundTrips()
+    {
+        var cff = RealCff();
+        var all = Enumerable.Range(0, 256).ToHashSet();
+
+        var subset = CffSubsetter.Subset(cff, all);
+
+        subset.Should().NotBeNullOrEmpty();
+        subset[0].Should().Be(1);
+    }
+
+    [Fact]
+    public void CffParser_ParsesRealFont_WithGlyphsAndNames()
+    {
+        var info = CffParser.Parse(RealCff());
+
+        info.Should().NotBeNull("a valid CFF font must parse");
+        info!.NumGlyphs.Should().BeGreaterThan(50, "Inconsolata has a full glyph set");
+        info.GlyphNames.Should().NotBeEmpty();
+        info.IsCidKeyed.Should().BeFalse("Inconsolata is a name-keyed (non-CID) font");
+        info.GlyphNameToIndex.Should().ContainKey("A", "a Latin font exposes the glyph name 'A'");
+    }
+
+    [Fact]
+    public void CffParser_GlyphNameLookup_RoundTripsWithIndex()
+    {
+        var info = CffParser.Parse(RealCff())!;
+        var idx = info.GlyphNameToIndex["A"];
+
+        idx.Should().BeInRange(0, info.NumGlyphs - 1);
+        info.GlyphNames[idx].Should().Be("A");
+    }
+
+    [Fact]
+    public void CffParser_ParsesFontBoundingBox()
+    {
+        var info = CffParser.Parse(RealCff())!;
+
+        info.XMax.Should().BeGreaterThan(info.XMin);
+        info.YMax.Should().BeGreaterThan(info.YMin);
     }
 }

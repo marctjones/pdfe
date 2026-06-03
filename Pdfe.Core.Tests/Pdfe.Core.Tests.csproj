@@ -36,4 +36,10 @@
     <ProjectReference Include="..\Pdfe.Core\Pdfe.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Real CFF font data for CffSubsetter round-trip tests.
+         Inconsolata (SIL OFL 1.1) — see Fixtures/Fonts/NOTICE.md. -->
+    <EmbeddedResource Include="Fixtures/Fonts/Inconsolata.cff" />
+  </ItemGroup>
+
 </Project>
