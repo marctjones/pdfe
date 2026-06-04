@@ -3,7 +3,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using AwesomeAssertions;
-using PdfEditor.Controls;
+using Pdfe.Avalonia.Controls;
 using SkiaSharp;
 using System;
 using System.IO;

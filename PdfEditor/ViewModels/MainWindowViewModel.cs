@@ -7,7 +7,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
-using PdfEditor.Controls;
+using Pdfe.Avalonia.Controls;
 using PdfEditor.Models;
 using Pdfe.Core.Document;
 using PdfEditor.Services;
@@ -555,7 +555,7 @@ public partial class MainWindowViewModel : ViewModelBase
     /// behind an overlay. Coords are in rendered-image pixels at the
     /// current render DPI, top-left origin.
     /// </summary>
-    public ObservableCollection<Models.HiddenTextHighlight> HiddenTextHighlights { get; }
+    public ObservableCollection<HiddenTextHighlight> HiddenTextHighlights { get; }
         = new();
 
     private void RefreshHiddenTextHighlights()
@@ -582,7 +582,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 page, CurrentPageIndex + 1))
             {
                 AddHighlight(h.Text, h.BoundingBox, h.HiddenBy, scale, pageHeight,
-                    Models.HiddenTextSource.Structural);
+                    HiddenTextSource.Structural);
             }
 
             // Pass 2: differential OCR — slow, opt-in, recovers text
@@ -598,7 +598,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     {
                         AddHighlight(h.Text, h.BoundingBox,
                             $"raster (OCR conf {h.Confidence:F2})", scale, pageHeight,
-                            Models.HiddenTextSource.DifferentialOcr);
+                            HiddenTextSource.DifferentialOcr);
                     }
                 }
                 else
@@ -624,7 +624,7 @@ public partial class MainWindowViewModel : ViewModelBase
         string source,
         double scale,
         double pageHeight,
-        Models.HiddenTextSource severity)
+        HiddenTextSource severity)
     {
         // PDF points (bottom-left origin) → rendered-image pixels
         // (top-left origin) at the render DPI.
@@ -632,7 +632,7 @@ public partial class MainWindowViewModel : ViewModelBase
         double top = (pageHeight - bbox.Top) * scale;
         double width = (bbox.Right - bbox.Left) * scale;
         double height = (bbox.Top - bbox.Bottom) * scale;
-        HiddenTextHighlights.Add(new Models.HiddenTextHighlight(
+        HiddenTextHighlights.Add(new HiddenTextHighlight(
             text, new Rect(left, top, width, height), source, severity));
     }
 
@@ -3167,10 +3167,10 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         // Direct pixel copy via WriteableBitmap — replaces a per-render
         // PNG encode + decode round-trip that ate ~150-300ms on every
-        // page render. See PdfEditor.Imaging.SkiaInterop for the rationale.
+        // page render. See Pdfe.Avalonia.Imaging.SkiaInterop for the rationale.
         try
         {
-            return PdfEditor.Imaging.SkiaInterop.ToAvaloniaBitmap(skBitmap);
+            return Pdfe.Avalonia.Imaging.SkiaInterop.ToAvaloniaBitmap(skBitmap);
         }
         catch (Exception ex)
         {

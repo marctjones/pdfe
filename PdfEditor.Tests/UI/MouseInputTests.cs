@@ -12,7 +12,8 @@ using Avalonia.Threading;
 using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
-using PdfEditor.Controls;
+using Pdfe.Avalonia.Controls;
+using Pdfe.Avalonia.Services;
 using PdfEditor.Services;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
@@ -661,7 +662,7 @@ public class MouseInputTests
         for (int i = 0; i < 10; i++) { await Task.Delay(150); window.UpdateLayout(); }
 
         var viewer = window.FindControl<PdfViewerControl>("PdfViewerControl");
-        viewer?.InteractionMode.Should().Be(PdfEditor.Controls.InteractionMode.TextSelection);
+        viewer?.InteractionMode.Should().Be(Pdfe.Avalonia.Controls.InteractionMode.TextSelection);
 
         var initialHistoryCount = vm.ClipboardHistory.Count;
 
