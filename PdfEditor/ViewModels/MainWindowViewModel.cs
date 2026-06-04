@@ -129,6 +129,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
         ToggleFormAuthoringModeCommand = ReactiveCommand.Create(() => { IsFormAuthoringMode = !IsFormAuthoringMode; });
+        ToggleOutlineCommand = ReactiveCommand.Create(ToggleOutlineSidebar);
+        ToggleThumbnailsCommand = ReactiveCommand.Create(ToggleThumbnailsSidebar);
         AutoDetectFieldsCommand = ReactiveCommand.Create(() => AutoDetectAndApplyFormFields());
         CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
         ZoomInCommand = ReactiveCommand.Create(ZoomIn);
@@ -219,6 +221,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         ToggleTextSelectionModeCommand = ReactiveCommand.Create(ToggleTextSelectionMode);
         ToggleFormAuthoringModeCommand = ReactiveCommand.Create(() => { IsFormAuthoringMode = !IsFormAuthoringMode; });
+        ToggleOutlineCommand = ReactiveCommand.Create(ToggleOutlineSidebar);
+        ToggleThumbnailsCommand = ReactiveCommand.Create(ToggleThumbnailsSidebar);
         AutoDetectFieldsCommand = ReactiveCommand.Create(() => AutoDetectAndApplyFormFields());
         CopyTextCommand = ReactiveCommand.CreateFromTask(CopyTextAsync);
         ZoomInCommand = ReactiveCommand.Create(ZoomIn);
@@ -286,7 +290,14 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool IsOutlineSidebarVisible
     {
         get => _isOutlineSidebarVisible;
-        set => this.RaiseAndSetIfChanged(ref _isOutlineSidebarVisible, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isOutlineSidebarVisible, value);
+            // The left sidebar Border and the inter-panel splitter are computed
+            // from both visibility flags, so re-raise them. (#369)
+            this.RaisePropertyChanged(nameof(IsLeftSidebarVisible));
+            this.RaisePropertyChanged(nameof(IsSidebarSplitterVisible));
+        }
     }
 
     private Models.OutlineNode? _selectedOutlineNode;
@@ -667,12 +678,27 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Visibility of the left thumbnail strip. Toggled from View menu.</summary>
+    /// <summary>Visibility of the left thumbnail strip. Toggled from View menu / toolbar.</summary>
     public bool IsThumbnailsSidebarVisible
     {
         get => _isThumbnailsSidebarVisible;
-        set => this.RaiseAndSetIfChanged(ref _isThumbnailsSidebarVisible, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isThumbnailsSidebarVisible, value);
+            this.RaisePropertyChanged(nameof(IsLeftSidebarVisible));
+            this.RaisePropertyChanged(nameof(IsSidebarSplitterVisible));
+        }
     }
+
+    /// <summary>
+    /// The left sidebar host is shown when *either* the outline or the
+    /// thumbnails panel is enabled — so the two can be toggled independently
+    /// (previously the whole sidebar was gated on thumbnails alone). (#369)
+    /// </summary>
+    public bool IsLeftSidebarVisible => IsOutlineSidebarVisible || IsThumbnailsSidebarVisible;
+
+    /// <summary>The outline/thumbnails splitter only makes sense when both panels show. (#369)</summary>
+    public bool IsSidebarSplitterVisible => IsOutlineSidebarVisible && IsThumbnailsSidebarVisible;
 
     /// <summary>Visibility of the right clipboard / pending-redactions sidebar.</summary>
     public bool IsClipboardSidebarVisible
@@ -945,6 +971,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> ApplyAllRedactionsCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleTextSelectionModeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleFormAuthoringModeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleOutlineCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleThumbnailsCommand { get; }
     public ReactiveCommand<Unit, int> AutoDetectFieldsCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyTextCommand { get; }
     public ReactiveCommand<Unit, Unit> ZoomInCommand { get; }
