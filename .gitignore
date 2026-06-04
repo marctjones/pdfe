@@ -88,3 +88,16 @@ pdfe.sh
 
 # Auto-generated test JSON
 **/*.cs.json
+
+# OCR training data — downloaded on demand (scripts/download-tessdata.sh), not committed
+tessdata/*.traineddata
+
+# Bundled PDF spec dump (large; reference it from the Wiki, don't commit it)
+PDF32000_2008.md
+
+# Test-host crash/hang dumps and blame sequence files (xUnit --blame-hang)
+*.dmp
+Sequence_*.xml
+
+# Git history-rewrite backup bundles
+*.bundle
