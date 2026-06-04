@@ -16,6 +16,13 @@ public class PdfDocument : IDisposable
     private readonly Dictionary<int, XRefEntry> _xref;
     private readonly Dictionary<int, PdfObject> _objectCache;
     private readonly PdfParser _parser;
+    // Object resolution seeks and reads the single shared _parser/lexer stream and
+    // mutates _objectCache, so it is NOT safe to call from multiple threads at once
+    // (concurrent Seeks corrupt each other -> "Unexpected keyword 'obj'"). The GUI
+    // hits this when a background search-indexer parses pages while the UI thread
+    // reads links/renders. Serialize the whole resolve path; the lock is reentrant
+    // so recursive resolution (ObjStm containers, /Length references) is fine. (#376)
+    private readonly object _parseLock = new();
     private readonly StreamDecompressor _decompressor;
     private readonly Pdfe.Core.Security.PdfStandardSecurityHandler? _securityHandler;
     private PageCollection? _pages;
@@ -542,6 +549,10 @@ public class PdfDocument : IDisposable
     /// </summary>
     public PdfObject GetObject(int objectNumber)
     {
+      // Serialize the shared-stream seek/parse + cache mutation against concurrent
+      // readers (reentrant for recursive resolution). (#376)
+      lock (_parseLock)
+      {
         // Check cache
         if (_objectCache.TryGetValue(objectNumber, out var cached))
             return cached;
@@ -607,6 +618,7 @@ public class PdfDocument : IDisposable
 
         _objectCache[objectNumber] = obj;
         return obj;
+      }
     }
 
     /// <summary>
