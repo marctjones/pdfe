@@ -4,6 +4,19 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [2.3.1] — 2026-06-04
+
+### Fixed
+- **Thread-safe object resolution (#376).** A single `PdfDocument` resolved
+  indirect objects through one shared lexer with a mutable stream position, so
+  concurrent reads — e.g. the GUI's background search-indexer parsing pages
+  while the UI thread reads links / renders — corrupted each other's seeks,
+  surfacing as spurious `PdfParseException: Unexpected keyword 'obj'`.
+  `GetObject` now serializes seek/parse + cache mutation behind a reentrant
+  lock. Verified on a large real document: 8 threads reading every page
+  produced 729 errors before and 0 after. Matters especially now that
+  `Pdfe.Core` ships as a NuGet package.
+
 ## [2.3.0] — 2026-06-04
 
 Turns pdfe's engine into reusable libraries for the wider .NET/Avalonia ecosystem.
