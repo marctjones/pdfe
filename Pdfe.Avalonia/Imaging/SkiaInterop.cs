@@ -4,7 +4,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using SkiaSharp;
 
-namespace PdfEditor.Imaging;
+namespace Pdfe.Avalonia.Imaging;
 
 /// <summary>
 /// Bridges SkiaSharp <see cref="SKBitmap"/> output into displayable Avalonia

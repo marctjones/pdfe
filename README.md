@@ -16,14 +16,32 @@ A cross-platform PDF editor and pure-.NET PDF framework, built with **C# + .NET 
 ## What's in the box
 
 ```
-Pdfe.Core/        Pure-.NET PDF parser, writer, content-stream library
-Pdfe.Rendering/   SkiaSharp-based renderer (text, images, paths, transparency)
-Pdfe.Ocr/         OCR via the system `tesseract` CLI + differential-OCR auditor
-Pdfe.Cli/         `pdfe` command-line tool
-PdfEditor/        Cross-platform Avalonia desktop app
+Pdfe.Core/             Pure-.NET PDF parser, writer, content-stream library
+Pdfe.Rendering/        SkiaSharp-based renderer (text, images, paths, transparency)
+Pdfe.Avalonia/         Reusable Avalonia PDF viewer control (PdfViewerControl)
+Pdfe.Avalonia.Sample/  Minimal "open and view" sample app for the control
+Pdfe.Ocr/              OCR via the system `tesseract` CLI + differential-OCR auditor
+Pdfe.Cli/              `pdfe` command-line tool
+PdfEditor/             Cross-platform Avalonia desktop app (reference consumer)
 ```
 
-The libraries are usable independently — embed `Pdfe.Core` if you only need parsing and redaction, or `Pdfe.Rendering` if you need page rasterization.
+The libraries are usable independently — embed `Pdfe.Core` if you only need parsing and redaction, `Pdfe.Rendering` if you need page rasterization, or `Pdfe.Avalonia` to drop a PDF viewer into any Avalonia app.
+
+### Reusable libraries (NuGet-packable)
+
+`Pdfe.Core`, `Pdfe.Rendering`, and `Pdfe.Avalonia` are packable as a dependency-light,
+pure-managed, MIT-licensed stack — a niche the .NET/Avalonia ecosystem largely lacks (the
+alternatives are native PDFium or commercial SDKs):
+
+- **`Pdfe.Avalonia`** — `<pdf:PdfViewerControl Document="…" CurrentPage="…" ZoomLevel="…" />`.
+  Depends only on `Pdfe.Core` + `Pdfe.Rendering` + Avalonia + SkiaSharp. See
+  [`Pdfe.Avalonia/README.md`](Pdfe.Avalonia/README.md) and `Pdfe.Avalonia.Sample`.
+- **`Pdfe.Rendering`** — framework-neutral render API: `RenderPage(page, options[, ct]) → SKBitmap`
+  and `RenderPageToPng(…)`. Pair with any UI (WPF/MAUI/Blazor/Uno) or a headless service. See
+  [`Pdfe.Rendering/README.md`](Pdfe.Rendering/README.md).
+- **`Pdfe.Core`** — parser/model/redaction. See [`Pdfe.Core/README.md`](Pdfe.Core/README.md).
+
+Build the packages locally with `dotnet pack -c Release` (they are also attached to releases).
 
 ## Features
 

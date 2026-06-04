@@ -28,6 +28,36 @@ public class SkiaRendererTests
     }
 
     [Fact]
+    public void RenderPage_AlreadyCancelledToken_Throws()
+    {
+        var pdfData = CreateSimplePdf("Hello World");
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+
+        // Cancellable render path (#366) must observe the token, not run to completion.
+        var act = () => renderer.RenderPage(doc.GetPage(1), new RenderOptions(), cts.Token);
+        act.Should().Throw<System.OperationCanceledException>();
+    }
+
+    [Fact]
+    public void RenderPageToPng_WritesValidPngBytes()
+    {
+        var pdfData = CreateSimplePdf("Hello World");
+        using var doc = PdfDocument.Open(pdfData);
+        var renderer = new SkiaRenderer();
+
+        using var ms = new System.IO.MemoryStream();
+        renderer.RenderPageToPng(doc.GetPage(1), ms);
+
+        ms.Length.Should().BeGreaterThan(8, "a PNG was written");
+        // PNG 8-byte signature: 89 50 4E 47 0D 0A 1A 0A
+        var sig = ms.ToArray();
+        sig[0..8].Should().Equal(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A);
+    }
+
+    [Fact]
     public void RenderPage_DefaultDpi_Returns150DpiImage()
     {
         // Arrange

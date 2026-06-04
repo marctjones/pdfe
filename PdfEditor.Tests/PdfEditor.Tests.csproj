@@ -56,6 +56,8 @@
   <ItemGroup>
     <!-- Reference to main project -->
     <ProjectReference Include="..\PdfEditor\PdfEditor.csproj" />
+    <!-- Direct ref so tests can use the extracted viewer control + its InternalsVisibleTo. -->
+    <ProjectReference Include="..\Pdfe.Avalonia\Pdfe.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>

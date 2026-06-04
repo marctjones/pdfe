@@ -88,7 +88,14 @@ public static class KeyboardTestHelpers
     {
         var tcs = new TaskCompletionSource<bool>();
         Dispatcher.UIThread.Post(() => tcs.SetResult(true), DispatcherPriority.Background);
-        await tcs.Task;
+        // Best-effort flush. If the dispatcher is saturated by higher-priority work
+        // — e.g. a success-toast auto-dismiss timer scheduled by a save — this
+        // Background-priority completion can be starved indefinitely under CI load,
+        // which previously hung the whole test host until the 120s blame-hang fired
+        // (KeyboardShortcutTests.CtrlS_SavesFile). Bound the wait so a busy dispatcher
+        // can't hang the run; Task.Delay fires off the thread-pool timer, not the
+        // dispatcher, so it can't itself be starved. (#363)
+        await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
     }
 
     /// <summary>

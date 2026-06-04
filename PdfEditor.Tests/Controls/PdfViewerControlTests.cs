@@ -7,7 +7,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using AwesomeAssertions;
-using PdfEditor.Controls;
+using Pdfe.Avalonia.Controls;
 using PdfEditor.Tests.Utilities;
 using Xunit;
 using PdfCoreDocument = Pdfe.Core.Document.PdfDocument;

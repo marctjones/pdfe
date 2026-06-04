@@ -1,6 +1,6 @@
 using Avalonia;
 
-namespace PdfEditor.Models;
+namespace Pdfe.Avalonia.Controls;
 
 /// <summary>
 /// How a piece of hidden text was discovered. Drives the overlay

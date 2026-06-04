@@ -114,6 +114,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Pdfe.Core\Pdfe.Core.csproj" />
     <ProjectReference Include="..\Pdfe.Rendering\Pdfe.Rendering.csproj" />
+    <ProjectReference Include="..\Pdfe.Avalonia\Pdfe.Avalonia.csproj" />
     <ProjectReference Include="..\Pdfe.Ocr\Pdfe.Ocr.csproj" />
   </ItemGroup>
 

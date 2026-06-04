@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Threading;
 using Pdfe.Core.ColorSpaces;
 using Pdfe.Core.Document;
 using Pdfe.Rendering.Fonts;
@@ -24,7 +25,18 @@ public class SkiaRenderer
     /// Render a PDF page to a bitmap with specified options.
     /// </summary>
     public SKBitmap RenderPage(PdfPage page, RenderOptions options)
+        => RenderPage(page, options, CancellationToken.None);
+
+    /// <summary>
+    /// Render a PDF page to a bitmap, observing a <see cref="CancellationToken"/>.
+    /// The token is checked between content-stream operators, so a long render of
+    /// a complex or hostile page can be abandoned promptly (companion to the
+    /// cancellable parsing added in #346). Throws <see cref="OperationCanceledException"/>
+    /// if cancellation is requested.
+    /// </summary>
+    public SKBitmap RenderPage(PdfPage page, RenderOptions options, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var scale = options.Dpi / 72.0;
         float s = (float)scale, W = (float)page.Width, H = (float)page.Height;
 
@@ -58,10 +70,26 @@ public class SkiaRenderer
         canvas.SetMatrix(m);
 
         // Render content
-        var context = new RenderContext(canvas, page, options);
+        var context = new RenderContext(canvas, page, options, cancellationToken);
         context.Render();
 
         return bitmap;
+    }
+
+    /// <summary>
+    /// Render a PDF page and encode it as a PNG into <paramref name="destination"/>.
+    /// Convenience for framework-neutral consumers that want bytes/streams rather
+    /// than an <see cref="SKBitmap"/> (e.g. a web handler or a non-Skia UI). For an
+    /// <see cref="SKImage"/>/<see cref="SKPicture"/> path, call <see cref="RenderPage(PdfPage, RenderOptions)"/>
+    /// and use SkiaSharp directly.
+    /// </summary>
+    public void RenderPageToPng(PdfPage page, Stream destination, RenderOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var bitmap = RenderPage(page, options ?? new RenderOptions(), cancellationToken);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        data.SaveTo(destination);
     }
 }
 
@@ -208,11 +236,15 @@ internal class RenderContext
     // list. RenderInlineImage looks up the entry and rasterizes.
     private readonly List<(string HeaderText, byte[] DataBytes)> _inlineImages = new();
 
-    public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options)
+    private readonly CancellationToken _cancellationToken;
+
+    public RenderContext(SKCanvas canvas, PdfPage page, RenderOptions options,
+        CancellationToken cancellationToken = default)
     {
         _canvas = canvas;
         _page = page;
         _options = options;
+        _cancellationToken = cancellationToken;
         _stateStack = new Stack<GraphicsState>();
         _state = new GraphicsState();
         _textState = new TextState();
@@ -244,6 +276,7 @@ internal class RenderContext
                 {
                     if (IsOperator(token))
                     {
+                        _cancellationToken.ThrowIfCancellationRequested();
                         ExecuteOperator(token, operands);
                         operands.Clear();
                     }
@@ -2693,6 +2726,7 @@ internal class RenderContext
                 {
                     if (IsOperator(token))
                     {
+                        _cancellationToken.ThrowIfCancellationRequested();
                         ExecuteOperator(token, operands);
                         operands.Clear();
                     }
@@ -2879,6 +2913,7 @@ internal class RenderContext
             {
                 if (IsOperator(token))
                 {
+                    _cancellationToken.ThrowIfCancellationRequested();
                     ExecuteOperator(token, operands);
                     operands.Clear();
                 }
