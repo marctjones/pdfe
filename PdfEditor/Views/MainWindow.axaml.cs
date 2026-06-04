@@ -207,6 +207,25 @@ public partial class MainWindow : Window
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
+        // Sidebar toggles. These Ctrl+Shift combos are checked FIRST, before the
+        // plain Ctrl+O handler below (which doesn't exclude Shift and would
+        // otherwise swallow Ctrl+Shift+O). (#369)
+        // Ctrl+Shift+O: toggle the outline / bookmarks sidebar
+        if (e.Key == Key.O && e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.ToggleOutlineCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+Shift+T: toggle the page-previews / thumbnails sidebar
+        if (e.Key == Key.T && e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            viewModel.ToggleThumbnailsCommand?.Execute().Subscribe();
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+O: Open file
         if (e.Key == Key.O && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {

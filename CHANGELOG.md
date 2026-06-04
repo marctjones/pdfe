@@ -4,6 +4,21 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [2.2.2] — 2026-06-03
+
+### Fixed
+- **Outline and page-preview (thumbnail) sidebars are now independently
+  toggleable (#369).** The outline panel was nested inside the thumbnails
+  sidebar, so "Show Outline" did nothing unless "Show Thumbnails" was also on,
+  and hiding thumbnails hid the outline too. The left sidebar now shows when
+  *either* panel is enabled, each panel binds its own visibility, and the
+  splitter appears only when both are visible.
+
+### Added
+- **Toolbar toggle buttons** for the outline (📑) and page previews (🗐), plus
+  **keyboard shortcuts** Ctrl+Shift+O (outline) and Ctrl+Shift+T (thumbnails) —
+  the toggles were previously buried as View-menu checkboxes only. (#369)
+
 ## [2.2.1] — 2026-06-03
 
 Maintenance release: parser-robustness hardening, a rotated-page render fix,
