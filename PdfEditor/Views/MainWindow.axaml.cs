@@ -6,7 +6,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
-using PdfEditor.Controls;
+using Pdfe.Avalonia.Controls;
 using PdfEditor.Models;
 using PdfEditor.ViewModels;
 using System;

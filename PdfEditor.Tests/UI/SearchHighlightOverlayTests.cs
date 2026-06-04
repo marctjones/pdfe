@@ -7,7 +7,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using AwesomeAssertions;
-using PdfEditor.Controls;
+using Pdfe.Avalonia.Controls;
 using PdfEditor.ViewModels;
 using PdfEditor.Views;
 using Xunit;

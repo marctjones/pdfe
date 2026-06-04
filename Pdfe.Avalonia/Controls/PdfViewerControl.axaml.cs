@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Collections;
+using Avalonia.Reactive;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
@@ -14,11 +15,11 @@ using Avalonia.Threading;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
 using Pdfe.Rendering;
-using PdfEditor.Imaging;
-using PdfEditor.Services;
+using Pdfe.Avalonia.Imaging;
+using Pdfe.Avalonia.Services;
 using SkiaSharp;
 
-namespace PdfEditor.Controls;
+namespace Pdfe.Avalonia.Controls;
 
 /// <summary>
 /// Reusable PDF viewer control with zoom, pan, and overlay support.
@@ -144,10 +145,10 @@ public partial class PdfViewerControl : UserControl
     /// rendered page. Bound to a VM observable collection; whenever it
     /// changes, <see cref="RefreshHiddenTextOverlays"/> redraws them.
     /// </summary>
-    public static readonly StyledProperty<System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>?> HiddenTextHighlightsProperty =
-        AvaloniaProperty.Register<PdfViewerControl, System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>?>(nameof(HiddenTextHighlights));
+    public static readonly StyledProperty<System.Collections.Generic.IEnumerable<HiddenTextHighlight>?> HiddenTextHighlightsProperty =
+        AvaloniaProperty.Register<PdfViewerControl, System.Collections.Generic.IEnumerable<HiddenTextHighlight>?>(nameof(HiddenTextHighlights));
 
-    public System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>? HiddenTextHighlights
+    public System.Collections.Generic.IEnumerable<HiddenTextHighlight>? HiddenTextHighlights
     {
         get => GetValue(HiddenTextHighlightsProperty);
         set => SetValue(HiddenTextHighlightsProperty, value);
@@ -269,15 +270,15 @@ public partial class PdfViewerControl : UserControl
             control.RedrawFormFieldsLayer());
         HiddenTextHighlightsProperty.Changed.AddClassHandler<PdfViewerControl>((control, e) =>
             control.OnHiddenTextHighlightsChanged(
-                e.OldValue as System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>,
-                e.NewValue as System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>));
+                e.OldValue as System.Collections.Generic.IEnumerable<HiddenTextHighlight>,
+                e.NewValue as System.Collections.Generic.IEnumerable<HiddenTextHighlight>));
     }
 
     private System.Collections.Specialized.INotifyCollectionChanged? _watchedHighlights;
 
     private void OnHiddenTextHighlightsChanged(
-        System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>? oldValue,
-        System.Collections.Generic.IEnumerable<PdfEditor.Models.HiddenTextHighlight>? newValue)
+        System.Collections.Generic.IEnumerable<HiddenTextHighlight>? oldValue,
+        System.Collections.Generic.IEnumerable<HiddenTextHighlight>? newValue)
     {
         // If the bound value is an ObservableCollection, subscribe to its
         // changes so the overlay repaints when the VM adds/removes hits.
@@ -311,7 +312,7 @@ public partial class PdfViewerControl : UserControl
             // Color code by source: yellow for structural (we have the
             // exact characters), orange for differential-OCR (recovered
             // from raster — confidence is OCR-typical, less certain).
-            var (fill, stroke, ink) = h.Source == PdfEditor.Models.HiddenTextSource.DifferentialOcr
+            var (fill, stroke, ink) = h.Source == HiddenTextSource.DifferentialOcr
                 ? (Color.FromArgb(220, 255, 165, 0),  // orange
                    Color.FromArgb(255, 200, 80, 0),
                    Color.FromArgb(255, 120, 40, 0))
@@ -437,7 +438,7 @@ public partial class PdfViewerControl : UserControl
             BorderThickness = new Thickness(1),
             Padding = new Thickness(2),
             FontSize = Math.Max(10, h * 0.6),
-            VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            VerticalContentAlignment = global::Avalonia.Layout.VerticalAlignment.Center,
         };
 
         // Commit on Enter (single-line) or focus loss.
@@ -555,13 +556,13 @@ public partial class PdfViewerControl : UserControl
         // everything; the handlers compute pointer coords relative to
         // the ZoomHost wrapper themselves.
         AddHandler(PointerPressedEvent, OnInteractionLayerPointerPressed,
-            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble,
+            global::Avalonia.Interactivity.RoutingStrategies.Tunnel | global::Avalonia.Interactivity.RoutingStrategies.Bubble,
             handledEventsToo: true);
         AddHandler(PointerMovedEvent, OnInteractionLayerPointerMoved,
-            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble,
+            global::Avalonia.Interactivity.RoutingStrategies.Tunnel | global::Avalonia.Interactivity.RoutingStrategies.Bubble,
             handledEventsToo: true);
         AddHandler(PointerReleasedEvent, OnInteractionLayerPointerReleased,
-            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble,
+            global::Avalonia.Interactivity.RoutingStrategies.Tunnel | global::Avalonia.Interactivity.RoutingStrategies.Bubble,
             handledEventsToo: true);
 
         // Surface viewport changes (scrollbars appearing/disappearing,
@@ -576,9 +577,13 @@ public partial class PdfViewerControl : UserControl
         // tooltips flickered and the button was unclickable.
         if (_scrollViewer != null)
         {
+            // AnonymousObserver (Avalonia.Reactive) rather than a Subscribe(Action<T>)
+            // overload — the latter comes from System.Reactive (Rx), which this
+            // library deliberately does NOT depend on (the app got it transitively
+            // via ReactiveUI). Avalonia ships AnonymousObserver for exactly this. (#365)
             _viewportSubscription = _scrollViewer
                 .GetObservable(ScrollViewer.ViewportProperty)
-                .Subscribe(OnScrollViewerViewportChanged);
+                .Subscribe(new AnonymousObserver<Size>(OnScrollViewerViewportChanged));
         }
     }
 
