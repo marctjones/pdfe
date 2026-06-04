@@ -442,6 +442,64 @@ public class MainWindowViewModelTests
     }
 
     [Fact]
+    public void OutlineSidebar_CanShowIndependentlyOfThumbnails()
+    {
+        // Regression for #369: the outline used to be nested inside the
+        // thumbnails sidebar, so turning thumbnails off hid the outline too.
+        _viewModel.IsThumbnailsSidebarVisible = false;
+        _viewModel.IsOutlineSidebarVisible = true;
+
+        _viewModel.IsLeftSidebarVisible.Should().BeTrue(
+            "the left sidebar must stay visible for the outline even with thumbnails off");
+        _viewModel.IsSidebarSplitterVisible.Should().BeFalse(
+            "the splitter only shows when BOTH panels are visible");
+    }
+
+    [Fact]
+    public void ThumbnailsSidebar_CanShowIndependentlyOfOutline()
+    {
+        _viewModel.IsOutlineSidebarVisible = false;
+        _viewModel.IsThumbnailsSidebarVisible = true;
+
+        _viewModel.IsLeftSidebarVisible.Should().BeTrue();
+        _viewModel.IsSidebarSplitterVisible.Should().BeFalse();
+    }
+
+    [Fact]
+    public void LeftSidebar_HiddenWhenBothOutlineAndThumbnailsOff()
+    {
+        _viewModel.IsOutlineSidebarVisible = false;
+        _viewModel.IsThumbnailsSidebarVisible = false;
+
+        _viewModel.IsLeftSidebarVisible.Should().BeFalse(
+            "with neither panel enabled the whole left sidebar collapses");
+    }
+
+    [Fact]
+    public void SidebarSplitter_VisibleOnlyWhenBothPanelsVisible()
+    {
+        _viewModel.IsOutlineSidebarVisible = true;
+        _viewModel.IsThumbnailsSidebarVisible = true;
+        _viewModel.IsSidebarSplitterVisible.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ToggleOutlineCommand_FlipsOutlineVisibility()
+    {
+        var before = _viewModel.IsOutlineSidebarVisible;
+        _viewModel.ToggleOutlineCommand.Execute().Subscribe();
+        _viewModel.IsOutlineSidebarVisible.Should().Be(!before);
+    }
+
+    [Fact]
+    public void ToggleThumbnailsCommand_FlipsThumbnailsVisibility()
+    {
+        var before = _viewModel.IsThumbnailsSidebarVisible;
+        _viewModel.ToggleThumbnailsCommand.Execute().Subscribe();
+        _viewModel.IsThumbnailsSidebarVisible.Should().Be(!before);
+    }
+
+    [Fact]
     public void IsClipboardSidebarVisible_InitiallyTrue()
     {
         _viewModel.IsClipboardSidebarVisible.Should().BeTrue();

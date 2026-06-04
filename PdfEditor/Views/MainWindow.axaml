@@ -136,9 +136,11 @@
                 <Separator/>
                 <MenuItem Header="Show _Outline"
                           ToggleType="CheckBox"
+                          InputGesture="Ctrl+Shift+O"
                           IsChecked="{Binding IsOutlineSidebarVisible, Mode=TwoWay}"/>
                 <MenuItem Header="Show _Thumbnails"
                           ToggleType="CheckBox"
+                          InputGesture="Ctrl+Shift+T"
                           IsChecked="{Binding IsThumbnailsSidebarVisible, Mode=TwoWay}"/>
                 <MenuItem Header="Show _Clipboard History"
                           ToggleType="CheckBox"
@@ -187,6 +189,25 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <!-- Left: Main Actions -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                    <!-- View Group: sidebar toggles (outline + page previews) -->
+                    <Button Content="📑" Command="{Binding ToggleOutlineCommand}"
+                            Classes="modern-button toggle"
+                            Classes.active="{Binding IsOutlineSidebarVisible}"
+                            Padding="10,6"
+                            ToolTip.Tip="Show/hide Outline (Ctrl+Shift+O)"
+                            AutomationProperties.Name="Toggle Outline Sidebar"
+                            AutomationProperties.HelpText="Show or hide the document outline / bookmarks panel"/>
+                    <Button Content="🗐" Command="{Binding ToggleThumbnailsCommand}"
+                            Classes="modern-button toggle"
+                            Classes.active="{Binding IsThumbnailsSidebarVisible}"
+                            Padding="10,6"
+                            ToolTip.Tip="Show/hide Page Previews (Ctrl+Shift+T)"
+                            AutomationProperties.Name="Toggle Thumbnails Sidebar"
+                            AutomationProperties.HelpText="Show or hide the page thumbnails / previews panel"/>
+
+                    <Border Width="1" Height="24" Margin="6,0"
+                            Background="{DynamicResource DividerBrush}"/>
+
                     <!-- File Group -->
                     <Button Content="📁 Open" Command="{Binding OpenFileCommand}"
                             Classes="modern-button" Padding="12,6"
@@ -445,7 +466,7 @@
                  hasn't toggled it off via View → Show Outline. -->
             <Border Grid.Column="0"
                     Width="220"
-                    IsVisible="{Binding IsThumbnailsSidebarVisible}"
+                    IsVisible="{Binding IsLeftSidebarVisible}"
                     Background="{DynamicResource SidebarBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
@@ -503,10 +524,11 @@
                               Background="{DynamicResource BorderBrush}"
                               HorizontalAlignment="Stretch"
                               ResizeDirection="Rows"
-                              IsVisible="{Binding IsOutlineSidebarVisible}"/>
+                              IsVisible="{Binding IsSidebarSplitterVisible}"/>
 
                 <!-- Thumbnails -->
-                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                <Grid Grid.Row="2" RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsThumbnailsSidebarVisible}">
                     <Border Grid.Row="0"
                             Background="{DynamicResource SecondaryBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
