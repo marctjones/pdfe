@@ -76,7 +76,13 @@ public class KeyboardShortcutTests
         var window = new MainWindow { DataContext = vm, Width = 1280, Height = 900 };
         window.Show();
 
-        await vm.LoadDocumentAsync(pdfPath);
+        // Bound the load. This test uniquely triggers a save -> success toast,
+        // whose auto-dismiss dispatcher activity can starve the load's
+        // render/index continuations under headless CI load and hang the whole
+        // test host. We only need the document loaded enough to route Ctrl+S;
+        // Task.Delay uses the thread-pool timer (not the dispatcher) so it can't
+        // be starved. (#363)
+        await Task.WhenAny(vm.LoadDocumentAsync(pdfPath), Task.Delay(TimeSpan.FromSeconds(10)));
         await Task.Delay(100);
 
         // Act

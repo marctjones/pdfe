@@ -2,7 +2,7 @@ using System.Linq;
 using AwesomeAssertions;
 using Pdfe.Core.Document;
 using Pdfe.Core.Text;
-using PdfEditor.Services;
+using Pdfe.Avalonia.Services;
 using Xunit;
 
 namespace PdfEditor.Tests.Unit;

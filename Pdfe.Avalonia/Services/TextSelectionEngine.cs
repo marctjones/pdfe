@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace PdfEditor.Services;
+namespace Pdfe.Avalonia.Services;
 
 /// <summary>
 /// Pure-logic letter hit-testing and reading-order range computation

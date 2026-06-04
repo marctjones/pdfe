@@ -8,6 +8,7 @@ using Pdfe.Core.Document;
 using Pdfe.Core.Graphics;
 using Pdfe.Rendering;
 using PdfEditor.Models;
+using Pdfe.Avalonia.Controls;
 using PdfEditor.ViewModels;
 using SkiaSharp;
 using Xunit;
