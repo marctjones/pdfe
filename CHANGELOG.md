@@ -4,6 +4,31 @@ All notable changes to pdfe are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [2.3.0] — 2026-06-04
+
+Turns pdfe's engine into reusable libraries for the wider .NET/Avalonia ecosystem.
+
+### Added
+- **`Pdfe.Avalonia` — reusable Avalonia PDF viewer control (#365).** The
+  `PdfViewerControl` (zoom/pan, navigation, text selection, search highlights,
+  annotations, links, form-field overlays) is extracted from the `PdfEditor`
+  app into a standalone, dependency-light library (depends only on `Pdfe.Core`
+  + `Pdfe.Rendering` + Avalonia + SkiaSharp). Any Avalonia app can now drop in a
+  pure-managed, SkiaSharp-based PDF viewer — a gap the ecosystem lacked. The
+  app consumes it as the reference implementation; a minimal `Pdfe.Avalonia.Sample`
+  shows the dependency-light usage.
+- **Framework-neutral render API (#366).** `Pdfe.Rendering.SkiaRenderer` gains
+  `RenderPage(page, options, CancellationToken)` (cancellable between
+  content-stream operators, companion to #346) and `RenderPageToPng(page, Stream, …)`
+  for non-Skia consumers.
+- **NuGet-packable trio.** `Pdfe.Core`, `Pdfe.Rendering`, and `Pdfe.Avalonia`
+  carry package metadata + per-package READMEs; `dotnet pack` produces three
+  valid `.nupkg`s (attached to this release; not pushed to nuget.org).
+
+### Changed
+- `PdfEditor` now consumes `Pdfe.Avalonia` rather than embedding the control;
+  behavior is unchanged.
+
 ## [2.2.2] — 2026-06-03
 
 ### Fixed
