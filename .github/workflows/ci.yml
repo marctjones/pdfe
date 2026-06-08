@@ -62,8 +62,10 @@ jobs:
           unzip -q /tmp/verapdf.zip -d /tmp/verapdf-installer \
             || { echo "::warning::veraPDF archive invalid; skipping veraPDF setup"; exit 0; }
 
-          # Create installation response file for silent install
-          cat > /tmp/auto-install.xml << 'EOF'
+          # Create installation response file for silent install.
+          # Unquoted heredoc so $HOME expands (izpack doesn't expand env vars; a
+          # quoted heredoc would create a literal "$HOME/verapdf" directory).
+          cat > /tmp/auto-install.xml << EOF
           <?xml version="1.0" encoding="UTF-8" standalone="no"?>
           <AutomatedInstallation langpack="eng">
               <com.izforge.izpack.panels.htmlhello.HTMLHelloPanel id="welcome"/>
