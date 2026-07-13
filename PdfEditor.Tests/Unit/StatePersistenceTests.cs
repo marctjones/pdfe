@@ -52,6 +52,8 @@ public class StatePersistenceTests
         settings.Width.Should().Be(1200);
         settings.Height.Should().Be(800);
         settings.IsMaximized.Should().BeFalse();
+        settings.ContinuousScrollEnabled.Should().BeFalse(
+            "continuous scroll is opt-in until v2.29.0 (see fix/continuous-nav-race)");
     }
 
     [Fact]
@@ -182,7 +184,8 @@ public class StatePersistenceTests
             Y = 75,
             Width = 1500,
             Height = 950,
-            IsMaximized = true
+            IsMaximized = true,
+            ContinuousScrollEnabled = false
         };
         settings.UpdateDocumentState("/tmp/doc1.pdf", 1.5, 10);
         settings.UpdateDocumentState("/tmp/doc2.pdf", 2.0, 20);
@@ -198,10 +201,22 @@ public class StatePersistenceTests
         restored.Width.Should().Be(1500);
         restored.Height.Should().Be(950);
         restored.IsMaximized.Should().BeTrue();
+        restored.ContinuousScrollEnabled.Should().BeFalse();
         restored.DocumentStates.Should().HaveCount(2);
         restored.DocumentStates[0].FilePath.Should().Be("/tmp/doc1.pdf");
         restored.DocumentStates[0].ZoomLevel.Should().Be(1.5);
         restored.DocumentStates[0].LastPageIndex.Should().Be(10);
+    }
+
+    [Fact]
+    public void WindowSettings_DeserializeOldConfig_DefaultsContinuousScrollOff()
+    {
+        var restored = JsonSerializer.Deserialize("{}", PdfeJsonContext.Default.WindowSettings);
+
+        restored.Should().NotBeNull();
+        restored!.ContinuousScrollEnabled.Should().BeFalse(
+            "a config written before this key existed must not silently switch the user into " +
+            "continuous scroll — it is opt-in until v2.29.0 (fix/continuous-nav-race)");
     }
 
     [Fact]

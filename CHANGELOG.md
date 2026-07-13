@@ -6,7 +6,88 @@ semantic versioning.
 
 ## [Unreleased]
 
-No changes yet.
+## [2.28.0] - 2026-07-13
+
+**Security release. Two redaction leaks are fixed. Upgrading is recommended for
+anyone using pdfe to redact sensitive documents.**
+
+Both fixed leaks share one root cause: redaction was verified by asking pdfe's
+own text extractor whether pdfe had removed the text. That extractor reads the
+content stream and nothing else, so text surviving in any other carrier was
+reported as a clean redaction — by a fully green test suite.
+
+### Security
+
+- **Fixed: redacted text survived in the structure tree of tagged PDFs (#636).**
+  `/ActualText` and `/Alt` restate the text of a marked-content span. Glyph
+  removal rewrote the content stream and left them untouched, so Acrobat, screen
+  readers, and any tag-aware extractor still read the redacted name straight out
+  of the file. Tagged PDFs are exactly the institutional documents (government
+  forms, court filings, medical records) most likely to hold sensitive data.
+- **Fixed: redacted text survived in document-level carriers (#608).** The XMP
+  `/Metadata` packet, outline (bookmark) titles, and annotation `/Contents` were
+  never scrubbed — only `/Info` was, and only in the GUI. A redacted name left in
+  a bookmark title is visible in the reader's navigation sidebar without the page
+  ever being opened.
+- **Verified (was only asserted in a comment): a full save garbage-collects the
+  previous revision**, so an incremental-update PDF cannot retain the
+  un-redacted page. Now proven by test rather than believed.
+- **New: redaction is now verified by tools that are not pdfe** (#606, #607,
+  #609) — independent extraction (mutool), independent rendering (Ghostscript)
+  as a before/after ink differential, and the full corpus. Ink absence is the
+  stronger claim: extraction cannot see text rendered as vector paths or raster
+  pixels; a renderer can.
+
+### Known security limitations (unchanged from 2.27.1 — not introduced here)
+
+- **Redaction is silently incomplete where text extraction is blind (#637).**
+  Where pdfe cannot read text, it cannot redact it, and it reports success
+  anyway. Measured on `irs-1040-instructions.pdf` page 47: pdfe extracts 471
+  characters, mutool extracts 3,192. **Verify redactions of unfamiliar documents
+  with an independent tool.** This is pre-existing; it is disclosed here because
+  the new independent-verification suite is what found it.
+- **Redacting an encrypted PDF returns an unencrypted copy (#638).** The writer
+  cannot emit `/Encrypt`. The redaction succeeds; the protection on the rest of
+  the document is silently dropped.
+- **`/P` permissions are parsed but never enforced (#642).**
+
+### Added
+- Continuous scroll can now be enabled from View > Continuous Scroll and the
+  choice is remembered across sessions (`ContinuousScrollEnabled`). It is
+  **opt-in**; making it the default is deferred to 2.29.0 (see Deferred below).
+- `PdfDocumentSanitizer.ScrubTerms` (public API, additive) — removes redacted
+  terms from `/Info`, XMP `/Metadata`, outline titles, and annotation `/Contents`.
+
+### Deferred to 2.29.0
+- **Continuous scroll as the default view mode.** Enabling it by default surfaced
+  a pre-existing navigation race in the viewer: a programmatic "go to page N"
+  (outline click, page-number box, search hit) issued before layout settles is
+  swallowed by the scroll→page sync and silently lands on page 1. The preference
+  machinery ships and works; only the default is off. Held back rather than delay
+  the security fixes in this release. Tracked on `fix/continuous-nav-race` with
+  failing regression tests that pin the contract.
+
+### Changed
+- Continuous-scroll page rendering now coalesces render passes and de-duplicates
+  in-flight tile requests, so fast scrolling through large documents no longer
+  queues and cancels a render for every intermediate scroll position. Tiles are
+  quantized and rendered with overscan so nearby scroll offsets reuse one cache
+  entry. Adds a `gui.render` benchmark workload covering visible-page settle time.
+
+### Fixed
+- View and Tools menu checkmarks (Show Outline, Show Thumbnails, Show Clipboard
+  History, Continuous Scroll, Reveal Hidden Text, Reveal Rasterized Hidden Text)
+  stayed permanently checked and did nothing when clicked. They bound `IsChecked`
+  two-way with no `Command`, so a click never reached the ViewModel. They now
+  mutate state through a ViewModel command with a one-way `IsChecked` binding,
+  and the macOS native menu drives its check state from `PropertyChanged` instead
+  of owning it.
+- Leaving an editing mode (redaction, text selection, form authoring, typewriter)
+  now restores the saved continuous-scroll preference. Previously these modes
+  forced single-page view on entry and never restored it, stranding the session in
+  single-page for the rest of its life.
+- Suppressed the tooltip on the status-bar page arrows, whose popup made the small
+  footer targets hard to click while the status bar was re-measuring.
 
 ## [2.27.1] - 2026-07-08
 

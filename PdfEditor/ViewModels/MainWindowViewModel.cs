@@ -72,7 +72,14 @@ public partial class MainWindowViewModel : ViewModelBase
     private Bitmap? _currentPageImage;
     private PdfCoreDocument? _pdfCoreDocument;
     private int _currentPageIndex;
+    // Continuous-scroll-by-default is deferred to v2.29.0: it exposed a navigation
+    // race in the viewer (a programmatic "go to page N" issued before layout settles
+    // is swallowed by the scroll -> CurrentPage sync). Tracked on
+    // fix/continuous-nav-race with failing regression tests. The PREFERENCE machinery
+    // below is fully wired and persisted — only the default is off, so a user can
+    // still opt in via View > Continuous Scroll and have it remembered.
     private PdfViewMode _viewMode = PdfViewMode.SinglePage;
+    private bool _continuousScrollPreference;
     private double _zoomLevel = 1.0;
     private bool _skipZoomSave; // Flag to skip zoom save during auto-reset
     private bool _isRedactionMode;
@@ -308,6 +315,42 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public bool IsContinuousView => ViewMode == PdfViewMode.Continuous;
 
+    public bool ContinuousScrollPreference => _continuousScrollPreference;
+
+    public void ApplyContinuousScrollPreference(bool enabled)
+    {
+        if (_continuousScrollPreference != enabled)
+        {
+            _continuousScrollPreference = enabled;
+            this.RaisePropertyChanged(nameof(ContinuousScrollPreference));
+        }
+
+        ViewMode = enabled ? PdfViewMode.Continuous : PdfViewMode.SinglePage;
+    }
+
+    /// <summary>
+    /// True while an editing mode owns the viewport. These modes are single-page
+    /// only, so each one forces <see cref="PdfViewMode.SinglePage"/> on entry.
+    /// </summary>
+    private bool IsEditingModeActive =>
+        _isRedactionMode || _isTextSelectionMode || _isFormAuthoringMode || _isTypewriterMode;
+
+    /// <summary>
+    /// Re-applies the saved continuous-scroll preference once the last editing mode
+    /// turns off. Without this the preference is a one-way valve: entering redaction
+    /// (or select-text / forms / typewriter) forces single-page, and leaving it would
+    /// strand the session in single-page for the rest of its life even though the
+    /// user's saved preference — and the state we persist on close — still says
+    /// continuous. Every editing-mode setter calls this on exit.
+    /// </summary>
+    private void RestoreViewModeFromPreference()
+    {
+        if (!_continuousScrollPreference || IsEditingModeActive)
+            return;
+
+        ViewMode = PdfViewMode.Continuous;
+    }
+
     public long RenderVersion
     {
         get => _renderVersion;
@@ -491,6 +534,10 @@ public partial class MainWindowViewModel : ViewModelBase
                 if (_isFormAuthoringMode) IsFormAuthoringMode = false;
                 if (_isTypewriterMode) IsTypewriterMode = false;
             }
+            else
+            {
+                RestoreViewModeFromPreference();
+            }
             this.RaisePropertyChanged(nameof(CurrentModeText));
             this.RaisePropertyChanged(nameof(InteractionMode));
             // The right sidebar's panel selector depends on this flag.
@@ -590,6 +637,10 @@ public partial class MainWindowViewModel : ViewModelBase
             if (value)
             {
                 ViewMode = PdfViewMode.SinglePage;
+            }
+            else
+            {
+                RestoreViewModeFromPreference();
             }
             // Turn off redaction mode when entering text selection mode
             if (value && _isRedactionMode)
@@ -1631,7 +1682,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void ToggleContinuousView()
     {
-        ViewMode = IsContinuousView ? PdfViewMode.SinglePage : PdfViewMode.Continuous;
+        ApplyContinuousScrollPreference(!IsContinuousView);
     }
 
     private async Task CopyTextAsync()
