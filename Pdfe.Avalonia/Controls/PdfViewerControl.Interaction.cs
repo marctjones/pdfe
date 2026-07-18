@@ -19,6 +19,9 @@ public partial class PdfViewerControl
 
     private void OnInteractionLayerPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (e.Handled)
+            return;
+
         if (IsTypewriterOverlayEvent(e))
             return;
 
